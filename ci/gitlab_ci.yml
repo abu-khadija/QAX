@@ -1,0 +1,121 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# QAX — GitLab CI: Auto-Generate Test Cases on Merge Request
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggers on every Merge Request open or update. Analyzes changed .cs files
+# with Claude, then posts a comment on the MR with generated test cases.
+#
+# Required CI/CD variable (Settings → CI/CD → Variables):
+#   ANTHROPIC_API_KEY — your Anthropic API key (mark as masked)
+#   (Jira/Xray not needed — DRY_RUN=true, no API calls made)
+#
+# Usage:
+#   1. Copy this file to .gitlab-ci.yml (or include it from your main CI file)
+#   2. Add ANTHROPIC_API_KEY as a masked CI/CD variable
+#   3. Open or update a Merge Request — the agent runs automatically
+# ─────────────────────────────────────────────────────────────────────────────
+
+stages:
+  - qa-generate
+
+variables:
+  DRY_RUN: "true"
+  LOG_LEVEL: "WARNING"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# ── Cache pip downloads between runs ─────────────────────────────────────────
+cache:
+  key: "$CI_COMMIT_REF_SLUG-pip"
+  paths:
+    - .cache/pip/
+
+# ── Main job: only runs on Merge Requests ────────────────────────────────────
+example-qa-generate:
+  stage: qa-generate
+  image: python:3.11-slim
+
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+  script:
+    # ── Install dependencies ─────────────────────────────────────────────────
+    - pip install --upgrade pip --quiet
+    - pip install -r requirements.txt --quiet
+
+    # ── Find changed .cs files in this MR ───────────────────────────────────
+    - |
+      git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME --depth=1
+      git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD \
+        | grep '\.cs$' | head -20 > changed_files.txt || true
+      echo "Changed .cs files:"
+      cat changed_files.txt
+
+    # ── Generate test cases for each changed file ────────────────────────────
+    - |
+      mkdir -p output
+      if [ -s changed_files.txt ]; then
+        while IFS= read -r filepath; do
+          if [ -f "$filepath" ]; then
+            echo "Analyzing: $filepath"
+            python main.py analyze \
+              --file "$filepath" \
+              --dry-run \
+              --output "output/pr_test_cases.json" 2>/dev/null || true
+          fi
+        done < changed_files.txt
+      else
+        echo "No .cs files changed — skipping analysis"
+        exit 0
+      fi
+
+    # ── Generate PR comment markdown ─────────────────────────────────────────
+    - |
+      python - <<'PYEOF'
+      import json, sys
+      from pathlib import Path
+
+      output_file  = Path("output/pr_test_cases.json")
+      changed_file = Path("changed_files.txt")
+
+      changed_files = []
+      if changed_file.exists():
+          changed_files = [l.strip() for l in changed_file.read_text().splitlines() if l.strip()]
+
+      test_cases = []
+      if output_file.exists():
+          try:
+              test_cases = json.loads(output_file.read_text(encoding="utf-8"))
+              if not isinstance(test_cases, list):
+                  test_cases = []
+          except Exception:
+              test_cases = []
+
+      try:
+          sys.path.insert(0, ".")
+          from core.markdown_reporter import generate_pr_comment
+          comment = generate_pr_comment(test_cases, changed_files)
+      except Exception as e:
+          comment = f"## QAX\n\nError generating report: {e}\n"
+
+      Path("mr_comment.md").write_text(comment, encoding="utf-8")
+      print(f"Generated: {len(test_cases)} test cases for {len(changed_files)} file(s)")
+      PYEOF
+
+    # ── Post comment on Merge Request via GitLab API ─────────────────────────
+    - |
+      if [ -f mr_comment.md ] && [ -n "$CI_MERGE_REQUEST_IID" ]; then
+        COMMENT=$(cat mr_comment.md)
+        curl --silent --request POST \
+          --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+          --header "Content-Type: application/json" \
+          --data "{\"body\": $(python3 -c 'import json,sys; print(json.dumps(open("mr_comment.md").read()))')}" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes" \
+          > /dev/null && echo "MR comment posted." || echo "Warning: could not post MR comment (check GITLAB_API_TOKEN)"
+      fi
+
+  artifacts:
+    name: "example-qa-test-cases-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - output/pr_test_cases.json
+      - mr_comment.md
+    expire_in: 7 days
+    when: always

@@ -1,0 +1,365 @@
+[
+  {
+    "test_case_id": "TC-TRK-0001",
+    "title": "Verify GenerateQuestionSavingErrorMessage handles TrackerResult without details",
+    "description": "Ensures the error message generator returns default error message when TrackerResult has no details available.",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "medium",
+    "preconditions": [
+      "User is logged in",
+      "OrderItemController is instantiated",
+      "TrackerResult exists with HasDetails = false"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Trigger a checklist save operation that results in a TrackerResult with HasDetails = false",
+        "expected_result": "Default AJAX error message is returned from GenerateQuestionSavingErrorMessage method",
+        "notes": "This tests the fallback error handling when no specific error details are available"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify the returned message matches the localized default error text",
+        "expected_result": "Message equals Localization.Resources.DefaultAjaxErrorMessage exactly",
+        "notes": "Confirms proper localization resource usage"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "navigate",
+        "selector_key": "TODO_checklist_step_url",
+        "value": "/Orders/OrderItem/View",
+        "assertion_type": "visible",
+        "assertion_value": ""
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_error_message",
+        "value": "",
+        "assertion_type": "text",
+        "assertion_value": "DefaultAjaxErrorMessage"
+      }
+    ],
+    "test_data": {
+      "trackerResult": {
+        "HasDetails": false,
+        "IsSuccess": false
+      }
+    },
+    "confidence_score": 8,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0002",
+    "title": "Verify permission error message generation for checklist questions",
+    "description": "Ensures proper error message is generated when user lacks permission to save checklist questions.",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "high",
+    "preconditions": [
+      "User is logged in",
+      "User does not have CanSaveProposal permission",
+      "TrackerResult contains PermissionError status"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Attempt to save checklist questions without proper permissions",
+        "expected_result": "Permission error is captured in TrackerResult with PermissionError status",
+        "notes": "Backend should detect permission violation"
+      },
+      {
+        "step_number": 2,
+        "action": "Check the generated error message from GenerateQuestionSavingErrorMessage",
+        "expected_result": "Error message equals Localization.Resources.ServiceStatus_PermissionError",
+        "notes": "Verifies correct localized permission error message is returned"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "click",
+        "selector_key": "TODO_save_checklist_button",
+        "value": "",
+        "assertion_type": "visible",
+        "assertion_value": ""
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_permission_error_message",
+        "value": "",
+        "assertion_type": "contains",
+        "assertion_value": "ServiceStatus_PermissionError"
+      }
+    ],
+    "test_data": {
+      "resultStatus": "PermissionError",
+      "errorDetail": {
+        "Status": "PermissionError",
+        "ItemId": "Q001"
+      }
+    },
+    "confidence_score": 7,
+    "needs_review": true,
+    "review_note": "Button selector and error message display location need UI verification",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0003",
+    "title": "Verify step completion conflict error when another user closes the step",
+    "description": "Ensures proper error handling when workflow step is completed by another user during current user's edit session.",
+    "module": "Orders",
+    "test_type": "edge_case",
+    "priority": "high",
+    "preconditions": [
+      "User A and User B both have checklist access",
+      "Same workflow step is open in both user sessions",
+      "User B completes the step first"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "User A attempts to save checklist questions after User B has already completed the step",
+        "expected_result": "TrackerResult contains StepCompletedByAnotherUser status",
+        "notes": "This simulates concurrent user conflict scenario"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify the error message generated includes the step closure notification",
+        "expected_result": "Error message equals Localization.Orders.ServiceStatus_WorkflowStepClosedByAnotherUser",
+        "notes": "Users should be informed about the conflict clearly"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "fill",
+        "selector_key": "TODO_checklist_question_field",
+        "value": "Test response",
+        "assertion_type": "visible",
+        "assertion_value": ""
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "click",
+        "selector_key": "TODO_save_button",
+        "value": "",
+        "assertion_type": "contains",
+        "assertion_value": "WorkflowStepClosedByAnotherUser"
+      }
+    ],
+    "test_data": {
+      "conflictScenario": "StepCompletedByAnotherUser",
+      "stepId": "STEP001",
+      "userId1": "UserA",
+      "userId2": "UserB"
+    },
+    "confidence_score": 6,
+    "needs_review": true,
+    "review_note": "Concurrent user testing requires specific test environment setup and UI element confirmation",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0004",
+    "title": "Verify checklist question closure validation with missing action text",
+    "description": "Ensures questions requiring actions cannot be closed without providing action text.",
+    "module": "Orders",
+    "test_type": "negative",
+    "priority": "medium",
+    "preconditions": [
+      "User has checklist edit permissions",
+      "Checklist question requires an action to close",
+      "Question is being marked as closed"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Mark a checklist question as closed without providing required action text",
+        "expected_result": "Save operation fails with ChecklistQuestionCannotCloseWithMissingActionText status",
+        "notes": "System should enforce action text requirement"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify error message includes the specific question ID that failed",
+        "expected_result": "Error message contains question ID and text from Localization.Orders.ServiceStatus_ChecklistQuestionsCannotCloseWithMissingActionText",
+        "notes": "Error should be specific to the failing question"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "click",
+        "selector_key": "TODO_close_question_checkbox",
+        "value": "",
+        "assertion_type": "checked",
+        "assertion_value": "true"
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_validation_error",
+        "value": "",
+        "assertion_type": "contains",
+        "assertion_value": "ChecklistQuestionsCannotCloseWithMissingActionText"
+      }
+    ],
+    "test_data": {
+      "questionId": "Q001",
+      "requiresAction": true,
+      "actionText": "",
+      "closeStatus": true
+    },
+    "confidence_score": 7,
+    "needs_review": true,
+    "review_note": "Checkbox selector and validation error display need UI verification",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0005",
+    "title": "Verify GetDisplayIdsToRefresh excludes warning items correctly",
+    "description": "Ensures that when saving checklist questions results in warnings, those warning items are excluded from refresh list while successful items are included.",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "medium",
+    "preconditions": [
+      "User has valid checklist questions",
+      "Some questions save successfully",
+      "Some questions generate warnings"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Submit checklist questions where some succeed and some generate warnings",
+        "expected_result": "TrackerResult contains mix of success and warning statuses for different questions",
+        "notes": "This tests partial success scenario"
+      },
+      {
+        "step_number": 2,
+        "action": "Check the returned display IDs from GetDisplayIdsToRefresh method",
+        "expected_result": "Only successful question IDs are returned, warning question IDs are excluded from refresh list",
+        "notes": "Warning items should not be refreshed to preserve user input"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "fill",
+        "selector_key": "TODO_question_1_field",
+        "value": "Valid response",
+        "assertion_type": "visible",
+        "assertion_value": ""
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_refresh_status",
+        "value": "",
+        "assertion_type": "count",
+        "assertion_value": "2"
+      }
+    ],
+    "test_data": {
+      "questions": [
+        {
+          "DisplayId": "Q001",
+          "Status": "Success"
+        },
+        {
+          "DisplayId": "Q002",
+          "Status": "Warning"
+        },
+        {
+          "DisplayId": "Q003",
+          "Status": "Success"
+        }
+      ],
+      "expectedRefreshIds": [
+        "Q001",
+        "Q003"
+      ]
+    },
+    "confidence_score": 8,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0006",
+    "title": "Verify CreateStepClassSelectListItems filters closed steps correctly",
+    "description": "Ensures step selection list includes only open steps when current step is not closed, but includes all steps of the class when current step is closed.",
+    "module": "Orders",
+    "test_type": "boundary",
+    "priority": "medium",
+    "preconditions": [
+      "Workflow has multiple steps of same class",
+      "Some steps are complete, some are incomplete",
+      "User needs to move item to different step"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Access step selection dropdown when current step is open",
+        "expected_result": "Only incomplete steps of the same class appear in the dropdown list",
+        "notes": "Closed steps should be filtered out for open current steps"
+      },
+      {
+        "step_number": 2,
+        "action": "Access step selection dropdown when current step is closed",
+        "expected_result": "All steps of the same class appear in dropdown, including completed ones",
+        "notes": "When current step is closed, all steps should be available for selection"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "click",
+        "selector_key": "TODO_step_selection_dropdown",
+        "value": "",
+        "assertion_type": "visible",
+        "assertion_value": ""
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_dropdown_options",
+        "value": "",
+        "assertion_type": "count",
+        "assertion_value": "3"
+      }
+    ],
+    "test_data": {
+      "stepClass": "OrderItem",
+      "currentStepClosed": false,
+      "availableSteps": [
+        {
+          "Id": "S001",
+          "IsComplete": false
+        },
+        {
+          "Id": "S002",
+          "IsComplete": true
+        },
+        {
+          "Id": "S003",
+          "IsComplete": false
+        }
+      ]
+    },
+    "confidence_score": 7,
+    "needs_review": true,
+    "review_note": "Dropdown selector and option counting need UI verification",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  }
+]

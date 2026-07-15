@@ -1,0 +1,83 @@
+{
+  "_comment": "Full regression run configuration. Use before major releases or after large code merges.",
+  "_usage": "python main.py --config configs/regression.json",
+
+  "run_name": "YOUR_PROJECT Regression — Release {{VERSION}} — {{DATE}}",
+  "_run_name_comment": "Replace {{VERSION}} with release number (e.g. 12.28.5) and {{DATE}} with today's date.",
+
+  "test_type_filter": "regression",
+  "_test_type_filter_comment": "Options: smoke | regression | functional | security | performance | negative",
+
+  "target_modules": [
+    "Orders",
+    "Investigator",
+    "Reports",
+    "RiskAssessor",
+    "Analytics",
+    "Schedules",
+    "Customers",
+    "ViewReport",
+    "Administration",
+    "Search",
+    "Dashboard"
+  ],
+  "_target_modules_comment": "Full regression covers ALL modules. Remove any not active in your environment.",
+
+  "source_directories": [
+    {
+      "dir": "WebApp/Areas/Orders/Controllers",
+      "module": "Orders",
+      "extensions": [".cs"],
+      "_comment": "All Orders controllers — includes checklist, proposal, action, approval, workflow"
+    },
+    {
+      "dir": "WebApp/Areas/Investigator/Controllers",
+      "module": "Investigator",
+      "extensions": [".cs"],
+      "_comment": "All Investigator controllers — includes incident CRUD, team, attachments"
+    },
+    {
+      "dir": "WebApp/Areas/Reports/Controllers",
+      "module": "Reports",
+      "extensions": [".cs"],
+      "_comment": "All Reports controllers — includes audit conduct, findings, actions"
+    },
+    {
+      "dir": "WebApp/Areas/RiskAssessor/Controllers",
+      "module": "RiskAssessor",
+      "extensions": [".cs"],
+      "_comment": "All Risk Assessor controllers"
+    },
+    {
+      "dir": "WebApp/Controllers",
+      "module": "General",
+      "extensions": [".cs"],
+      "_comment": "Root controllers — Home, Account, Search, GraphQL, etc."
+    }
+  ],
+  "_source_directories_comment": "Analyze entire directories instead of individual files. All .cs files in each dir will be processed.",
+
+  "priority_filter": ["critical", "high", "medium", "low"],
+  "_priority_filter_comment": "Regression includes all priorities.",
+
+  "dry_run": true,
+  "_dry_run_comment": "Set to false when ready to push to Jira. ALWAYS preview first with dry_run=true.",
+
+  "output_file": "output/regression-{{VERSION}}-{{DATE}}.json",
+  "_output_file_comment": "Output file path. Replace {{VERSION}} and {{DATE}} before running.",
+
+  "chunk_size": 200,
+  "_chunk_size_comment": "Lines per chunk. Large controllers like TrackerController.cs (25KB) will be split automatically.",
+
+  "push_to_xray": false,
+  "_push_to_xray_comment": "Set to true to push to Xray. Requires XRAY_CLIENT_ID and XRAY_CLIENT_SECRET in .env.",
+
+  "jira_labels": ["regression", "auto-generated", "qax-agent"],
+  "_jira_labels_comment": "Labels applied to every Jira issue in this regression run.",
+
+  "skip_files_containing": ["Migration", "Seed", "Scaffold"],
+  "_skip_files_comment": "Skip files whose names contain these strings — they're rarely testable.",
+
+  "min_confidence_to_push": 5,
+  "_min_confidence_to_push_comment": "Only push test cases with confidence_score >= this value. Lower scores go to needs_review."
+}

@@ -1,0 +1,111 @@
+{
+  "_comment": "Bug regression template. Use this to generate targeted test cases for specific known bugs.",
+  "_usage": "Copy this file, rename it (e.g. bugs-sprint-22.json), fill in the bugs array, then run: python main.py --config configs/bugs-sprint-22.json",
+
+  "run_name": "YOUR_PROJECT Bug Regression — {{SPRINT_OR_DATE}}",
+  "_run_name_comment": "Replace {{SPRINT_OR_DATE}} with sprint number or date. Example: Sprint-22 or Mar-2026.",
+
+  "mode": "bug_regression",
+  "_mode_comment": "Focused mode — generates test cases specifically designed to reproduce and verify bug fixes.",
+
+  "bugs": [
+    {
+      "jira_key": "EXAMPLE-XXXX",
+      "_jira_key_comment": "Jira issue key of the bug. Example: EXAMPLE-2646",
+
+      "title": "{{BUG_TITLE}}",
+      "_title_comment": "Full bug title copied from Jira.",
+
+      "priority": "high",
+      "_priority_comment": "Bug priority: critical | high | medium | low",
+
+      "module": "{{MODULE_NAME}}",
+      "_module_comment": "Which EXAMPLE module this bug is in. Example: Orders, Investigator, Search",
+
+      "affected_file": "{{PATH_TO_AFFECTED_FILE}}",
+      "_affected_file_comment": "Path to the source file that contains the bug fix. Relative to repo root.",
+
+      "bug_description": "{{WHAT_THE_BUG_DOES}}",
+      "_bug_description_comment": "Plain English: what goes wrong? Example: Returns 404 instead of 302 for unauthenticated users.",
+
+      "steps_to_reproduce": [
+        "{{STEP_1}}",
+        "{{STEP_2}}",
+        "{{STEP_3}}"
+      ],
+      "_steps_to_reproduce_comment": "Exact steps to reproduce the bug. Copy from Jira if available.",
+
+      "expected_behavior": "{{WHAT_SHOULD_HAPPEN}}",
+      "_expected_behavior_comment": "What the correct behavior should be after the fix.",
+
+      "actual_behavior": "{{WHAT_CURRENTLY_HAPPENS}}",
+      "_actual_behavior_comment": "What the buggy behavior is. Used to write the 'before fix' negative test.",
+
+      "test_data_required": "{{ANY_SPECIAL_TEST_DATA_NEEDED}}",
+      "_test_data_required_comment": "Example: 'Need a user without session cookie' or 'Need work request at child location'.",
+
+      "status": "open",
+      "_status_comment": "open | fixed | verified | wont-fix"
+    },
+    {
+      "_example": "Filled example for EXAMPLE-2646 — delete before use",
+      "jira_key": "EXAMPLE-2646",
+      "title": "Investigator/Home/Index returns 404 instead of 302 for unauthenticated requests",
+      "priority": "high",
+      "module": "Investigator",
+      "affected_file": "WebApp/Areas/Investigator/Controllers/HomeController.cs",
+      "bug_description": "When an unauthenticated user navigates to /Investigator/Home/Index, the server returns HTTP 404 Not Found instead of HTTP 302 redirect to /Account/Login.",
+      "steps_to_reproduce": [
+        "Log out of EXAMPLE completely (clear session cookie)",
+        "Navigate directly to https://your-app.example.com/Investigator/Home/Index",
+        "Observe HTTP response code"
+      ],
+      "expected_behavior": "HTTP 302 redirect to /Account/Login page",
+      "actual_behavior": "HTTP 404 Not Found — page not found error shown",
+      "test_data_required": "Unauthenticated browser session (clear cookies or use incognito)",
+      "status": "open"
+    },
+    {
+      "_example": "Filled example for EXAMPLE-2647 — delete before use",
+      "jira_key": "EXAMPLE-2647",
+      "title": "Search/Execute returns 500 when session cookie is missing",
+      "priority": "high",
+      "module": "Search",
+      "affected_file": "WebApp/Controllers/SearchController.cs",
+      "bug_description": "POST to /Search/Execute returns HTTP 500 Internal Server Error when the session session cookie is missing. Should return 302 redirect to login.",
+      "steps_to_reproduce": [
+        "Open browser DevTools → Application tab → delete session cookie",
+        "POST to /Search/Execute?isTriggerSearch=true with valid search body",
+        "Observe HTTP 500 error in response"
+      ],
+      "expected_behavior": "HTTP 302 redirect to /Account/Login",
+      "actual_behavior": "HTTP 500 Internal Server Error",
+      "test_data_required": "Session with missing/expired session cookie",
+      "status": "open"
+    }
+  ],
+
+  "test_type_filter": "regression",
+  "_test_type_filter_comment": "Bug regression always uses regression type.",
+
+  "generate_negative_tests": true,
+  "_generate_negative_tests_comment": "Also generate 'negative' tests that CONFIRM the bug exists (before-fix verification).",
+
+  "dry_run": true,
+  "_dry_run_comment": "Always preview first. Set to false to push to Jira.",
+
+  "output_file": "output/bugs-{{SPRINT_OR_DATE}}.json",
+  "_output_file_comment": "Output path. Replace {{SPRINT_OR_DATE}}.",
+
+  "push_to_xray": false,
+  "_push_to_xray_comment": "Set to true to push to Xray after generation.",
+
+  "jira_labels": ["bug-regression", "auto-generated", "qax-agent"],
+  "_jira_labels_comment": "Labels applied to all bug regression test cases in Jira.",
+
+  "link_to_bug": true,
+  "_link_to_bug_comment": "If true, each generated test case will be linked to its source bug in Jira (requires Xray API).",
+
+  "test_environment": "https://your-app.example.com",
+  "_test_environment_comment": "RC environment URL where bugs were found and must be verified."
+}

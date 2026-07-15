@@ -1,0 +1,77 @@
+{
+  "_comment": "Release verification template. Fill in the 'release' section with actual Jira issues for each release.",
+  "_usage": "Copy this file, rename it (e.g. release-12.28.5.json), fill in release_issues, then run: python main.py --config configs/release-12.28.5.json",
+
+  "run_name": "YOUR_PROJECT Release Verification — {{VERSION}} — {{DATE}}",
+  "_run_name_comment": "Replace {{VERSION}} (e.g. 12.28.5) and {{DATE}} (e.g. Mar-2026).",
+
+  "mode": "release_verification",
+  "_mode_comment": "Tells the agent this is a targeted release check, not a full scan. Focus on changed files only.",
+
+  "release": {
+    "version": "{{VERSION}}",
+    "_version_comment": "Release version number. Example: 12.28.5",
+
+    "release_notes_url": "{{JIRA_RELEASE_URL}}",
+    "_release_notes_url_comment": "URL to the Jira release page. Example: https://your-domain.atlassian.net/projects/EXAMPLE/versions/xxxxx",
+
+    "issues": [
+      {
+        "jira_key": "EXAMPLE-XXXX",
+        "title": "{{ISSUE_TITLE}}",
+        "priority": "critical",
+        "area": "{{MODULE_NAME}}",
+        "changed_file": "{{PATH_TO_CHANGED_FILE}}",
+        "what_to_verify": "{{PLAIN_ENGLISH_DESCRIPTION_OF_WHAT_TO_TEST}}",
+        "_comment": "Copy this block for each Jira issue in the release. Fill ALL fields."
+      },
+      {
+        "_example": "This is a filled example — delete before use",
+        "jira_key": "EXAMPLE-2588",
+        "title": "Proposal Checklists: Admin > Workflows — error saving",
+        "priority": "critical",
+        "area": "Administration",
+        "changed_file": "WebApp/Areas/Admin/Controllers/WorkflowController.cs",
+        "what_to_verify": "Open Admin > Workflows. Select any workflow. Change any checkbox value and click Save Workflow Configuration. Must save successfully with NO error."
+      },
+      {
+        "_example": "Second filled example — delete before use",
+        "jira_key": "EXAMPLE-2603",
+        "title": "Proposal Checklist Does Not Load For Child Locations",
+        "priority": "high",
+        "area": "Orders",
+        "changed_file": "WebApp/Areas/Orders/Controllers/OrderItemController.cs",
+        "what_to_verify": "Create a work request using a CHILD location. Verify the Proposal Checklist loads correctly."
+      }
+    ],
+    "_issues_comment": "List every Jira issue included in this release. The agent will focus test generation on the changed files."
+  },
+
+  "test_type_filter": "regression",
+  "_test_type_filter_comment": "Release verification uses regression tests.",
+
+  "priority_filter": ["critical", "high"],
+  "_priority_filter_comment": "Release verification focuses on critical and high priority only.",
+
+  "dry_run": true,
+  "_dry_run_comment": "Always start with dry_run=true. Switch to false only after reviewing output.",
+
+  "output_file": "output/release-{{VERSION}}-verification.json",
+  "_output_file_comment": "Where to save generated test cases.",
+
+  "push_to_xray": false,
+  "_push_to_xray_comment": "Set to true to push directly to Xray.",
+
+  "jira_labels": ["release-verification", "auto-generated", "qax-agent"],
+  "_jira_labels_comment": "Labels for release verification test cases in Jira.",
+
+  "test_environment": "https://your-app.example.com",
+  "_test_environment_comment": "The environment where these tests must be executed.",
+
+  "notes": [
+    "Always run EXAMPLE-2588 (Business Critical) first — block release if it fails",
+    "EXAMPLE-2603 requires test data: checklist assigned to PARENT location + work request at CHILD location",
+    "EXAMPLE-2583 requires Pre-check questionnaire configured with at least 1 action"
+  ],
+  "_notes_comment": "Free-text notes visible in the run report. Add anything the tester needs to know."
+}

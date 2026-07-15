@@ -1,0 +1,242 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EXAMPLE QA Test Case",
+  "description": "Schema for AI-generated test cases targeting the ExampleApp ExampleOrg platform. Enforced before every Xray push.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "test_case_id",
+      "title",
+      "description",
+      "module",
+      "test_type",
+      "priority",
+      "preconditions",
+      "manual_steps",
+      "automation_steps",
+      "confidence_score",
+      "needs_review",
+      "generated_from_file",
+      "generated_at"
+    ],
+    "additionalProperties": false,
+    "properties": {
+
+      "test_case_id": {
+        "type": "string",
+        "description": "Unique identifier following pattern TC-{MODULE}-{4_DIGITS}. Example: TC-INC-0001",
+        "pattern": "^TC-[A-Z]{2,5}-[0-9]{4}$"
+      },
+
+      "title": {
+        "type": "string",
+        "description": "Short, action-oriented test case title. Must be non-empty.",
+        "minLength": 10,
+        "maxLength": 200
+      },
+
+      "description": {
+        "type": "string",
+        "description": "Full description of what this test case verifies and why it matters.",
+        "minLength": 20
+      },
+
+      "module": {
+        "type": "string",
+        "description": "The EXAMPLE module this test case belongs to. Must match a known module.",
+        "enum": [
+          "Orders",
+          "Investigator",
+          "Reports",
+          "RiskAssessor",
+          "Analytics",
+          "Schedules",
+          "Customers",
+          "ViewReport",
+          "Administration",
+          "Search",
+          "Dashboard",
+          "General"
+        ]
+      },
+
+      "test_type": {
+        "type": "string",
+        "description": "The category of testing this test case performs. Use 'functional' for negative/edge case tests.",
+        "enum": ["smoke", "regression", "functional", "security", "performance", "negative", "boundary", "edge_case", "integration", "api"]
+      },
+
+      "priority": {
+        "type": "string",
+        "description": "Execution priority. Critical = must pass before any release.",
+        "enum": ["critical", "high", "medium", "low"]
+      },
+
+      "preconditions": {
+        "type": "array",
+        "description": "List of conditions that must be true before this test can run.",
+        "items": {
+          "type": "string",
+          "minLength": 5
+        },
+        "minItems": 1
+      },
+
+      "steps": {
+        "type": "array",
+        "description": "OPTIONAL — Legacy steps array kept for backward compatibility. Replaced by manual_steps + automation_steps.",
+        "minItems": 2,
+        "items": {
+          "type": "object",
+          "required": ["step_number", "action", "expected_result"],
+          "additionalProperties": false,
+          "properties": {
+            "step_number": {
+              "type": "integer",
+              "description": "Sequential step number starting from 1.",
+              "minimum": 1
+            },
+            "action": {
+              "type": "string",
+              "description": "Concrete user action to perform. Must start with a verb (click, type, navigate, select, upload, etc.).",
+              "minLength": 10
+            },
+            "expected_result": {
+              "type": "string",
+              "description": "Specific, verifiable outcome after performing the action.",
+              "minLength": 10
+            }
+          }
+        }
+      },
+
+      "test_data": {
+        "type": ["object", "null"],
+        "description": "Optional input data required to execute the test. Must be a key-value object, not a string.",
+        "additionalProperties": true
+      },
+
+      "confidence_score": {
+        "type": "integer",
+        "description": "AI confidence in this test case accuracy. 10=fully explicit code, 1=heavy guessing. See scoring rules in system_prompt.md.",
+        "minimum": 1,
+        "maximum": 10
+      },
+
+      "needs_review": {
+        "type": "boolean",
+        "description": "Set to true if any UI element, field name, or behavior could not be confirmed from the source code."
+      },
+
+      "review_note": {
+        "type": "string",
+        "description": "Required when needs_review=true. Explains exactly what needs human verification and why.",
+        "default": ""
+      },
+
+      "generated_from_file": {
+        "type": "string",
+        "description": "Relative path to the source code file that was analyzed to produce this test case.",
+        "minLength": 3
+      },
+
+      "generated_at": {
+        "type": "string",
+        "description": "ISO 8601 UTC timestamp of when this test case was generated. Example: 2025-01-15T10:30:00Z",
+        "format": "date-time"
+      },
+
+      "manual_steps": {
+        "type": "array",
+        "description": "Plain-language steps a human QA tester can follow without any coding knowledge. Must match automation_steps count.",
+        "minItems": 2,
+        "items": {
+          "type": "object",
+          "required": ["step_number", "action", "expected_result"],
+          "additionalProperties": false,
+          "properties": {
+            "step_number": {
+              "type": "integer",
+              "description": "Sequential step number starting from 1.",
+              "minimum": 1
+            },
+            "action": {
+              "type": "string",
+              "description": "Human-readable instruction. Example: 'Click the Save button at the bottom of the form'.",
+              "minLength": 10
+            },
+            "expected_result": {
+              "type": "string",
+              "description": "What the human tester should see/observe after the action.",
+              "minLength": 10
+            },
+            "notes": {
+              "type": "string",
+              "description": "Optional tips for the human tester. Example: 'If the button is greyed out, mandatory fields above are not filled'.",
+              "default": ""
+            }
+          }
+        }
+      },
+
+      "automation_steps": {
+        "type": "array",
+        "description": "Playwright-ready steps with selector keys. Use selector_key from example_selectors.json. If unknown, use 'TODO_elementname'.",
+        "minItems": 2,
+        "items": {
+          "type": "object",
+          "required": ["step_number", "playwright_action", "selector_key"],
+          "additionalProperties": false,
+          "properties": {
+            "step_number": {
+              "type": "integer",
+              "description": "Sequential step number starting from 1. Must match manual_steps step_number.",
+              "minimum": 1
+            },
+            "playwright_action": {
+              "type": "string",
+              "description": "Playwright action type.",
+              "enum": ["click", "fill", "navigate", "assert", "select", "upload", "wait", "hover"]
+            },
+            "selector_key": {
+              "type": "string",
+              "description": "Key referencing a selector in example_selectors.json. Use 'TODO_elementname' if selector is unknown. Never leave empty.",
+              "default": "TODO_unknown"
+            },
+            "value": {
+              "type": "string",
+              "description": "Text to fill, URL to navigate to, or value to select. Empty string for click/assert actions.",
+              "default": ""
+            },
+            "assertion_type": {
+              "type": "string",
+              "description": "Always required. Use 'visible' as default for non-assert steps. Never leave empty.",
+              "enum": ["visible", "text", "url", "count", "enabled", "disabled", "checked", "value", "contains", "not_visible", "attribute"],
+              "default": "visible"
+            },
+            "assertion_value": {
+              "type": "string",
+              "description": "Expected value for the assertion. Example: 'Checklist saved successfully'.",
+              "default": ""
+            }
+          }
+        }
+      }
+    },
+
+    "if": {
+      "properties": {
+        "needs_review": { "const": true }
+      }
+    },
+    "then": {
+      "required": ["review_note"],
+      "properties": {
+        "review_note": {
+          "minLength": 10
+        }
+      }
+    }
+  }
+}

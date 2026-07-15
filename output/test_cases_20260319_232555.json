@@ -1,0 +1,366 @@
+[
+  {
+    "test_case_id": "TC-TRK-0001",
+    "title": "View checklist step with valid permissions and workflow step",
+    "description": "Verify that authorized user can view checklist step when workflow step exists and user has proper permissions",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "high",
+    "preconditions": [
+      "User is logged in with Orders module access",
+      "User has CanViewItems permission for checklist steps",
+      "Work request exists with valid workflow step at specified step number",
+      "User session is authenticated"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Navigate to checklist step view with valid work request ID and step number",
+        "expected_result": "Checklist step view loads successfully without permission denied message"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify the checklist step model properties are populated correctly",
+        "expected_result": "WorkRequestId, StepNumber are set correctly, DisplayAddNewQuestionLink visibility matches workflow editability"
+      },
+      {
+        "step_number": 3,
+        "action": "Check that AssignedToSelection dropdown is populated with eligible assignees",
+        "expected_result": "Dropdown contains 'Select Assigned To' as first option plus eligible assignees from OrderItemProvider"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-12345",
+      "step_number": 2,
+      "workflow_step_editable": true
+    },
+    "confidence_score": 8,
+    "needs_review": true,
+    "review_note": "Cannot confirm exact UI labels for buttons/links like DisplayAddNewQuestionLink, DisplaySelectChecklistsLink from this controller code alone",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-27T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0002",
+    "title": "View checklist step access denied for unauthorized user",
+    "description": "Verify that user without proper permissions cannot access checklist step view",
+    "module": "Orders",
+    "test_type": "security",
+    "priority": "high",
+    "preconditions": [
+      "User is logged in but lacks CanViewItems permission for checklist steps",
+      "Work request exists with valid workflow step"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Navigate to checklist step view URL with valid work request ID and step number",
+        "expected_result": "Access denied message is displayed or user is redirected to unauthorized page"
+      },
+      {
+        "step_number": 2,
+        "action": "Attempt to access checklist step via direct URL manipulation",
+        "expected_result": "Same access denied behavior - system prevents unauthorized access consistently"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-12345",
+      "step_number": 1
+    },
+    "confidence_score": 9,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-27T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0003",
+    "title": "Save checklist step with valid data returns success status",
+    "description": "Verify that saving checklist step with valid questions and data returns QuestionsSuccess true in response body",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "critical",
+    "preconditions": [
+      "User is logged in with edit permissions",
+      "Checklist step exists and is in editable state",
+      "Valid questions data is prepared"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Submit POST request to OrderItem/Save with valid questions array and metadata",
+        "expected_result": "HTTP 200 response is returned"
+      },
+      {
+        "step_number": 2,
+        "action": "Parse response body JSON and check QuestionsSuccess property",
+        "expected_result": "QuestionsSuccess property is true indicating successful save operation"
+      },
+      {
+        "step_number": 3,
+        "action": "Verify that saved data persists by refreshing the checklist step view",
+        "expected_result": "Previously saved question responses are displayed correctly"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-12345",
+      "step_number": 2,
+      "questions": [
+        {
+          "QuestionId": 1,
+          "Response": "Test response",
+          "IsRequired": true
+        }
+      ]
+    },
+    "confidence_score": 9,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-27T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0004",
+    "title": "Save checklist step silent failure detection",
+    "description": "Verify that failed checklist step save operations are properly detected by checking QuestionsSuccess in response body despite HTTP 200 status",
+    "module": "Orders",
+    "test_type": "negative",
+    "priority": "critical",
+    "preconditions": [
+      "User has access to checklist step",
+      "Scenario exists that causes save operation to fail internally"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Submit POST request to OrderItem/Save with invalid or problematic data",
+        "expected_result": "HTTP 200 response is returned (controller always returns 200)"
+      },
+      {
+        "step_number": 2,
+        "action": "Parse response body JSON and check QuestionsSuccess property value",
+        "expected_result": "QuestionsSuccess property is false indicating save operation failed"
+      },
+      {
+        "step_number": 3,
+        "action": "Check that failed data was not persisted by viewing checklist step",
+        "expected_result": "Original data remains unchanged, failed save data is not stored"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-12345",
+      "step_number": 2,
+      "invalid_questions": "malformed_data"
+    },
+    "confidence_score": 10,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-27T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0005",
+    "title": "Checklist step workflow validation prevents invalid step access",
+    "description": "Verify that accessing checklist step for non-existent workflow step returns appropriate error",
+    "module": "Orders",
+    "test_type": "negative",
+    "priority": "medium",
+    "preconditions": [
+      "User is logged in with valid permissions",
+      "Work request exists but does not have workflow step at specified step number"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Navigate to checklist step view with valid work request ID but invalid step number",
+        "expected_result": "Error handling occurs - either error message displayed or redirect to valid page"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify that no checklist step model is created for invalid workflow step",
+        "expected_result": "Page indicates that the requested step is not available or does not exist"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-12345",
+      "invalid_step_number": 99
+    },
+    "confidence_score": 7,
+    "needs_review": true,
+    "review_note": "Error handling behavior not fully visible in controller code - may need confirmation of actual error page or redirect behavior",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-27T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0001",
+    "title": "Save Proposal Questions Successfully with Valid Data",
+    "description": "Verify that proposal questions are saved successfully when all data is valid and user has appropriate permissions",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "high",
+    "preconditions": [
+      "User is logged in with tracker editor permissions",
+      "User is on a checklist step page with proposal questions",
+      "Work request ID exists and is valid",
+      "Step number exists and is valid"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Fill out all proposal questions with valid responses",
+        "expected_result": "All question fields are populated with valid data"
+      },
+      {
+        "step_number": 2,
+        "action": "Submit the proposal questions form",
+        "expected_result": "HTTP POST request is sent to SaveProposalQuestions endpoint"
+      },
+      {
+        "step_number": 3,
+        "action": "Verify the response body contains success indicators",
+        "expected_result": "Response body contains QuestionsSuccess: true, QuestionsError: false, and TrackerResult.IsSuccess: true"
+      },
+      {
+        "step_number": 4,
+        "action": "Check that updated categories are returned in response",
+        "expected_result": "UpdatedCategories field is populated in the response"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-2024-001",
+      "step_number": 2,
+      "questions": [
+        {
+          "id": "Q001",
+          "response": "Test response 1",
+          "closed": false
+        }
+      ]
+    },
+    "confidence_score": 8,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0002",
+    "title": "Save Proposal Questions with Null Questions List",
+    "description": "Verify system handles null questions list gracefully without throwing exceptions",
+    "module": "Orders",
+    "test_type": "negative",
+    "priority": "medium",
+    "preconditions": [
+      "User is logged in with tracker editor permissions",
+      "User is on a checklist step page",
+      "Work request ID exists and is valid"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Submit proposal questions form with null questions data",
+        "expected_result": "Request is processed without throwing null reference exception"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify the response status and body",
+        "expected_result": "Response returns HTTP 200 with appropriate error handling in response body"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-2024-001",
+      "step_number": 2,
+      "questions": null
+    },
+    "confidence_score": 7,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0003",
+    "title": "Save Proposal Questions with Invalid Work Request ID",
+    "description": "Verify system properly handles attempts to save questions for non-existent work request",
+    "module": "Orders",
+    "test_type": "negative",
+    "priority": "high",
+    "preconditions": [
+      "User is logged in with tracker editor permissions",
+      "Invalid work request ID is used"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Attempt to submit proposal questions with invalid work request ID",
+        "expected_result": "System validates work request ID exists"
+      },
+      {
+        "step_number": 2,
+        "action": "Check response for error handling",
+        "expected_result": "Response indicates QuestionsSuccess: false with appropriate error message"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "INVALID-ID-999",
+      "step_number": 2,
+      "questions": [
+        {
+          "id": "Q001",
+          "response": "Test response",
+          "closed": false
+        }
+      ]
+    },
+    "confidence_score": 7,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0004",
+    "title": "Verify Response Format Contains All Required Fields",
+    "description": "Ensure SaveProposalQuestions returns all expected fields in the response structure",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "medium",
+    "preconditions": [
+      "User is logged in with tracker editor permissions",
+      "Valid work request and step number are provided"
+    ],
+    "steps": [
+      {
+        "step_number": 1,
+        "action": "Submit valid proposal questions data",
+        "expected_result": "Request is processed successfully"
+      },
+      {
+        "step_number": 2,
+        "action": "Inspect the JSON response structure",
+        "expected_result": "Response contains QuestionsSuccess, QuestionsError, UpdatedCategories, and TrackerResult fields"
+      },
+      {
+        "step_number": 3,
+        "action": "Verify TrackerResult contains IsSuccess property",
+        "expected_result": "TrackerResult object has IsSuccess boolean property"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-2024-001",
+      "step_number": 1,
+      "questions": [
+        {
+          "id": "Q001",
+          "response": "Valid response",
+          "closed": false
+        }
+      ]
+    },
+    "confidence_score": 8,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  }
+]

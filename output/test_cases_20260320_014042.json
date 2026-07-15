@@ -1,0 +1,207 @@
+[
+  {
+    "test_case_id": "TC-TRK-0001",
+    "title": "Verify OrderItem View loads with correct permissions and display settings",
+    "description": "Ensure the OrderItem View action properly loads the checklist view model with correct permission-based display settings and assignee selections.",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "high",
+    "preconditions": [
+      "User is logged in with appropriate Orders permissions",
+      "A work request exists with checklist steps configured",
+      "User has permission to view checklist items"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Navigate to a work request and click on a checklist step tab",
+        "expected_result": "Checklist step view loads successfully showing questions and controls",
+        "notes": "Step should show based on workflow configuration"
+      },
+      {
+        "step_number": 2,
+        "action": "Verify the 'Add New Question' link visibility matches user edit permissions",
+        "expected_result": "Add New Question link is visible only if step is editable and user has CanAddItem permission",
+        "notes": "Permission check: DisplayAddNewQuestionLink = isEditable && model.CanAddItem"
+      },
+      {
+        "step_number": 3,
+        "action": "Check the 'Select Checklists' link visibility",
+        "expected_result": "Select Checklists link is visible only if step is editable, user can select checklists, and checklists exist",
+        "notes": "Permission check combines multiple conditions"
+      },
+      {
+        "step_number": 4,
+        "action": "Verify the assignee dropdown contains eligible assignees with default 'Select Assigned To' option",
+        "expected_result": "Dropdown shows 'Select Assigned To' as first option followed by eligible assignees",
+        "notes": "Default selection inserted at position 0"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "navigate",
+        "selector_key": "TODO_checklist_step_tab",
+        "value": "/Orders/OrderItem/View",
+        "assertion_type": "visible",
+        "assertion_value": ""
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_add_new_question_link",
+        "value": "",
+        "assertion_type": "visible",
+        "assertion_value": "conditional_on_permissions"
+      },
+      {
+        "step_number": 3,
+        "playwright_action": "assert",
+        "selector_key": "TODO_select_checklists_link",
+        "value": "",
+        "assertion_type": "visible",
+        "assertion_value": "conditional_on_permissions"
+      },
+      {
+        "step_number": 4,
+        "playwright_action": "assert",
+        "selector_key": "TODO_assignee_dropdown",
+        "value": "",
+        "assertion_type": "contains",
+        "assertion_value": "Select Assigned To"
+      }
+    ],
+    "test_data": {
+      "work_request_id": "WR-001",
+      "checklist_step_id": "CS-001"
+    },
+    "confidence_score": 7,
+    "needs_review": true,
+    "review_note": "UI element names and exact labels need confirmation - code shows logic but not specific UI text",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0002",
+    "title": "Verify OrderItem Save handles validation and permission checks correctly",
+    "description": "Test that OrderItem Save method validates user permissions, processes answers correctly, and returns appropriate success/failure responses in the JSON body.",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "critical",
+    "preconditions": [
+      "User is logged in with Orders permissions",
+      "A work request with checklist step exists",
+      "User has CanSaveOrderItem permission"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Fill out checklist questions with valid answers and click Save",
+        "expected_result": "Save operation succeeds. QuestionsSuccess field in response body is true",
+        "notes": "Must check response body - HTTP status is always 200 even on failure"
+      },
+      {
+        "step_number": 2,
+        "action": "Attempt to save checklist step without required permissions",
+        "expected_result": "Save fails gracefully. QuestionsSuccess field in response body is false",
+        "notes": "Permission check occurs before processing answers"
+      },
+      {
+        "step_number": 3,
+        "action": "Save with invalid or missing required answers",
+        "expected_result": "Validation errors returned in response. QuestionsSuccess is false with error details",
+        "notes": "Server-side validation should catch invalid submissions"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "click",
+        "selector_key": "TODO_checklist_save_button",
+        "value": "",
+        "assertion_type": "text",
+        "assertion_value": "QuestionsSuccess: true"
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "click",
+        "selector_key": "TODO_checklist_save_button",
+        "value": "",
+        "assertion_type": "text",
+        "assertion_value": "QuestionsSuccess: false"
+      },
+      {
+        "step_number": 3,
+        "playwright_action": "click",
+        "selector_key": "TODO_checklist_save_button",
+        "value": "",
+        "assertion_type": "contains",
+        "assertion_value": "validation error"
+      }
+    ],
+    "test_data": {
+      "checklist_answers": {
+        "question_1": "Yes",
+        "question_2": "No"
+      }
+    },
+    "confidence_score": 8,
+    "needs_review": false,
+    "review_note": "",
+    "generated_from_file": "OrderItemController.cs",
+    "generated_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "test_case_id": "TC-TRK-0301",
+    "title": "GenerateQuestionSavingErrorMessage returns localized error message for permission error",
+    "description": "Verify that when TrackerResult contains permission error details, the appropriate localized error message is generated.",
+    "module": "Orders",
+    "test_type": "functional",
+    "priority": "medium",
+    "preconditions": [
+      "User is logged in",
+      "TrackerResult object exists with permission error status"
+    ],
+    "manual_steps": [
+      {
+        "step_number": 1,
+        "action": "Create a TrackerResult with permission error status details",
+        "expected_result": "TrackerResult is created with PermissionError status",
+        "notes": "This is typically handled at the service layer"
+      },
+      {
+        "step_number": 2,
+        "action": "Call GenerateQuestionSavingErrorMessage with the TrackerResult",
+        "expected_result": "Method returns the localized permission error message from Localization.Resources.ServiceStatus_PermissionError",
+        "notes": "Error message should be user-friendly and localized"
+      }
+    ],
+    "automation_steps": [
+      {
+        "step_number": 1,
+        "playwright_action": "assert",
+        "selector_key": "TODO_tracker_result",
+        "value": "",
+        "assertion_type": "contains",
+        "assertion_value": "PermissionError"
+      },
+      {
+        "step_number": 2,
+        "playwright_action": "assert",
+        "selector_key": "TODO_error_message",
+        "value": "",
+        "assertion_type": "text",
+        "assertion_value": "ServiceStatus_PermissionError"
+      }
+    ],
+    "test_data": {
+      "error_status": "PermissionError",
+      "has_details": true
+    },
+    "confidence_score": 7,
+    "needs_review": true,
+    "review_note": "This is a backend method - exact UI manifestation needs confirmation",
+    "generated_from_file": "D:\\AI\\kms-suite\\WebApp\\Areas\\Orders\\Controllers\\OrderItemController.cs",
+    "generated_at": "2025-01-23T10:30:00Z"
+  }
+]

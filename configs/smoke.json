@@ -1,0 +1,55 @@
+{
+  "_comment": "Smoke test run configuration. Use this for quick sanity checks after every deployment.",
+  "_usage": "python main.py --config configs/smoke.json",
+
+  "run_name": "YOUR_PROJECT Smoke Test — RC — {{DATE}}",
+  "_run_name_comment": "Human-readable name for this run. Replace {{DATE}} with today's date.",
+
+  "test_type_filter": "smoke",
+  "_test_type_filter_comment": "Only generate/push test cases of this type. Options: smoke | regression | functional | security | performance | negative",
+
+  "target_modules": ["Orders", "Investigator", "Reports", "Search", "Administration"],
+  "_target_modules_comment": "Which EXAMPLE modules to target. Remove any modules you don't want to test in this run.",
+
+  "source_files": [
+    {
+      "file": "WebApp/Areas/Orders/Controllers/OrderItemController.cs",
+      "module": "Orders",
+      "_comment": "Silent failure risk — must check QuestionsSuccess in response body"
+    },
+    {
+      "file": "WebApp/Areas/Orders/Controllers/ProposalController.cs",
+      "module": "Orders",
+      "_comment": "Core workflow controller — check response body for success flag"
+    },
+    {
+      "file": "WebApp/Areas/Investigator/Controllers/HomeController.cs",
+      "module": "Investigator",
+      "_comment": "Known bug EXAMPLE-2646 — 404 instead of 302 for unauthenticated requests"
+    },
+    {
+      "file": "WebApp/Controllers/SearchController.cs",
+      "module": "Search",
+      "_comment": "Known bug EXAMPLE-2647 — 500 on missing session cookie"
+    }
+  ],
+  "_source_files_comment": "List of files to analyze. Each entry needs 'file' (relative path from repo root) and 'module' (EXAMPLE module name).",
+
+  "priority_filter": ["critical", "high"],
+  "_priority_filter_comment": "Only include test cases of these priorities. Smoke = critical + high only.",
+
+  "dry_run": true,
+  "_dry_run_comment": "Set to false when ready to push to Jira/Xray. Keep true for local preview.",
+
+  "output_file": "output/smoke-{{DATE}}.json",
+  "_output_file_comment": "Where to save the generated test cases JSON. Replace {{DATE}} with today's date.",
+
+  "chunk_size": 200,
+  "_chunk_size_comment": "Max lines per chunk when splitting large files. 200 is safe for most controllers.",
+
+  "push_to_xray": false,
+  "_push_to_xray_comment": "Set to true to automatically push valid test cases to Xray after generation.",
+
+  "jira_labels": ["smoke-testing", "auto-generated", "qax-agent"],
+  "_jira_labels_comment": "Labels to apply to every Jira issue created in this run."
+}

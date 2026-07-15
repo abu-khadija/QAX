@@ -1,0 +1,40 @@
+# QAX — Python Dependencies
+# Install with: pip install -r requirements.txt
+# Requires Python 3.11+
+
+# ── AI / Anthropic ────────────────────────────────────────────────────────────
+# Use >= to allow pip to pick the best compatible version for your Python version
+anthropic>=0.40.0
+
+# ── Pydantic (required by anthropic SDK internals, fixes Python 3.14 warnings) ─
+pydantic>=2.0.0
+
+# ── Environment variable loading ──────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── JSON Schema validation ────────────────────────────────────────────────────
+jsonschema==4.23.0
+
+# ── HTTP requests (Jira / Xray API calls) ────────────────────────────────────
+requests==2.32.3
+
+# ── Screenshot capture (Enhancement 1) ───────────────────────────────────────
+# NOTE: Playwright requires Python 3.11 or 3.12 (not 3.14 yet).
+# If you want screenshot support, install Python 3.12 from python.org
+# then run: pip install playwright==1.44.0 && playwright install chromium
+# playwright==1.44.0   ← uncomment when on Python 3.11/3.12
+
+# ── Async test support (for Playwright async API) ────────────────────────────
+pytest-asyncio==0.23.7
+
+# ── Web Dashboard (Prompt 6) ──────────────────────────────────────────────────
+# Lightweight WSGI web framework — used only for the local dashboard server.
+# Does NOT require a production server; flask dev server is fine for local use.
+flask>=3.0.0
+
+# ── Excel export (ExcelAdapter) ───────────────────────────────────────────────
+openpyxl>=3.1.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.3.5
+pytest-cov==6.0.0
