@@ -1779,7 +1779,7 @@ def run_pipeline_command() -> None:
     # ── Export ─────────────────────────────────────────────────────────────────
     parser.add_argument(
         "--export",
-        choices=["xray", "zephyr", "excel", "none"],
+        choices=["xray", "zephyr", "excel", "csv", "none"],
         default="none",
         help="Output adapter to use (default: none — keep in memory only).",
     )

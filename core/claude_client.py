@@ -26,7 +26,10 @@ SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.md"
 CLAUDE_MODEL_HEAVY = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 CLAUDE_MODEL_LIGHT = os.getenv("CLAUDE_MODEL_LIGHT", "claude-haiku-4-5-20251001")
 MODEL_ID = CLAUDE_MODEL_HEAVY   # kept for backward compat in retry/check-connection
-MAX_TOKENS = 4000
+# Output token ceiling. 4000 was too low for deep/critical coverage (5+ detailed
+# test cases with manual + automation steps), causing mid-array truncation. 8000
+# gives comfortable headroom; override with CLAUDE_MAX_TOKENS if needed.
+MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "8000"))
 
 
 class ClaudeClient:
@@ -333,6 +336,16 @@ class ClaudeClient:
             #   B) Claude echoed the prefill:  raw starts with [  → use as-is
             #   C) Claude added preamble text: raw starts with text → don't prepend,
             #      let _parse_response fallback find the actual "[" in the text
+            # Detect truncation early: when the model hits the output ceiling the
+            # JSON array is cut off mid-object, so downstream parsing must salvage
+            # only the complete test cases rather than trust the whole blob.
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                logger.warning(
+                    "Claude response for %s hit max_tokens (%d) — output may be "
+                    "truncated; salvaging complete test cases only",
+                    file_path, MAX_TOKENS,
+                )
+
             raw_text = response.content[0].text
             stripped = raw_text.lstrip()
             if stripped.startswith("["):
@@ -525,17 +538,28 @@ Do NOT use markdown. Do NOT explain. Just the JSON array."""
         """
         Parse Claude's text response into a list of test case dictionaries.
 
-        When called after assistant prefill, response_text already has the
-        leading "[" prepended by analyze_code() before this method is called.
-        Handles edge cases where Claude still manages to wrap in markdown or
-        include trailing text.
+        Robust against three real-world failure modes seen in production:
+          1. Preamble text or markdown fences around the JSON.
+          2. Truncation when the model hits max_tokens mid-array — the outer
+             array never closes, so naive "scan back from the last ]" bracket
+             matching would grab an inner ``manual_steps`` array and return step
+             objects instead of test cases.
+          3. An incomplete trailing object after truncation.
+
+        Every candidate list is passed through :meth:`_accept_test_cases`, which
+        only accepts lists whose elements actually look like test cases — this is
+        what stops a stray array of steps from being mistaken for the result. A
+        final salvage pass (:meth:`_salvage_objects`) extracts every complete
+        top-level object and keeps the test-case-shaped ones, recovering cleanly
+        from truncation.
 
         Args:
-            response_text (str): The raw text response from Claude, with "[" prepended
-                                 if assistant prefill was used.
+            response_text (str): The raw text response from Claude, with "["
+                                 prepended if assistant prefill was used.
 
         Returns:
-            list[dict] | None: Parsed list of test cases, or None if parsing fails.
+            list[dict] | None: Parsed test cases, or None when nothing parseable
+                               was found (which triggers the correction retry).
         """
         if not response_text or not response_text.strip():
             logger.warning("Empty response from Claude")
@@ -547,76 +571,209 @@ Do NOT use markdown. Do NOT explain. Just the JSON array."""
         try:
             result = json.loads(cleaned)
             if isinstance(result, list):
-                logger.debug("Successfully parsed JSON directly (%d test cases)", len(result))
-                return result
+                accepted = self._accept_test_cases(result)
+                if accepted is not None:
+                    logger.debug("Parsed JSON directly (%d test case(s))", len(accepted))
+                    return accepted
             elif isinstance(result, dict):
                 # Some models return {"test_cases": [...]} — unwrap it
                 for key in ("test_cases", "tests", "results", "data"):
-                    if key in result and isinstance(result[key], list):
-                        logger.debug("Unwrapped JSON from key '%s'", key)
-                        return result[key]
+                    if isinstance(result.get(key), list):
+                        accepted = self._accept_test_cases(result[key])
+                        if accepted is not None:
+                            logger.debug("Unwrapped JSON from key '%s'", key)
+                            return accepted
         except json.JSONDecodeError:
             pass
 
-        # ── Attempt 2: Strip markdown code fences and retry ───────────────────
-        # Handles responses like: ```json\n[...]\n```
+        # ── Attempt 2: Strip markdown code fences (prefill-aware) ─────────────
+        # Handles ```json ... ``` blocks, including the prefill case where the
+        # opening "[" was consumed by the assistant seed.
         code_block_pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
-        matches = re.findall(code_block_pattern, cleaned)
-        for match in matches:
-            try:
-                result = json.loads(match.strip())
-                if isinstance(result, list):
-                    logger.debug("Parsed JSON from markdown code block")
-                    return result
-            except json.JSONDecodeError:
-                continue
-
-        # ── Attempt 2b: Prefill-aware code fence reconstruction ───────────────
-        # When assistant prefill consumed "[", the code fence content starts
-        # with "{" (the opening bracket is missing). Try prepending "[".
-        for match in matches:
+        for match in re.findall(code_block_pattern, cleaned):
             content = match.strip()
             if not content:
                 continue
-            # Try "[" + content  (prefill consumed the opening "[")
-            if not content.startswith("["):
-                for candidate in (f"[{content}", f"[{content}]"):
-                    try:
-                        result = json.loads(candidate)
-                        if isinstance(result, list):
-                            logger.debug("Parsed JSON via prefill-aware code fence reconstruction")
-                            return result
-                    except json.JSONDecodeError:
-                        continue
-
-        # ── Attempt 3: Find array boundaries manually ─────────────────────────
-        # Handles responses with explanatory text before/after the JSON.
-        # Search backwards from the last "]" to find the matching "[".
-        end_idx = cleaned.rfind("]")
-        if end_idx != -1:
-            # Walk backwards to find the "[" that opens the outermost array
-            depth = 0
-            start_idx = -1
-            for i in range(end_idx, -1, -1):
-                if cleaned[i] == "]":
-                    depth += 1
-                elif cleaned[i] == "[":
-                    depth -= 1
-                    if depth == 0:
-                        start_idx = i
-                        break
-            if start_idx != -1:
-                json_slice = cleaned[start_idx:end_idx + 1]
+            for candidate in (content, f"[{content}", f"[{content}]"):
                 try:
-                    result = json.loads(json_slice)
-                    if isinstance(result, list):
-                        logger.debug("Parsed JSON by matching array boundaries")
-                        return result
+                    result = json.loads(candidate)
                 except json.JSONDecodeError:
-                    pass
+                    continue
+                if isinstance(result, list):
+                    accepted = self._accept_test_cases(result)
+                    if accepted is not None:
+                        logger.debug("Parsed JSON from markdown code block")
+                        return accepted
+
+        # ── Attempt 3: Extract the OUTERMOST array ────────────────────────────
+        # Scan FORWARD from the first "[" to its matching "]" (string-aware).
+        # Scanning forward finds the test-case array; the old scan-backward
+        # approach could latch onto an inner steps array on truncated output.
+        outer = self._extract_outer_array(cleaned)
+        if outer is not None:
+            try:
+                result = json.loads(outer)
+                if isinstance(result, list):
+                    accepted = self._accept_test_cases(result)
+                    if accepted is not None:
+                        logger.debug("Parsed JSON by outer-array extraction")
+                        return accepted
+            except json.JSONDecodeError:
+                pass
+
+        # ── Attempt 4: Salvage every complete top-level object ────────────────
+        # Recovers from truncation: keeps each complete test-case object and
+        # silently drops an incomplete trailing one.
+        salvaged = self._salvage_objects(cleaned)
+        if salvaged:
+            logger.warning(
+                "Recovered %d test case(s) via salvage — response was likely "
+                "truncated or malformed", len(salvaged),
+            )
+            return salvaged
 
         logger.warning("All JSON parsing attempts failed — first 300 chars: %s", cleaned[:300])
         return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Parsing Helpers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _looks_like_test_case(obj: object) -> bool:
+        """
+        Heuristic: does this object look like a test case rather than a step?
+
+        A test case carries identifying/structural fields (test_case_id, title,
+        manual_steps, automation_steps). A bare step object has step_number +
+        action and none of those, so it is explicitly rejected. This is the
+        guard that stops an inner steps array from being returned as the result.
+
+        Args:
+            obj: Any parsed JSON value.
+
+        Returns:
+            bool: True if obj is a test-case-shaped dict.
+        """
+        if not isinstance(obj, dict):
+            return False
+        if "step_number" in obj and "action" in obj and "title" not in obj:
+            return False
+        return any(
+            k in obj
+            for k in ("test_case_id", "title", "manual_steps", "automation_steps")
+        )
+
+    @classmethod
+    def _accept_test_cases(cls, result: list) -> list[dict] | None:
+        """
+        Accept a parsed list only if it genuinely holds test cases.
+
+        Args:
+            result (list): A parsed JSON array.
+
+        Returns:
+            list[dict] | None: The test-case-shaped elements (strays dropped),
+                               or None if the list is empty or not a test-case
+                               list (e.g. an array of steps).
+        """
+        if not isinstance(result, list) or not result:
+            return None
+        test_cases = [o for o in result if cls._looks_like_test_case(o)]
+        return test_cases or None
+
+    @staticmethod
+    def _extract_outer_array(text: str) -> str | None:
+        """
+        Return the substring of the first balanced top-level ``[...]`` array.
+
+        Scans forward from the first "[" tracking bracket depth while ignoring
+        brackets inside JSON strings.
+
+        Args:
+            text (str): The cleaned response text.
+
+        Returns:
+            str | None: The array substring, or None if no balanced outer array
+                        is found (e.g. the array was truncated before closing).
+        """
+        start = text.find("[")
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        return None
+
+    @classmethod
+    def _salvage_objects(cls, text: str) -> list[dict]:
+        """
+        Extract every complete top-level ``{...}`` object and keep the
+        test-case-shaped ones.
+
+        Brace depth is tracked string-aware, so objects nested inside a test
+        case (manual_steps entries, test_data) are not extracted on their own.
+        A truncated final object fails json.loads and is skipped — the graceful
+        degradation we want when the model runs out of output tokens mid-array.
+
+        Args:
+            text (str): The cleaned response text.
+
+        Returns:
+            list[dict]: Complete, test-case-shaped objects (possibly empty).
+        """
+        objects: list[dict] = []
+        depth = 0
+        start = -1
+        in_str = False
+        escape = False
+        for i, ch in enumerate(text):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start != -1:
+                        try:
+                            obj = json.loads(text[start:i + 1])
+                        except json.JSONDecodeError:
+                            obj = None
+                        if cls._looks_like_test_case(obj):
+                            objects.append(obj)
+                        start = -1
+        return objects
 
     # ─────────────────────────────────────────────────────────────────────────
     # Retry with Correction Prompt

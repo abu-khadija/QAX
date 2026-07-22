@@ -44,6 +44,7 @@ _ADAPTER_PATHS: dict[str, str] = {
     "xray":   "core.adapters.xray_adapter.XrayAdapter",
     "zephyr": "core.adapters.zephyr_adapter.ZephyrAdapter",
     "excel":  "core.adapters.excel_adapter.ExcelAdapter",
+    "csv":    "core.adapters.csv_adapter.CSVAdapter",
     "none":   "core.adapters.memory_adapter.MemoryAdapter",
 }
 
@@ -340,105 +341,66 @@ class QAXPipeline:
         Returns:
             list[dict]: Valid test case dicts, or [] on any error.
         """
-        module      = kwargs.get("module")
-        user_story  = kwargs.get("user_story")
-        test_type   = kwargs.get("test_type")
-        pre_content = kwargs.get("content")   # pre-loaded content from input adapter
+        # ── Phase 1: delegate to the extracted GenerationService ──────────────
+        # This method used to inline the SmartChecker → Claude → Validator stack.
+        # That exact logic now lives in services/generation_service.py, so the
+        # pipeline (and every other face) share one implementation. Behaviour is
+        # unchanged; the pipeline keeps its own printed summary below so the CLI
+        # output stays the same. A NullProgressReporter is used so no extra lines
+        # are printed here — the UI face supplies a live reporter instead.
+        from services.context import QAXContext
+        from services.exceptions import QAXConfigError
+        from services.generation_service import GenerationOptions, GenerationService
+        from services.progress import NullProgressReporter
+
+        options = GenerationOptions(
+            module=kwargs.get("module"),
+            user_story=kwargs.get("user_story"),
+            test_type=kwargs.get("test_type"),
+            include_git=bool(kwargs.get("include_git")),
+            include_deps=bool(kwargs.get("include_deps")),
+            include_bugs=bool(kwargs.get("include_bugs")),
+            content=kwargs.get("content"),
+        )
+
+        context = QAXContext.from_env(project=self.project, dry_run=self.dry_run)
 
         try:
-            from core.smart_checker import SmartChecker
-            from core.claude_client import ClaudeClient
-            from core.validator     import validate_batch
-
-            # ── Load content ───────────────────────────────────────────────────
-            checker = SmartChecker(project=self.project)
-
-            if pre_content is not None:
-                # Story/Jira/virtual source — content already loaded by input adapter
-                content   = pre_content
-                file_data = {
-                    "content":     content,
-                    "module_hint": module,
-                    "size_lines":  len(content.splitlines()),
-                }
-            else:
-                # File/folder/PR — load from disk
-                from core.code_reader import read_file
-                file_data = read_file(file_path)
-                content   = file_data.get("content", "")
-
-            # Build optional git history for risk assessment
-            git_history: dict | None = None
-            if kwargs.get("include_git"):
-                try:
-                    from core.git_analyzer import GitAnalyzer
-                    git_history = GitAnalyzer().get_file_history(file_path)
-                except Exception as exc:
-                    logger.debug("QAX Pipeline: git history unavailable — %s", exc)
-
-            pre = checker.run_pre_checks(
-                file_path=file_path,
-                file_content=content,
-                module=module,
-                git_history=git_history,
-                user_story=user_story,
+            service = GenerationService(context)
+            result = service.generate(
+                file_path, options=options, progress=NullProgressReporter()
             )
-
-            # ── Cache hit: return immediately ─────────────────────────────────
-            if pre.get("cache_hit"):
-                cached = pre.get("cached_result") or []
-                logger.info(
-                    "QAX Pipeline: cache hit for %s (%d case(s))",
-                    file_path, len(cached),
-                )
-                print(f"  [QAX] Cache hit — returning {len(cached)} cached test case(s)")
-                return cached
-
-            # ── Build bug patterns if requested ───────────────────────────────
-            bug_patterns: str | None = None
-            if kwargs.get("include_bugs") and module:
-                try:
-                    from core.bug_fetcher import BugFetcher
-                    bug_patterns = BugFetcher().get_patterns_for_module(module)
-                except Exception as exc:
-                    logger.debug("QAX Pipeline: bug patterns unavailable — %s", exc)
-
-            # ── Call Claude ───────────────────────────────────────────────────
-            client = ClaudeClient(project=self.project)
-            raw    = client.analyze_code(
-                code=content,
-                file_path=file_path,
-                module_hint=module or file_data.get("module_hint"),
-                bug_patterns=bug_patterns,
-                user_story=user_story,
-                risk_assessment=pre.get("risk"),
-                test_type=test_type or pre.get("test_type"),
-                skill_context=pre.get("skill_context"),
-                risk_level=pre.get("risk", {}).get("risk_level", "low"),
-                line_count=file_data.get("size_lines", 0),
-            )
-
-            # ── Validate ──────────────────────────────────────────────────────
-            batch = validate_batch(raw)
-            valid = batch.get("valid", [])
-            summ  = batch.get("summary", {})
-            logger.info(
-                "QAX Pipeline: generation complete — %d valid, %d invalid",
-                len(valid), len(batch.get("invalid", [])),
-            )
-            print(f"  Generated: {summ.get('total', len(raw))} | "
-                  f"Valid: {len(valid)} | "
-                  f"Avg confidence: {summ.get('avg_confidence', 0):.1f}/10")
-            return valid
-
-        except FileNotFoundError as exc:
-            logger.error("QAX Pipeline: file not found — %s", exc)
+        except QAXConfigError as exc:
+            logger.error("QAX Pipeline: configuration error — %s", exc)
             print(f"  [QAX] ERROR: {exc}")
             return []
-        except Exception as exc:
-            logger.error("QAX Pipeline: generation error — %s", exc)
-            print(f"  [QAX] Generation error: {exc}")
+
+        # ── Outright failure (missing file, API error) ────────────────────────
+        if result.error:
+            logger.error("QAX Pipeline: generation error — %s", result.error)
+            print(f"  [QAX] Generation error: {result.error}")
             return []
+
+        # ── Cache hit ─────────────────────────────────────────────────────────
+        if result.from_cache:
+            logger.info(
+                "QAX Pipeline: cache hit for %s (%d case(s))",
+                file_path, result.count,
+            )
+            print(f"  [QAX] Cache hit — returning {result.count} cached test case(s)")
+            return result.test_cases
+
+        # ── Success ───────────────────────────────────────────────────────────
+        logger.info(
+            "QAX Pipeline: generation complete — %d valid, %d invalid",
+            result.count, len(result.invalid),
+        )
+        print(
+            f"  Generated: {result.summary.get('total', result.count)} | "
+            f"Valid: {result.count} | "
+            f"Avg confidence: {result.avg_confidence:.1f}/10"
+        )
+        return result.test_cases
 
     def _run_generation_from_item(self, item: dict, **kwargs) -> list[dict]:
         """

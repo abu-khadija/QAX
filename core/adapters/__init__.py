@@ -19,6 +19,7 @@ from core.adapters.base import BaseExportAdapter
 from core.adapters.xray_adapter import XrayAdapter
 from core.adapters.zephyr_adapter import ZephyrAdapter
 from core.adapters.excel_adapter import ExcelAdapter
+from core.adapters.csv_adapter import CSVAdapter
 from core.adapters.memory_adapter import MemoryAdapter
 
 # ── Registry: name → class ────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ _REGISTRY: dict[str, type[BaseExportAdapter]] = {
     "xray":   XrayAdapter,
     "zephyr": ZephyrAdapter,
     "excel":  ExcelAdapter,
+    "csv":    CSVAdapter,
     "none":   MemoryAdapter,
 }
 
@@ -50,6 +52,7 @@ __all__ = [
     "XrayAdapter",
     "ZephyrAdapter",
     "ExcelAdapter",
+    "CSVAdapter",
     "MemoryAdapter",
     "get_adapter",
 ]
