@@ -30,12 +30,12 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from services.context import QAXContext
 from services.exceptions import QAXGenerationError
 from services.progress import NullProgressReporter, ProgressReporter
-from services.results import GenerationResult
+from services.results import BatchGenerationResult, GenerationResult
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,127 @@ class GenerationService:
             return GenerationResult(
                 source=source, module=effective_module, error=str(exc)
             )
+
+    def generate_from_source(
+        self,
+        source: str,
+        *,
+        input_type: str = "file",
+        options: GenerationOptions | None = None,
+        ext: str | None = None,
+        progress: ProgressReporter | None = None,
+    ) -> BatchGenerationResult:
+        """
+        Generate test cases from any source type via the input adapters.
+
+        This is the multi-source orchestration layer: it resolves the input
+        adapter, fetches the source into a normalised list of items (one per
+        file / ticket / story), and runs generate() on each — aggregating the
+        results. A single file is just the one-item case.
+
+        Supported input_type values: "file", "folder", "jira", "pr", "story".
+
+        Args:
+            source (str): The source identifier — a path, folder, Jira key,
+                PR reference, or story text, depending on input_type.
+            input_type (str): Which input adapter to use.
+            options (GenerationOptions | None): Generation options applied to
+                every item. Defaults are used when None.
+            ext (str | None): File-extension filter for the "folder" adapter
+                (e.g. ".py"). Ignored by other adapters.
+            progress (ProgressReporter | None): Progress sink.
+
+        Returns:
+            BatchGenerationResult: Per-item results plus flattened views. Never
+                raises for runtime issues — failures land in .error (source-level)
+                or in each item's GenerationResult.error.
+
+        Raises:
+            QAXConfigError: If the Anthropic API key is missing.
+        """
+        opts = options or GenerationOptions()
+        prog = progress or NullProgressReporter()
+
+        # Fail fast on missing credentials before doing any fetching.
+        self.context.require_anthropic_key()
+
+        # ── Resolve the input adapter and fetch items ─────────────────────────
+        prog.emit("input", "start", f"reading source via '{input_type}'")
+        try:
+            from core.input_adapters import get_input_adapter
+
+            adapter = get_input_adapter(input_type)
+            # Input adapters guarantee they never raise — they return [].
+            items = adapter.fetch(source, ext=ext, module=opts.module)
+        except Exception as exc:  # defensive — should not happen
+            logger.error("Input adapter '%s' failed for %s: %s", input_type, source, exc)
+            prog.emit("input", "error", str(exc))
+            return BatchGenerationResult(
+                input_type=input_type, source=source, error=str(exc)
+            )
+
+        if not items:
+            prog.emit("input", "warn", "no analyzable input found")
+            return BatchGenerationResult(
+                input_type=input_type,
+                source=source,
+                error="No analyzable input found for this source",
+            )
+
+        prog.emit("input", "ok", f"{len(items)} item(s) to analyze")
+
+        # ── Generate per item ─────────────────────────────────────────────────
+        results: list[GenerationResult] = []
+        for idx, item in enumerate(items, 1):
+            name = item.get("file_name") or item.get("file_path") or f"item {idx}"
+            prog.emit("item", "start", f"[{idx}/{len(items)}] {name}")
+            results.append(self._generate_from_item(item, opts, prog))
+
+        return BatchGenerationResult(
+            input_type=input_type, source=source, items=results
+        )
+
+    def _generate_from_item(
+        self,
+        item: dict,
+        opts: GenerationOptions,
+        prog: ProgressReporter,
+    ) -> GenerationResult:
+        """
+        Generate test cases for a single normalised input item.
+
+        Uses the content the adapter already loaded (all adapters populate
+        "content"), so nothing is re-read from disk — this is what makes
+        non-disk sources (Jira, PR, story) work through the same path. Only
+        falls back to a disk read when the item carries no content.
+
+        Args:
+            item (dict): A normalised input item from an adapter's fetch().
+            opts (GenerationOptions): Base options for the run.
+            prog (ProgressReporter): Progress sink.
+
+        Returns:
+            GenerationResult: The result for this one item.
+        """
+        source_type = item.get("source_type", "file")
+        file_path = item.get("file_path") or f"{source_type}://input"
+        content = item.get("content", "")
+        metadata = item.get("metadata") or {}
+
+        if content and content.strip():
+            is_story = source_type in ("story", "jira")
+            item_opts = replace(
+                opts,
+                content=content,
+                user_story=(opts.user_story or content) if is_story else opts.user_story,
+                module=opts.module or metadata.get("module") or metadata.get("issue_type"),
+                # git history needs a real tracked file; skip it for adapter-loaded content
+                include_git=False,
+            )
+            return self.generate(file_path, options=item_opts, progress=prog)
+
+        # No pre-loaded content → treat file_path as a real disk path.
+        return self.generate(file_path, options=opts, progress=prog)
 
     # ── Internals ───────────────────────────────────────────────────────────
 

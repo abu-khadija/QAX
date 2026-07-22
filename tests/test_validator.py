@@ -155,12 +155,19 @@ class TestMissingRequiredField:
         result = validate_test_case(tc)
         assert result is False, "Missing 'module' field should fail validation"
 
-    def test_invalid_module_enum_fails(self):
-        """A test case with an unrecognized module name should fail validation."""
-        tc = make_valid_test_case(module="UnknownModule")
+    def test_arbitrary_module_is_accepted(self):
+        """QAX is generic — any non-empty module name validates (no hardcoded enum)."""
+        tc = make_valid_test_case(module="Checkout")
 
         result = validate_test_case(tc)
-        assert result is False, "Invalid module enum value should fail validation"
+        assert result is True, "Free-form module name should validate (generic tool)"
+
+    def test_empty_module_fails(self):
+        """An empty module still fails validation (minLength: 1)."""
+        tc = make_valid_test_case(module="")
+
+        result = validate_test_case(tc)
+        assert result is False, "Empty module should fail validation"
 
     def test_missing_generated_at_fails(self):
         """A test case without 'generated_at' should fail validation."""

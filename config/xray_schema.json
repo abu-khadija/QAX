@@ -44,21 +44,8 @@
 
       "module": {
         "type": "string",
-        "description": "The EXAMPLE module this test case belongs to. Must match a known module.",
-        "enum": [
-          "Orders",
-          "Investigator",
-          "Reports",
-          "RiskAssessor",
-          "Analytics",
-          "Schedules",
-          "Customers",
-          "ViewReport",
-          "Administration",
-          "Search",
-          "Dashboard",
-          "General"
-        ]
+        "minLength": 1,
+        "description": "The module or feature area this test case belongs to (free-form, e.g. 'Auth', 'Checkout', 'Orders'). QAX is generic — module names are not restricted to any one project."
       },
 
       "test_type": {

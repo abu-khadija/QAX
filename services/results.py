@@ -77,6 +77,95 @@ class GenerationResult:
 
 
 @dataclass
+class BatchGenerationResult:
+    """
+    The outcome of generating across a whole source (folder, PR, ...) — i.e. one
+    or more input items each producing its own GenerationResult.
+
+    This is what a multi-file source returns: the per-item results plus flattened
+    convenience views (all valid test cases together, combined summary) that the
+    UI and CLI render directly.
+
+    Attributes:
+        input_type (str): The input adapter used — "file", "folder", "jira",
+            "pr", or "story".
+        source (str): The source identifier that was fetched.
+        items (list[GenerationResult]): One result per input item.
+        error (str | None): Set only when the source itself could not be
+            resolved (bad adapter, nothing fetched). Per-item errors live on the
+            individual GenerationResult objects.
+    """
+
+    input_type: str = "file"
+    source: str = ""
+    items: list = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def test_cases(self) -> list[dict]:
+        """All valid test cases across every item, flattened."""
+        cases: list[dict] = []
+        for r in self.items:
+            cases.extend(r.test_cases)
+        return cases
+
+    @property
+    def count(self) -> int:
+        """Total valid test cases produced across all items."""
+        return len(self.test_cases)
+
+    @property
+    def item_count(self) -> int:
+        """Number of input items processed (files, tickets, ...)."""
+        return len(self.items)
+
+    @property
+    def invalid_count(self) -> int:
+        """Total cases that failed validation across all items."""
+        return sum(len(r.invalid) for r in self.items)
+
+    @property
+    def success(self) -> bool:
+        """True when the source resolved (individual items may still be empty)."""
+        return self.error is None
+
+    @property
+    def avg_confidence(self) -> float:
+        """Average confidence across all produced cases (0.0 if none)."""
+        scores = [
+            c.get("confidence_score", 0)
+            for c in self.test_cases
+            if isinstance(c, dict)
+        ]
+        return round(sum(scores) / len(scores), 2) if scores else 0.0
+
+    @property
+    def summary(self) -> dict:
+        """Combined stats across all items."""
+        return {
+            "input_type": self.input_type,
+            "items": self.item_count,
+            "total": self.count + self.invalid_count,
+            "valid_count": self.count,
+            "invalid_count": self.invalid_count,
+            "avg_confidence": self.avg_confidence,
+        }
+
+    def to_dict(self) -> dict:
+        """Return a JSON-friendly form for MCP/SaaS faces."""
+        return {
+            "input_type": self.input_type,
+            "source": self.source,
+            "success": self.success,
+            "error": self.error,
+            "item_count": self.item_count,
+            "count": self.count,
+            "test_cases": self.test_cases,
+            "summary": self.summary,
+        }
+
+
+@dataclass
 class ExportResult:
     """
     The outcome of an ExportService.export() call.

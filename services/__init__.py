@@ -38,6 +38,7 @@ from services.progress import (
     ProgressReporter,
 )
 from services.results import (
+    BatchGenerationResult,
     ExecutionResult,
     ExportResult,
     GenerationResult,
@@ -55,6 +56,7 @@ __all__ = [
     "PrintProgressReporter",
     "NullProgressReporter",
     "GenerationResult",
+    "BatchGenerationResult",
     "ExportResult",
     "ExecutionResult",
     "ReportResult",
