@@ -342,6 +342,51 @@ def run_qax_command(
         return 1, err
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Service-layer progress bridge
+# ══════════════════════════════════════════════════════════════════════════════
+
+from services.progress import ProgressReporter as _ServiceProgressReporter
+
+
+class _UIProgressReporter(_ServiceProgressReporter):
+    """
+    Bridge the GenerationService's progress events onto the Analyze tab's step
+    checklist. This replaces the old approach of scraping stdout lines from a
+    subprocess — the service now drives the UI directly with structured events.
+    """
+
+    # Service event step -> UI step keys to mark done when it fires.
+    _STEP_MAP = {
+        "pre_check": ("risk", "cache"),
+        "cache":     ("cache",),
+        "generate":  ("risk", "cache", "claude"),
+        "validate":  ("risk", "cache", "claude", "valid"),
+    }
+
+    def __init__(self, steps: dict, placeholder, render) -> None:
+        """
+        Args:
+            steps: The Analyze tab's _steps dict (mutated in place).
+            placeholder: An st.empty() placeholder to re-render into.
+            render: A function(steps) -> HTML string.
+        """
+        super().__init__()
+        self._steps = steps
+        self._placeholder = placeholder
+        self._render = render
+
+    def _handle(self, event) -> None:
+        """Mark the mapped steps done and re-render the checklist."""
+        for key in self._STEP_MAP.get(event.step, ()):
+            if key in self._steps:
+                self._steps[key]["done"] = True
+        try:
+            self._placeholder.markdown(self._render(self._steps), unsafe_allow_html=True)
+        except Exception:
+            pass
+
+
 @st.cache_data(ttl=30)
 def get_projects() -> list[str]:
     """
@@ -785,30 +830,6 @@ with tab1:
             if not effective_path:
                 st.error("Please provide a file path or upload a file.")
             else:
-                # ── Build command args ─────────────────────────────────────
-                args = [
-                    "analyze",
-                    "--file", effective_path,
-                    "--project", project,
-                    "--chunk-size", str(chunk_size),
-                ]
-                if dry_run_analyze:
-                    args.append("--dry-run")
-                if include_git:
-                    args.append("--include-git")
-                if include_deps:
-                    args.append("--include-deps")
-                if include_bugs and st.session_state.get("analyze_module"):
-                    args += ["--include-bugs", "--module", st.session_state.analyze_module]
-                if auto_accept:
-                    args.append("--auto-accept")
-                if natural_out:
-                    args.append("--natural")
-                if user_story:
-                    args += ["--story", user_story]
-                if test_type != "auto":
-                    args += ["--test-type", test_type]
-
                 # ── Step-by-step progress + streaming terminal ─────────────
                 st.markdown("**Progress**")
                 _steps: dict[str, dict] = {
@@ -839,58 +860,84 @@ with tab1:
                 terminal_placeholder = st.empty()
 
                 try:
-                    # Stream subprocess line-by-line, updating progress steps
-                    _cmd = [sys.executable, str(QAX_ROOT / "main.py")] + args
-                    _proc = subprocess.Popen(
-                        _cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                        cwd=str(QAX_ROOT),
+                    from services.context import QAXContext
+                    from services.generation_service import (
+                        GenerationOptions,
+                        GenerationService,
                     )
-                    _lines: list[str] = []
-                    for _line in _proc.stdout:  # type: ignore[union-attr]
-                        _lines.append(_line)
-                        # Parse progress signals
-                        _ll = _line.lower()
-                        if not _steps["risk"]["done"]   and ("risk:" in _ll or "risk level" in _ll):
-                            _steps["risk"]["done"] = True
-                        if not _steps["cache"]["done"]  and "cache hit" in _ll:
-                            _steps["cache"]["done"] = True
-                        if not _steps["claude"]["done"] and ("sending to claude" in _ll or "claude" in _ll and "send" in _ll):
-                            _steps["claude"]["done"] = True
-                        if not _steps["valid"]["done"]  and ("schema pass" in _ll or "valid (" in _ll):
-                            _steps["valid"]["done"] = True
-                        prog_placeholder.markdown(_steps_html(_steps), unsafe_allow_html=True)
-                        terminal_placeholder.markdown(
-                            f'<div class="terminal">{"".join(_lines[-60:])}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    _proc.wait()
-                    rc     = _proc.returncode
-                    output = "".join(_lines)
-                    # Mark all steps done on success
-                    if rc == 0:
-                        for _s in _steps.values():
-                            _s["done"] = True
-                        prog_placeholder.markdown(_steps_html(_steps), unsafe_allow_html=True)
 
-                    # ── Load results ───────────────────────────────────────
-                    load_all_test_cases.clear()
-                    results = load_latest_test_cases()
+                    # Build options straight from the form — no CLI args, no
+                    # subprocess. The service returns structured data we render
+                    # directly, and drives the progress checklist via events.
+                    _opts = GenerationOptions(
+                        module=st.session_state.get("analyze_module") or None,
+                        user_story=user_story or None,
+                        test_type=(test_type if test_type != "auto" else None),
+                        include_git=include_git,
+                        include_deps=include_deps,
+                        include_bugs=include_bugs,
+                        auto_accept=auto_accept,
+                    )
+                    _ctx = QAXContext.from_env(project=project, dry_run=dry_run_analyze)
+                    _reporter = _UIProgressReporter(_steps, prog_placeholder, _steps_html)
+
+                    terminal_placeholder.markdown(
+                        '<div class="terminal">Generating — calling Claude…</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    _result = GenerationService(_ctx).generate(
+                        effective_path, options=_opts, progress=_reporter,
+                    )
+
+                    # Mark every step done once generation returns
+                    for _s in _steps.values():
+                        _s["done"] = True
+                    prog_placeholder.markdown(_steps_html(_steps), unsafe_allow_html=True)
+
+                    results = _result.test_cases
+                    rc = 1 if _result.error else 0
+                    if _result.error:
+                        output = _result.error
+                    else:
+                        output = (
+                            f"Generated {_result.count} valid test case(s) — "
+                            f"avg confidence {_result.avg_confidence:.1f}/10"
+                            + (" (from cache)" if _result.from_cache else "")
+                        )
+                    terminal_placeholder.markdown(
+                        f'<div class="terminal">{output}</div>', unsafe_allow_html=True,
+                    )
+
+                    # Persist to output/ so the Dashboard and Feedback tabs
+                    # (which read saved JSON files) keep working.
+                    if results:
+                        try:
+                            _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                            _out = QAX_ROOT / "output" / f"test_cases_{_ts}.json"
+                            _out.parent.mkdir(parents=True, exist_ok=True)
+                            _out.write_text(
+                                json.dumps(results, indent=2, ensure_ascii=False),
+                                encoding="utf-8",
+                            )
+                            load_all_test_cases.clear()
+                        except Exception:
+                            pass
+
                     st.session_state["analyze_results"] = results
                     st.session_state["analyze_output"]  = output
                     st.session_state["analyze_rc"]      = rc
-                    if rc == 0 and results:
+                    if _result.error:
+                        st.toast("Generation failed — check output for details", icon="❌")
+                    elif results:
                         st.session_state["onboarded"] = True
                         st.toast(f"✅ Generated {len(results)} test case(s)", icon="🤖")
-                    elif rc != 0:
-                        st.toast("Generation failed — check output for details", icon="❌")
+                    else:
+                        st.toast("No valid test cases produced", icon="⚠️")
                 except Exception as _exc:
                     rc, output = 1, str(_exc)
                     st.session_state["analyze_rc"] = rc
-                    st.error(f"Command error: {_exc}")
+                    st.error(f"Generation error: {_exc}")
                 finally:
                     if uploaded_tmp and os.path.exists(uploaded_tmp):
                         try:
