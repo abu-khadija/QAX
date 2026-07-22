@@ -166,6 +166,62 @@ class BatchGenerationResult:
 
 
 @dataclass
+class ComprehensionResult:
+    """
+    The outcome of RepoComprehensionService.comprehend() — a high-level map of
+    the source built before generation, so the generated tests go deeper.
+
+    Attributes:
+        overview (str): One or two sentences on what the app/module does.
+        main_flows (list[str]): Key user/business flows.
+        entry_points (list[str]): Controllers/routes/handlers ("file: role").
+        risk_areas (list[str]): Areas to test hardest (auth, payments, ...).
+        files (list[dict]): [{"path", "role"}] for the most important files.
+        file_count (int): Number of source files read.
+        error (str | None): Set only when comprehension failed outright.
+    """
+
+    overview: str = ""
+    main_flows: list = field(default_factory=list)
+    entry_points: list = field(default_factory=list)
+    risk_areas: list = field(default_factory=list)
+    files: list = field(default_factory=list)
+    file_count: int = 0
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        """True when comprehension completed without an outright error."""
+        return self.error is None
+
+    def as_context(self) -> str:
+        """
+        Build a compact text block to inject into generation as app context.
+
+        Returns:
+            str: A few labelled lines summarising the app, or "" if empty.
+        """
+        lines: list[str] = []
+        if self.overview:
+            lines.append(f"App overview: {self.overview}")
+        if self.main_flows:
+            lines.append("Main flows: " + "; ".join(str(f) for f in self.main_flows))
+        if self.risk_areas:
+            lines.append("High-risk areas to test hard: "
+                         + ", ".join(str(r) for r in self.risk_areas))
+        if self.entry_points:
+            lines.append("Entry points: "
+                         + "; ".join(str(e) for e in self.entry_points[:8]))
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        """Return a JSON-friendly form for MCP/SaaS faces."""
+        data = asdict(self)
+        data["success"] = self.success
+        return data
+
+
+@dataclass
 class ExportResult:
     """
     The outcome of an ExportService.export() call.

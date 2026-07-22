@@ -180,6 +180,7 @@ class ClaudeClient:
         risk_assessment: dict | None = None,
         test_type: str | None = None,
         model_override: str | None = None,
+        repo_context: str | None = None,
     ) -> list[dict]:
         """
         Send source code to Claude for test case generation.
@@ -274,6 +275,7 @@ class ClaudeClient:
             risk_assessment=risk_assessment,
             test_type=test_type,
             skill_context=skill_context,
+            repo_context=repo_context,
         )
 
         logger.info("Sending %s to Claude for analysis...", file_path)
@@ -402,6 +404,7 @@ class ClaudeClient:
         risk_assessment: dict | None = None,
         test_type: str | None = None,
         skill_context: str | None = None,
+        repo_context: str | None = None,
     ) -> str:
         """
         Construct the user message that will be sent to Claude alongside the system prompt.
@@ -504,11 +507,20 @@ class ClaudeClient:
                 f"{skill_context.strip()}\n"
             )
 
+        # ── App context section (whole-source comprehension) ──────────────────
+        repo_context_section = ""
+        if repo_context and repo_context.strip():
+            repo_context_section = (
+                "\n**APP CONTEXT (whole-source understanding — use it to focus "
+                "the tests on real flows and risks):**\n"
+                f"{repo_context.strip()}\n"
+            )
+
         prompt = f"""Analyze the following source code file and generate comprehensive test cases.
 
 **File Path:** {file_path}
 **Module Context:** {module_context}
-{user_story_section}{risk_section_b2}{test_type_section}{bug_patterns_section}{skill_context_section}
+{repo_context_section}{user_story_section}{risk_section_b2}{test_type_section}{bug_patterns_section}{skill_context_section}
 **Source Code:**
 ```
 {code}

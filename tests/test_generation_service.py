@@ -199,6 +199,21 @@ def test_cache_hit_with_garbage_regenerates():
     assert result.count == 1            # regenerated a valid case
 
 
+def test_repo_context_forwarded_to_claude():
+    """The comprehension app-map (repo_context) is passed into analyze_code."""
+    raw = [make_valid_test_case()]
+    with patch("core.smart_checker.SmartChecker", _FakeSmartChecker(_default_pre())), \
+         patch("core.claude_client.ClaudeClient") as MockClient:
+        MockClient.return_value.analyze_code.return_value = raw
+        GenerationService(_ctx()).generate(
+            "story://x",
+            options=GenerationOptions(content="def x(): pass",
+                                      repo_context="App overview: a login module"),
+        )
+        _, kwargs = MockClient.return_value.analyze_code.call_args
+        assert kwargs.get("repo_context") == "App overview: a login module"
+
+
 def test_to_dict_is_json_shaped():
     """to_dict() exposes the fields an MCP/SaaS face needs as plain JSON."""
     result = GenerationResult(test_cases=[make_valid_test_case()], source="a.py",

@@ -60,6 +60,10 @@ class GenerationOptions:
         content (str | None): Pre-loaded source content. When provided, the
             service skips reading from disk — used for story/jira/virtual
             sources where `source` is not a real file path.
+        repo_context (str | None): Whole-source understanding from the
+            RepoComprehensionService (app overview, flows, risk areas). When
+            set, it is injected into the prompt so tests are informed by the
+            whole picture, not just this one file.
     """
 
     module: str | None = None
@@ -71,6 +75,7 @@ class GenerationOptions:
     use_cache: bool = True
     auto_accept: bool = False
     content: str | None = None
+    repo_context: str | None = None
 
 
 class GenerationService:
@@ -422,6 +427,7 @@ class GenerationService:
             risk_level=(pre.get("risk") or {}).get("risk_level", "low"),
             line_count=line_count,
             use_cache=opts.use_cache,
+            repo_context=opts.repo_context,
         )
 
         used_model = pre.get("recommended_model", "") or (
