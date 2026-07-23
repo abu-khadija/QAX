@@ -1120,10 +1120,35 @@ def _run_wizard_critic() -> None:
         st.error(f"Critic error: {exc}")
         return
     st.session_state["critic_result"] = crit
+    st.session_state["investigation_result"] = None   # stale once the Critic re-runs
     if crit.error:
         st.warning(crit.error)
     else:
         st.toast(crit.summary(), icon="🕵️")
+
+
+def _run_wizard_investigator() -> None:
+    """Reproduce each suspected bug on the live app — confirm or downgrade it."""
+    from services.context import QAXContext
+    from services.investigator_service import InvestigatorService
+
+    crit = st.session_state.get("critic_result")
+    results = st.session_state.get("analyze_results") or []
+    base_url = st.session_state.get("wiz_base_url") or ""
+    if not crit:
+        return
+    ctx = QAXContext.from_env()
+    try:
+        with st.spinner("Reproducing on the live app (verify before you file)…"):
+            inv = InvestigatorService(ctx).investigate(crit, results, base_url=base_url)
+    except Exception as exc:
+        st.error(f"Investigator error: {exc}")
+        return
+    st.session_state["investigation_result"] = inv
+    if inv.error:
+        st.warning(inv.error)
+    else:
+        st.toast(inv.summary(), icon="✅")
 
 
 def _wiz_step_bugreports() -> None:
@@ -1157,13 +1182,46 @@ def _wiz_step_bugreports() -> None:
             m3.metric("❓ Uncertain", len(crit.uncertain))
             st.divider()
 
+            inv = st.session_state.get("investigation_result")
             if crit.real_bugs:
-                st.markdown("#### 🐞 Real bugs — worth reporting")
+                st.markdown("#### 🐞 Suspected bugs")
+                if not inv:
+                    st.caption("The Critic flagged these from the tests. Verify each on "
+                               "the live app before trusting it.")
+                    if st.button("✅ Verify on the live app", key="wiz_investigate_run",
+                                 help="The Investigator reproduces each suspected bug against "
+                                      "the running app and drops false alarms."):
+                        _run_wizard_investigator()
                 for v in crit.real_bugs:
                     st.markdown(f"**{str(v.title)[:70]}**")
                     st.caption(f"↳ why: {str(v.reason)[:180]}")
-                    if v.suggestion:
-                        st.caption(f"↳ reproduce: {str(v.suggestion)[:180]}")
+
+            if inv and not inv.error:
+                st.divider()
+                v1, v2, v3 = st.columns(3)
+                v1.metric("✅ Confirmed", len(inv.confirmed))
+                v2.metric("🚫 False alarms", len(inv.not_reproduced))
+                v3.metric("❓ Inconclusive", len(inv.inconclusive))
+                if inv.note:
+                    st.caption(inv.note)
+                if inv.confirmed:
+                    st.markdown("#### ✅ Confirmed bugs — reproduced on the live app")
+                    for v in inv.confirmed:
+                        st.markdown(f"**{str(v.title)[:70]}**")
+                        st.caption(f"↳ {str(v.reason)[:180]}")
+                        if v.evidence:
+                            st.caption(f"↳ evidence: {str(v.evidence)[:160]}")
+                if inv.not_reproduced:
+                    with st.expander(f"🚫 {len(inv.not_reproduced)} false alarm(s) — "
+                                     f"did not hold up on the live app"):
+                        for v in inv.not_reproduced:
+                            st.markdown(f"**{str(v.title)[:70]}**")
+                            st.caption(f"↳ {str(v.reason)[:180]}")
+                if inv.inconclusive:
+                    with st.expander(f"❓ {len(inv.inconclusive)} inconclusive"):
+                        for v in inv.inconclusive:
+                            st.caption(f"{str(v.title)[:70]} — {str(v.reason)[:120]}")
+
             if crit.broken_tests:
                 with st.expander(f"🔧 {len(crit.broken_tests)} broken test(s) — "
                                  f"not app bugs (the test's own fault)"):
@@ -1205,7 +1263,7 @@ def _wiz_step_bugreports() -> None:
         if st.button("↺ Start over", use_container_width=True, key="wiz_restart2"):
             for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension",
                        "repo_context", "execution_result", "report_path",
-                       "critic_result"):
+                       "critic_result", "investigation_result"):
                 st.session_state[_k] = None
             _wiz_go(1)
 

@@ -301,6 +301,89 @@ class CriticResult:
 
 
 @dataclass
+class InvestigationVerdict:
+    """
+    The Investigator's verdict on one suspected bug after trying to reproduce it.
+
+    Attributes:
+        test_case_id (str): The test's id.
+        title (str): The test's title.
+        status (str): "confirmed" | "not_reproduced" | "inconclusive".
+        reproduced (bool): Whether the failure recurred on re-run.
+        reason (str): One-sentence explanation, citing the evidence.
+        evidence (str): The intended request vs the actual response captured.
+    """
+
+    test_case_id: str = ""
+    title: str = ""
+    status: str = "inconclusive"
+    reproduced: bool = False
+    reason: str = ""
+    evidence: str = ""
+
+    @property
+    def is_confirmed(self) -> bool:
+        return self.status == "confirmed"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class InvestigationResult:
+    """
+    The outcome of InvestigatorService.investigate() — the "verify before file"
+    pass that reproduces each suspected bug on the live app and either confirms
+    it with evidence or downgrades it (bias toward not_reproduced).
+
+    Attributes:
+        verdicts (list[InvestigationVerdict]): One verdict per suspected bug.
+        error (str | None): Set only when the investigation failed outright.
+        note (str): Optional human note (e.g. why nothing could be reproduced).
+    """
+
+    verdicts: list = field(default_factory=list)
+    error: str | None = None
+    note: str = ""
+
+    @property
+    def confirmed(self) -> list:
+        """Bugs reproduced AND judged to be genuine application defects."""
+        return [v for v in self.verdicts if v.status == "confirmed"]
+
+    @property
+    def not_reproduced(self) -> list:
+        """Suspected bugs that did not hold up — false alarms."""
+        return [v for v in self.verdicts if v.status == "not_reproduced"]
+
+    @property
+    def inconclusive(self) -> list:
+        """Suspected bugs that could not be verified either way."""
+        return [v for v in self.verdicts if v.status == "inconclusive"]
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    def summary(self) -> str:
+        """One-line human summary of the investigation."""
+        return (f"{len(self.confirmed)} confirmed, "
+                f"{len(self.not_reproduced)} not reproduced, "
+                f"{len(self.inconclusive)} inconclusive")
+
+    def to_dict(self) -> dict:
+        return {
+            "confirmed": len(self.confirmed),
+            "not_reproduced": len(self.not_reproduced),
+            "inconclusive": len(self.inconclusive),
+            "verdicts": [v.to_dict() for v in self.verdicts],
+            "error": self.error,
+            "note": self.note,
+            "success": self.success,
+        }
+
+
+@dataclass
 class ExportResult:
     """
     The outcome of an ExportService.export() call.
