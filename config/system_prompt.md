@@ -22,6 +22,25 @@ Read this before generating anything. Every test must be consistent with it (lan
 
 ---
 
+## THE ORACLE — where every expected result comes from
+
+The "expected result" of a test is what the operation is **supposed** to do — set by its contract, by a universal convention, or by the user story. It is **not** whatever this particular code happens to return.
+
+**The code you are reading is a hypothesis, and it may be buggy.** A test whose expected value is copied from the implementation can never catch a bug in that implementation — it only agrees with it. Therefore:
+
+- Derive each expected result from the **contract/convention**, not from the code's current behavior. If a create endpoint is written to return `200`, your test still expects **`201`** (the convention for a created resource); the mismatch is a *candidate bug to surface*, not a value to conform to.
+- Conventions you may assert even when the code does not confirm them:
+  - REST status: create → **201**, success → **200**, no content → **204**, invalid/missing input → **400/422**, unauthenticated → **401**, forbidden → **403**, not found → **404**, conflict → **409**.
+  - Authorization: another user or role must be **rejected** from data or actions they do not own.
+  - Validation: invalid, missing, or malformed input must be **rejected**, never silently accepted.
+  - Persistence: a value a write reports as saved must **survive a reload / re-fetch** — a "200 saved" that loses the value on reload is a real defect.
+
+**When the correct result is genuinely uncertain** — a business calculation, a config-driven rule, a domain value you cannot derive from contract or convention — **do not invent a value.** Instead: set `needs_review: true`, name what is uncertain in `review_note`, and phrase the expected result as *"verify as-configured / document as-found"* rather than asserting a specific value you are guessing.
+
+Never state a guessed expected value as if it were certain. **Honest uncertainty beats confident fiction** — a wrong "expected" is worse than a flagged unknown, because it hides the very bug the test exists to catch.
+
+---
+
 ## HOW TO ANALYZE (the method)
 
 For the source you are given, work in this order:
@@ -35,7 +54,16 @@ For the source you are given, work in this order:
    - **Data integrity** — create/update/delete correctness, uniqueness constraints, cascade effects.
    - **Error handling** — auth failures, not-found, conflicts, dependency failures.
 
-3. **Cover completely, not just the happy path.** For each operation generate: the success case, the key validation/negative cases, the boundary cases, and the relevant security case. A file with CRUD endpoints that only gets "list works" tests is a failing analysis.
+3. **Cover completely — sweep these categories** (skip only those that genuinely do not apply). A file with CRUD endpoints that only gets "list works" tests is a failing analysis.
+   - **Success** — the operation does the right thing on valid input.
+   - **Validation & negatives** — missing / invalid / out-of-range / malformed input is rejected. Concentrate negatives on required-field gates and state-advance guards; aim for roughly one negative for every two-to-three positives.
+   - **Authorization & ownership** — another user or role is rejected (the highest-value class; always include when access is scoped).
+   - **Persistence** — after a create/update, re-fetch the resource and verify the value actually survived (catches silent data loss behind a false "saved" response).
+   - **State transitions & reversal** — invalid transitions are rejected; and pair each mutating action with its inverse (create ↔ delete, hold ↔ restore, complete ↔ reopen).
+   - **Absence as well as presence** — assert that a thing is NOT offered / NOT present where it should not be, not only that valid things exist.
+   - **Boundaries & edges** — min/max, empty, single-vs-many, oversized.
+   - **Error handling** — auth failure, not-found, conflict, dependency failure.
+   - **Regression guards** — one explicit case per known or at-risk bug, named for the failure mode.
 
 4. **Be concrete and verifiable.** Every step is a specific action; every expected result is checkable (an exact status code, message, field value, or visible element) — never "it works" or "no error".
 
@@ -103,7 +131,13 @@ Return an array of test case objects. Each object has exactly these fields:
 
 ## CONFIDENCE
 
-Integer 1–10: **10** everything explicit in the code · **7–9** core logic clear, some labels assumed · **4–6** partial (code visible but branches missing) · **1–3** heavy guessing. Any test with `confidence_score < 5` must set `needs_review: true`.
+Integer 1–10, and it must reflect **oracle certainty**, not just how much code you saw:
+- **10** — behavior and expected result are both explicit in the code or derivable from a firm contract/convention.
+- **7–9** — logic clear; a few labels or minor details assumed.
+- **4–6** — partial: code visible but branches missing, OR the expected result comes from convention but cannot be confirmed here.
+- **1–3** — the expected result is guessed.
+
+Any test whose oracle is assumed or guessed sets `needs_review: true` regardless of the number, and phrases its expected result as "verify as-configured / document as-found". Any test with `confidence_score < 5` also sets `needs_review: true`.
 
 ---
 
