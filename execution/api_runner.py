@@ -343,6 +343,110 @@ class APIRunner:
             "duration_ms":   0,
         }
 
+    # ── API step execution (real HTTP) ──────────────────────────────────────────
+
+    @staticmethod
+    def _render(obj, variables: dict):
+        """
+        Substitute {{name}} placeholders in strings (recursively in dicts/lists).
+
+        {{random}} and any saved variable (e.g. {{token}}) are replaced from the
+        variables dict; unknown placeholders are left untouched.
+
+        Args:
+            obj: A string, dict, list, or scalar to render.
+            variables (dict): Placeholder values.
+
+        Returns:
+            The rendered object of the same shape.
+        """
+        import re
+
+        if isinstance(obj, str):
+            def _sub(m):
+                val = variables.get(m.group(1))
+                return str(val) if val is not None else m.group(0)
+            return re.sub(r"\{\{(\w+)\}\}", _sub, obj)
+        if isinstance(obj, dict):
+            return {k: APIRunner._render(v, variables) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [APIRunner._render(v, variables) for v in obj]
+        return obj
+
+    def execute_api_step(self, step: dict, variables: dict) -> dict:
+        """
+        Execute one api_step as a real HTTP request and assert its status.
+
+        api_step shape:
+            {step_number, method, path, body?, expected_status,
+             save? {var: response_key}, use_auth?}
+
+        Placeholders {{random}} / {{var}} in path and body are rendered from
+        ``variables``; ``save`` extracts response JSON fields into ``variables``
+        (e.g. an access token) for later steps; ``use_auth`` sends the saved
+        token as a Bearer header.
+
+        Args:
+            step (dict): The api_step definition.
+            variables (dict): Mutable per-test-case variable store.
+
+        Returns:
+            dict: Step result (step_number, action, status, actual_result,
+                  error, response_code, duration_ms).
+        """
+        method   = (step.get("method") or "GET").upper()
+        path     = self._render(step.get("path", ""), variables)
+        body     = self._render(step.get("body"), variables)
+        expected = step.get("expected_status")
+        save     = step.get("save") or {}
+
+        result = {
+            "step_number":   step.get("step_number", 0),
+            "action":        f"{method} {path}",
+            "status":        "PASS",
+            "actual_result": "",
+            "error":         None,
+            "response_code": None,
+            "duration_ms":   0,
+        }
+
+        if not self.session:
+            return self._step_error(step, "APIRunner not set up — call setup() first")
+
+        headers = {}
+        if step.get("use_auth") and variables.get("token"):
+            headers["Authorization"] = f"Bearer {variables['token']}"
+
+        t0 = time.time()
+        try:
+            resp = self.session.request(
+                method, self._resolve_url(path),
+                json=body if isinstance(body, (dict, list)) else None,
+                headers=headers, timeout=self.timeout,
+            )
+            result["response_code"] = resp.status_code
+            result["actual_result"] = f"{method} {path} → {resp.status_code}"
+
+            if expected is not None and resp.status_code != int(expected):
+                result["status"] = "FAIL"
+                result["error"]  = (f"Expected status {expected}, got "
+                                    f"{resp.status_code} — {resp.text[:150]}")
+            elif save:
+                try:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        for var_name, resp_key in save.items():
+                            if resp_key in data:
+                                variables[var_name] = data[resp_key]
+                except Exception:
+                    pass
+        except Exception as exc:
+            result["status"] = "FAIL"
+            result["error"]  = str(exc)
+
+        result["duration_ms"] = int((time.time() - t0) * 1000)
+        return result
+
     # ── Test case / batch execution ────────────────────────────────────────────
 
     def execute_test_case(self, test_case: dict) -> dict:
@@ -367,23 +471,37 @@ class APIRunner:
                 - bug_reported  (bool)
                 - bug_key       (str | None)
         """
-        steps = test_case.get("automation_steps") or test_case.get("manual_steps") or []
-        if not steps:
-            logger.warning(
-                "QAX APIRunner: test case %s has no steps — marking SKIP",
-                test_case.get("test_case_id", "?"),
-            )
+        import uuid
 
+        api_steps = test_case.get("api_steps") or []
         t0           = time.time()
         step_results = []
         overall      = "PASS"
 
-        for step in steps:
-            r = self.execute_step(step)
-            step_results.append(r)
-            if r["status"] == "FAIL":
-                overall = "FAIL"
-                break  # stop on first failure
+        if api_steps:
+            # Real HTTP execution, with a per-test-case variable store so steps
+            # can chain (e.g. save a token on login, reuse it on the next call).
+            variables = {"random": uuid.uuid4().hex[:8]}
+            for step in api_steps:
+                r = self.execute_api_step(step, variables)
+                step_results.append(r)
+                if r["status"] == "FAIL":
+                    overall = "FAIL"
+                    break
+        else:
+            # No API steps → the UI-shaped automation_steps can't be executed
+            # meaningfully over HTTP. Mark SKIP rather than a hollow PASS.
+            steps = test_case.get("automation_steps") or test_case.get("manual_steps") or []
+            if not steps:
+                overall = "SKIP"
+            else:
+                overall = "SKIP"
+                step_results.append({
+                    "step_number": 0, "action": "api_steps",
+                    "status": "SKIP", "actual_result": "",
+                    "error": "No api_steps to execute (test is UI-shaped)",
+                    "response_code": None, "duration_ms": 0,
+                })
 
         return {
             "test_case_id":     test_case.get("test_case_id", ""),
@@ -392,6 +510,7 @@ class APIRunner:
             "mode":             "api",
             "duration_seconds": round(time.time() - t0, 2),
             "steps_results":    step_results,
+            "steps":            step_results,
             "bug_reported":     False,
             "bug_key":          None,
         }

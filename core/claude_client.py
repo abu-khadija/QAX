@@ -516,6 +516,37 @@ class ClaudeClient:
                 f"{repo_context.strip()}\n"
             )
 
+        # ── API steps instruction (real, executable HTTP) ─────────────────────
+        # When testing an API/endpoint file, ask for executable api_steps so the
+        # runner can hit the live endpoints — not just UI-shaped automation_steps.
+        api_steps_instruction = ""
+        if test_type in ("api", "e2e"):
+            api_steps_instruction = (
+                "\n\nThis file exposes HTTP endpoints. For EACH test case, also include an "
+                "\"api_steps\" array of REAL, EXECUTABLE HTTP requests so the test can run "
+                "against the live API. Example:\n"
+                "  \"api_steps\": [\n"
+                "    {\"step_number\": 1, \"method\": \"POST\", \"path\": \"/auth/register\", "
+                "\"body\": {\"email\": \"user_{{random}}@test.com\", \"password\": \"Secret123!\"}, "
+                "\"expected_status\": 201},\n"
+                "    {\"step_number\": 2, \"method\": \"POST\", \"path\": \"/auth/login\", "
+                "\"body\": {\"email\": \"user_{{random}}@test.com\", \"password\": \"Secret123!\"}, "
+                "\"expected_status\": 200, \"save\": {\"token\": \"access_token\"}},\n"
+                "    {\"step_number\": 3, \"method\": \"GET\", \"path\": \"/auth/me\", "
+                "\"expected_status\": 200, \"use_auth\": true}\n"
+                "  ]\n"
+                "Rules for api_steps:\n"
+                "- Use the EXACT endpoint paths, HTTP methods, and request/response field names from the code.\n"
+                "- expected_status must be the real status the endpoint returns for THIS scenario "
+                "(e.g. 201 create, 200 ok, 400 validation, 401 unauthorized, 404 not found, 422 unprocessable).\n"
+                "- To reuse a value from a response (e.g. an auth token), add \"save\": "
+                "{\"token\": \"<response_field>\"} on the step that returns it, then \"use_auth\": true "
+                "on later steps that need it.\n"
+                "- For values that must be unique per run (e.g. a new user email), use {{random}} "
+                "as a placeholder — the SAME {{random}} resolves to the same value within a test case.\n"
+                "- Keep api_steps minimal and derived only from the code."
+            )
+
         prompt = f"""Analyze the following source code file and generate comprehensive test cases.
 
 **File Path:** {file_path}
@@ -531,7 +562,7 @@ Generate test cases covering:
 2. Validation failures (missing/invalid inputs)
 3. Permission/role boundary checks
 4. Edge cases and boundary conditions
-5. Error handling paths{bug_patterns_instruction}{user_story_instruction}
+5. Error handling paths{bug_patterns_instruction}{user_story_instruction}{api_steps_instruction}
 
 - Set needs_review=true for any UI element you cannot confirm from this code.
 - Set generated_from_file to exactly: {file_path}

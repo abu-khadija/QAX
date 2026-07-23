@@ -209,6 +209,24 @@
             }
           }
         }
+      },
+      "api_steps": {
+        "type": "array",
+        "description": "OPTIONAL — executable HTTP steps for API testing. When present, the API runner runs these as real HTTP requests and asserts the status code.",
+        "items": {
+          "type": "object",
+          "required": ["step_number", "method", "path"],
+          "additionalProperties": true,
+          "properties": {
+            "step_number": { "type": "integer", "minimum": 1 },
+            "method": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"] },
+            "path": { "type": "string", "description": "Endpoint path, e.g. /auth/login. May contain {{var}} placeholders." },
+            "body": { "description": "Optional JSON request body. May contain {{var}} placeholders." },
+            "expected_status": { "type": "integer", "description": "Expected HTTP status code." },
+            "save": { "type": "object", "description": "Map of variable name to response JSON key to capture, e.g. {\"token\": \"access_token\"}." },
+            "use_auth": { "type": "boolean", "description": "Send the saved token as an Authorization: Bearer header." }
+          }
+        }
       }
     },
 
