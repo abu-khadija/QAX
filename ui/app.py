@@ -1004,20 +1004,138 @@ def _wiz_step_understand(project: str) -> None:
             _wiz_go(4)
 
 
+def _run_wizard_execution(results: list[dict], base_url: str, mode: str) -> None:
+    """Execute the generated tests against a live URL and store the result."""
+    from services.context import QAXContext
+    from services.execution_service import ExecutionService
+
+    ctx = QAXContext.from_env(dry_run=st.session_state.get("cfg_dry", True))
+    with st.spinner(f"Running {len(results)} test(s) against {base_url}…"):
+        try:
+            result = ExecutionService(ctx).execute(
+                results, mode=mode, base_url=base_url, stop_on_fail=False)
+        except Exception as exc:
+            st.error(f"Execution error: {exc}")
+            return
+
+    st.session_state["execution_result"] = result
+    if result.error:
+        st.warning(result.error)
+    else:
+        st.toast(f"Ran {result.total} — {result.passed} passed, {result.failed} failed",
+                 icon="▶️")
+
+
+def _wiz_render_execution(result) -> None:
+    """Render execution metrics and per-test results."""
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total", result.total)
+    m2.metric("Passed", result.passed)
+    m3.metric("Failed", result.failed)
+    m4.metric("Pass rate", f"{result.pass_rate:.0f}%")
+    st.divider()
+    for r in result.results:
+        status = r.get("status", "?")
+        icon = {"PASS": "✅", "FAIL": "❌", "ERROR": "⚠️", "SKIP": "➖"}.get(status, "•")
+        tc_id = r.get("test_case_id", r.get("id", "?"))
+        title = str(r.get("title", ""))[:55]
+        st.markdown(f"{icon} **[{status}]** {tc_id} — {title}")
+        if status in ("FAIL", "ERROR"):
+            for step in r.get("steps", []):
+                if step.get("status") in ("FAIL", "ERROR"):
+                    st.caption(f"↳ step {step.get('step_number', '?')}: "
+                               f"{str(step.get('error', ''))[:110]}")
+            if r.get("error"):
+                st.caption(f"↳ {str(r['error'])[:130]}")
+
+
 def _wiz_step_execute() -> None:
-    """Step 6 — E2E execution (placeholder)."""
-    _wiz_coming_soon(
-        6, "Step 6 · Execute (E2E)",
-        "Run the generated tests against your live app URL with Playwright, "
-        "and auto-heal broken selectors.",
-        back_to=5, next_to=7, next_label="Skip to Bug reports →")
+    """Step 6 — run the generated tests against a live app."""
+    st.subheader("Step 6 · Execute (E2E)")
+    results = st.session_state.get("analyze_results") or []
+    if not results:
+        st.info("Generate test cases first (step 4).")
+        st.divider()
+        if st.button("← Back", use_container_width=True, key="wiz_back_6"):
+            _wiz_go(5)
+        return
+
+    st.caption(f"{len(results)} test case(s) ready to run against a live app.")
+    st.session_state.setdefault("wiz_base_url", "http://localhost:8000")
+    st.session_state.setdefault("wiz_exec_mode", "api")
+    st.text_input("Live app URL", key="wiz_base_url",
+                  help="The running app to test against (e.g. a staging URL or localhost).")
+    st.radio("Mode", ["api", "ui"], key="wiz_exec_mode", horizontal=True,
+             help="api = hit HTTP endpoints directly (no browser) · "
+                  "ui = Playwright browser (needs Python 3.11/3.12).")
+
+    if st.button("▶️ Run tests", type="primary", key="wiz_exec_run"):
+        _run_wizard_execution(results, st.session_state.get("wiz_base_url", ""),
+                              st.session_state.get("wiz_exec_mode", "api"))
+
+    ex = st.session_state.get("execution_result")
+    if ex:
+        _wiz_render_execution(ex)
+
+    st.divider()
+    b1, _, b2 = st.columns([1, 2, 1])
+    with b1:
+        if st.button("← Back", use_container_width=True, key="wiz_back_6"):
+            _wiz_go(5)
+    with b2:
+        if st.button("Next: Bug reports →", use_container_width=True,
+                     key="wiz_next_6", disabled=not ex):
+            _wiz_go(7)
+
+
+def _run_wizard_bugreport(execution) -> None:
+    """Build a standalone HTML report from the execution result."""
+    from services.context import QAXContext
+    from services.reporting_service import ReportingService
+
+    ctx = QAXContext.from_env()
+    with st.spinner("Building the report…"):
+        rep = ReportingService(ctx).report(execution)
+    if rep.error:
+        st.warning(rep.error)
+    elif rep.html_path:
+        st.session_state["report_path"] = rep.html_path
+        st.toast("Report ready", icon="📄")
 
 
 def _wiz_step_bugreports() -> None:
-    """Step 7 — bug reports (placeholder)."""
+    """Step 7 — turn execution failures into a bug report."""
     st.subheader("Step 7 · Bug reports")
-    st.info("🚧 Turn execution failures into structured bug reports — a standalone "
-            "HTML report or Jira tickets.\n\nComing soon — not built yet.")
+    ex = st.session_state.get("execution_result")
+    if not ex:
+        st.info("Run the tests first (step 6).")
+    else:
+        failed = [r for r in ex.results if r.get("status") in ("FAIL", "ERROR")]
+        st.caption(f"{ex.failed} failing / {ex.total} test(s) — "
+                   f"{len(failed)} bug candidate(s).")
+        if st.button("📄 Build bug report", type="primary", key="wiz_report_run"):
+            _run_wizard_bugreport(ex)
+
+        for r in failed:
+            st.markdown(f"**🐞 {r.get('test_case_id', '?')} — "
+                        f"{str(r.get('title', ''))[:60]}**")
+            for step in r.get("steps", []):
+                if step.get("status") in ("FAIL", "ERROR"):
+                    st.caption(f"↳ step {step.get('step_number', '?')}: "
+                               f"{str(step.get('error', ''))[:130]}")
+            if r.get("error"):
+                st.caption(f"↳ {str(r['error'])[:150]}")
+
+        path = st.session_state.get("report_path")
+        if path and Path(path).exists():
+            try:
+                st.download_button("⬇️ Download HTML report",
+                                   data=Path(path).read_text(encoding="utf-8"),
+                                   file_name="qax_report.html", mime="text/html",
+                                   use_container_width=True)
+            except Exception:
+                st.caption(f"Report saved: {path}")
+
     st.divider()
     b1, _, b2 = st.columns([1, 2, 1])
     with b1:
@@ -1025,7 +1143,8 @@ def _wiz_step_bugreports() -> None:
             _wiz_go(6)
     with b2:
         if st.button("↺ Start over", use_container_width=True, key="wiz_restart2"):
-            for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension", "repo_context"):
+            for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension",
+                       "repo_context", "execution_result", "report_path"):
                 st.session_state[_k] = None
             _wiz_go(1)
 
