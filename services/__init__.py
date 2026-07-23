@@ -48,6 +48,7 @@ from services.results import (
     InvestigationResult,
     InvestigationVerdict,
     ReportResult,
+    TourResult,
 )
 
 __all__ = [
@@ -70,4 +71,5 @@ __all__ = [
     "FailureVerdict",
     "InvestigationResult",
     "InvestigationVerdict",
+    "TourResult",
 ]

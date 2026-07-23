@@ -301,6 +301,82 @@ class CriticResult:
 
 
 @dataclass
+class TourResult:
+    """
+    The outcome of TourService.tour() — the app's real UI surface, observed by
+    driving a browser over the running app (the UNDERSTAND-mode "live tour").
+
+    Attributes:
+        base_url (str): The app root that was toured.
+        screens (list[dict]): One per visited screen —
+            {url, title, elements: [{tag, type, testid, selector, label}], errors}.
+        login_ok (bool | None): Whether the optional login step succeeded.
+        error (str | None): Set only when the tour failed outright.
+    """
+
+    base_url: str = ""
+    screens: list = field(default_factory=list)
+    login_ok: bool | None = None
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    @property
+    def screen_count(self) -> int:
+        return len(self.screens)
+
+    @property
+    def element_count(self) -> int:
+        """Total interactive elements observed across all screens."""
+        return sum(len(s.get("elements", [])) for s in self.screens)
+
+    @property
+    def console_errors(self) -> list:
+        """Console/page errors captured across all screens (with their screen)."""
+        out = []
+        for s in self.screens:
+            for e in s.get("errors", []):
+                out.append({"url": s.get("url", ""), "error": e})
+        return out
+
+    def as_context(self) -> str:
+        """
+        Build an "OBSERVED UI SURFACE" text block to inject into generation, so
+        tests are grounded in real screens and use real selectors.
+
+        Returns:
+            str: A compact labelled block, or "" when nothing was observed.
+        """
+        if not self.screens:
+            return ""
+        lines = ["OBSERVED UI SURFACE (from a live tour — use these REAL selectors, "
+                 "do not invent element names):"]
+        for s in self.screens:
+            url = s.get("url", "")
+            title = s.get("title", "")
+            lines.append(f"\nScreen {url}" + (f" — {title}" if title else ""))
+            for el in s.get("elements", [])[:40]:
+                sel = el.get("selector") or "(no stable selector)"
+                kind = el.get("tag", "")
+                if el.get("type"):
+                    kind += f"[{el['type']}]"
+                label = el.get("label", "")
+                lines.append(f"  - {sel}  · {kind}" + (f" · \"{label}\"" if label else ""))
+            if s.get("errors"):
+                lines.append(f"  ! {len(s['errors'])} console/page error(s) on this screen")
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["success"] = self.success
+        data["screen_count"] = self.screen_count
+        data["element_count"] = self.element_count
+        return data
+
+
+@dataclass
 class InvestigationVerdict:
     """
     The Investigator's verdict on one suspected bug after trying to reproduce it.

@@ -569,6 +569,7 @@ Cover EVERY operation this code exposes (each endpoint / function / branch) — 
 5. Error-handling paths (auth failure, not-found, conflict, dependency failure){bug_patterns_instruction}{user_story_instruction}{api_steps_instruction}
 
 Coverage doctrine (apply in addition to the above):
+- OBSERVED UI SURFACE: if the context above lists real screens and selectors from a live tour, generate UI tests grounded in those screens and set every automation_steps[].selector_key to the EXACT real selector shown (e.g. [data-testid="..."]) — never a TODO_ placeholder for an element that appears in the surface. Only tour-observed screens/elements are real; do not invent others.
 - Persistence: after a create/update, re-fetch the resource and verify the value actually survived a reload — a "saved"/200 response that loses the value is a real bug.
 - Absence & reversal: assert that forbidden things are NOT offered/present, and pair each mutating action with its inverse (create/delete, hold/restore).
 - ORACLE: every expected result comes from the operation's contract/convention or the user story — NOT from whatever this (possibly buggy) code returns. If a create returns 200, still expect 201 and surface the mismatch as a candidate bug. When the true result is genuinely uncertain, set needs_review=true and phrase the expected result as "verify as-configured / document as-found" instead of inventing a value.

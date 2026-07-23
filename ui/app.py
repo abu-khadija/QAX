@@ -993,6 +993,30 @@ def _wiz_step_understand(project: str) -> None:
     if comp:
         _wiz_render_comprehension(comp)
 
+    with st.expander("🌐 Tour the live app (optional — needs the app running + Playwright)"):
+        st.caption("QAX drives a browser over the running app to learn its real screens "
+                   "and selectors — so UI tests are grounded in reality and actually runnable.")
+        st.session_state.setdefault("tour_url", "http://localhost:5173")
+        st.text_input("App URL", key="tour_url")
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            st.text_input("Login email (optional)", key="tour_email")
+        with tc2:
+            st.text_input("Login password (optional)", key="tour_pass", type="password")
+        if st.button("🌐 Tour the live app", key="wiz_tour_run"):
+            _login = None
+            if st.session_state.get("tour_email"):
+                _login = {"email": st.session_state.get("tour_email", ""),
+                          "password": st.session_state.get("tour_pass", "")}
+            _run_wizard_tour(st.session_state.get("tour_url", ""), _login)
+        tour = st.session_state.get("tour_result")
+        if tour and not tour.error:
+            st.success(f"Toured {tour.screen_count} screen(s), {tour.element_count} real "
+                       f"element(s), {len(tour.console_errors)} console error(s). "
+                       f"Generation will use these real selectors.")
+            for s in tour.screens:
+                st.caption(f"↳ {s.get('url', '')} — {len(s.get('elements', []))} elements")
+
     st.divider()
     b1, _, b2 = st.columns([1, 2, 1])
     with b1:
@@ -1002,6 +1026,32 @@ def _wiz_step_understand(project: str) -> None:
         _lbl = "Next: Generate →" if comp else "Skip to Generate →"
         if st.button(_lbl, use_container_width=True, key="wiz_next_3"):
             _wiz_go(4)
+
+
+def _run_wizard_tour(base_url: str, login: dict | None) -> None:
+    """Tour the live app and merge its real UI surface into the generation context."""
+    from services.context import QAXContext
+    from services.tour_service import TourService
+
+    if not base_url:
+        st.warning("Enter the app URL first.")
+        return
+    ctx = QAXContext.from_env()
+    with st.spinner(f"Touring {base_url} (driving a real browser)…"):
+        tour = TourService(ctx).tour(base_url, login=login)
+    st.session_state["tour_result"] = tour
+    if tour.error:
+        st.warning(tour.error)
+        return
+    # Merge comprehension + observed surface so generation uses the real selectors.
+    parts = []
+    comp = st.session_state.get("comprehension")
+    if comp:
+        parts.append(comp.as_context())
+    parts.append(tour.as_context())
+    st.session_state["repo_context"] = "\n\n".join(p for p in parts if p)
+    st.toast(f"Toured {tour.screen_count} screen(s), {tour.element_count} element(s)",
+             icon="🌐")
 
 
 def _run_wizard_execution(results: list[dict], base_url: str, mode: str) -> None:
@@ -1263,7 +1313,7 @@ def _wiz_step_bugreports() -> None:
         if st.button("↺ Start over", use_container_width=True, key="wiz_restart2"):
             for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension",
                        "repo_context", "execution_result", "report_path",
-                       "critic_result", "investigation_result"):
+                       "critic_result", "investigation_result", "tour_result"):
                 st.session_state[_k] = None
             _wiz_go(1)
 
