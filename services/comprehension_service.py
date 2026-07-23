@@ -171,15 +171,21 @@ class RepoComprehensionService:
     def _build_prompt(digest: str, file_count: int) -> str:
         """Build the comprehension prompt."""
         return f"""You are a senior QA engineer reviewing a codebase before writing tests.
+Your goal is to produce a map that a test generator can turn into HIGH-VALUE tests —
+the ones that catch real bugs, not just happy-path checks.
 
-Below are {file_count} source file(s) (each truncated). Read them and produce a
-concise, high-level map of the application to guide test design.
-
-Return ONLY a JSON object with these keys:
+Below are {file_count} source file(s) (each truncated). Read them and return ONLY a JSON object:
 - "overview": one or two sentences on what this app/module does.
 - "main_flows": array of the key user/business flows (short phrases).
-- "entry_points": array of entry points (controllers, routes, handlers) as "file: what it does".
-- "risk_areas": array of the riskiest areas to test hard (e.g. auth, permissions, payments, data mutations, validation).
+- "entry_points": array of entry points as "path: HTTP method + route / handler purpose".
+- "risk_areas": array of CONCRETE, TESTABLE risks — each phrased so a test can target it.
+  Prioritise and always include when present:
+    * Authorization / ownership boundaries — "user A must not access user B's <resource>",
+      "role X must not reach action Y". (Highest value, most often missed — look hard for
+      per-user/per-role scoping such as owner_id filters or permission checks.)
+    * Input validation gaps, invalid state transitions, data-integrity/uniqueness, error paths.
+  Write each as a specific claim to verify, e.g. "Deleting another user's todo must return 404",
+  not a vague label like "authorization".
 - "files": array of {{"path": "...", "role": "one-line role"}} for the most important files.
 
 Source:

@@ -536,6 +536,10 @@ class ClaudeClient:
                 "\"expected_status\": 200, \"use_auth\": true}\n"
                 "  ]\n"
                 "Rules for api_steps:\n"
+                "- SELF-CONTAINED: each test sets up ALL its own prerequisites. If an endpoint "
+                "needs auth, the FIRST steps must register a fresh user (email \"user_{{random}}@test.com\") "
+                "and then log in — never start with login for a user you did not just register, and never "
+                "assume any user, record, or session already exists.\n"
                 "- Use the EXACT endpoint paths, HTTP methods, and request/response field names from the code.\n"
                 "- expected_status must be the real status the endpoint returns for THIS scenario "
                 "(e.g. 201 create, 200 ok, 400 validation, 401 unauthorized, 404 not found, 422 unprocessable).\n"
@@ -557,12 +561,12 @@ class ClaudeClient:
 {code}
 ```
 {deps_section}
-Generate test cases covering:
+Cover EVERY operation this code exposes (each endpoint / function / branch) — not just the first one. For each, generate the relevant cases from:
 1. Happy path (successful execution)
-2. Validation failures (missing/invalid inputs)
-3. Permission/role boundary checks
-4. Edge cases and boundary conditions
-5. Error handling paths{bug_patterns_instruction}{user_story_instruction}{api_steps_instruction}
+2. Validation failures (missing / invalid / out-of-range / malformed input)
+3. **Authorization & ownership boundaries** — if data or actions are scoped to a user or role, test that another user/role is rejected (e.g. accessing/modifying/deleting someone else's resource → expect 403/404). This is the highest-value class — include it whenever the code scopes access.
+4. State-transition and data-integrity cases (invalid transitions, uniqueness, cascade effects)
+5. Error-handling paths (auth failure, not-found, conflict, dependency failure){bug_patterns_instruction}{user_story_instruction}{api_steps_instruction}
 
 - Set needs_review=true for any UI element you cannot confirm from this code.
 - Set generated_from_file to exactly: {file_path}
