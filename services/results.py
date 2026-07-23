@@ -222,6 +222,85 @@ class ComprehensionResult:
 
 
 @dataclass
+class FailureVerdict:
+    """
+    The Critic's verdict on a single failed test.
+
+    Attributes:
+        test_case_id (str): The failing test's id.
+        title (str): The failing test's title.
+        classification (str): "real_bug" | "broken_test" | "uncertain".
+        reason (str): One-sentence explanation of the verdict.
+        suggestion (str): How to fix the test, or how to reproduce the bug.
+        failed_step (int | None): Step number where it first failed.
+    """
+
+    test_case_id: str = ""
+    title: str = ""
+    classification: str = "uncertain"
+    reason: str = ""
+    suggestion: str = ""
+    failed_step: int | None = None
+
+    @property
+    def is_real_bug(self) -> bool:
+        return self.classification == "real_bug"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class CriticResult:
+    """
+    The outcome of CriticService.review() — the "verify, don't trust" pass that
+    separates real application bugs from broken/self-inflicted test failures.
+
+    Attributes:
+        verdicts (list[FailureVerdict]): One verdict per failed test.
+        error (str | None): Set only when the review failed outright.
+    """
+
+    verdicts: list = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def real_bugs(self) -> list:
+        """Verdicts classified as genuine application bugs."""
+        return [v for v in self.verdicts if v.classification == "real_bug"]
+
+    @property
+    def broken_tests(self) -> list:
+        """Verdicts classified as the test's own fault."""
+        return [v for v in self.verdicts if v.classification == "broken_test"]
+
+    @property
+    def uncertain(self) -> list:
+        """Verdicts the Critic could not classify confidently."""
+        return [v for v in self.verdicts if v.classification == "uncertain"]
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    def summary(self) -> str:
+        """One-line human summary of the review."""
+        return (f"{len(self.real_bugs)} real bug(s), "
+                f"{len(self.broken_tests)} broken test(s), "
+                f"{len(self.uncertain)} uncertain")
+
+    def to_dict(self) -> dict:
+        return {
+            "real_bugs": len(self.real_bugs),
+            "broken_tests": len(self.broken_tests),
+            "uncertain": len(self.uncertain),
+            "verdicts": [v.to_dict() for v in self.verdicts],
+            "error": self.error,
+            "success": self.success,
+        }
+
+
+@dataclass
 class ExportResult:
     """
     The outcome of an ExportService.export() call.

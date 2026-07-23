@@ -520,7 +520,7 @@ class ClaudeClient:
         # When testing an API/endpoint file, ask for executable api_steps so the
         # runner can hit the live endpoints — not just UI-shaped automation_steps.
         api_steps_instruction = ""
-        if test_type in ("api", "e2e"):
+        if test_type in ("api", "e2e", "security", "integration", "negative", "boundary"):
             api_steps_instruction = (
                 "\n\nThis file exposes HTTP endpoints. For EACH test case, also include an "
                 "\"api_steps\" array of REAL, EXECUTABLE HTTP requests so the test can run "

@@ -1103,8 +1103,31 @@ def _run_wizard_bugreport(execution) -> None:
         st.toast("Report ready", icon="📄")
 
 
+def _run_wizard_critic() -> None:
+    """Run the Critic over the execution result — separate real bugs from broken tests."""
+    from services.context import QAXContext
+    from services.critic_service import CriticService
+
+    ex = st.session_state.get("execution_result")
+    results = st.session_state.get("analyze_results") or []
+    if not ex:
+        return
+    ctx = QAXContext.from_env()
+    try:
+        with st.spinner("Investigating failures (verify, don't trust)…"):
+            crit = CriticService(ctx).review(ex, results)
+    except Exception as exc:
+        st.error(f"Critic error: {exc}")
+        return
+    st.session_state["critic_result"] = crit
+    if crit.error:
+        st.warning(crit.error)
+    else:
+        st.toast(crit.summary(), icon="🕵️")
+
+
 def _wiz_step_bugreports() -> None:
-    """Step 7 — turn execution failures into a bug report."""
+    """Step 7 — investigate failures, then report only the real bugs."""
     st.subheader("Step 7 · Bug reports")
     ex = st.session_state.get("execution_result")
     if not ex:
@@ -1112,19 +1135,56 @@ def _wiz_step_bugreports() -> None:
     else:
         failed = [r for r in ex.results if r.get("status") in ("FAIL", "ERROR")]
         st.caption(f"{ex.failed} failing / {ex.total} test(s) — "
-                   f"{len(failed)} bug candidate(s).")
-        if st.button("📄 Build bug report", type="primary", key="wiz_report_run"):
-            _run_wizard_bugreport(ex)
+                   f"{len(failed)} to investigate.")
 
-        for r in failed:
-            st.markdown(f"**🐞 {r.get('test_case_id', '?')} — "
-                        f"{str(r.get('title', ''))[:60]}**")
-            for step in r.get("steps", []):
-                if step.get("status") in ("FAIL", "ERROR"):
-                    st.caption(f"↳ step {step.get('step_number', '?')}: "
-                               f"{str(step.get('error', ''))[:130]}")
-            if r.get("error"):
-                st.caption(f"↳ {str(r['error'])[:150]}")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🕵️ Investigate failures", type="primary",
+                         key="wiz_critic_run", disabled=not failed,
+                         help="The Critic checks each failure: real app bug, or the "
+                              "test's own fault? Only real bugs should be reported."):
+                _run_wizard_critic()
+        with c2:
+            if st.button("📄 Build bug report", key="wiz_report_run",
+                         disabled=not failed):
+                _run_wizard_bugreport(ex)
+
+        crit = st.session_state.get("critic_result")
+        if crit and not crit.error:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("🐞 Real bugs", len(crit.real_bugs))
+            m2.metric("🔧 Broken tests", len(crit.broken_tests))
+            m3.metric("❓ Uncertain", len(crit.uncertain))
+            st.divider()
+
+            if crit.real_bugs:
+                st.markdown("#### 🐞 Real bugs — worth reporting")
+                for v in crit.real_bugs:
+                    st.markdown(f"**{str(v.title)[:70]}**")
+                    st.caption(f"↳ why: {str(v.reason)[:180]}")
+                    if v.suggestion:
+                        st.caption(f"↳ reproduce: {str(v.suggestion)[:180]}")
+            if crit.broken_tests:
+                with st.expander(f"🔧 {len(crit.broken_tests)} broken test(s) — "
+                                 f"not app bugs (the test's own fault)"):
+                    for v in crit.broken_tests:
+                        st.markdown(f"**{str(v.title)[:70]}**")
+                        st.caption(f"↳ {str(v.reason)[:180]}")
+            if crit.uncertain:
+                with st.expander(f"❓ {len(crit.uncertain)} uncertain"):
+                    for v in crit.uncertain:
+                        st.caption(f"{str(v.title)[:70]} — {str(v.reason)[:120]}")
+        else:
+            # Not yet investigated — show raw failures.
+            for r in failed:
+                st.markdown(f"**⚠️ {r.get('test_case_id', '?')} — "
+                            f"{str(r.get('title', ''))[:60]}**")
+                for step in r.get("steps", []):
+                    if step.get("status") in ("FAIL", "ERROR"):
+                        st.caption(f"↳ step {step.get('step_number', '?')}: "
+                                   f"{str(step.get('error', ''))[:130]}")
+                if r.get("error"):
+                    st.caption(f"↳ {str(r['error'])[:150]}")
 
         path = st.session_state.get("report_path")
         if path and Path(path).exists():
@@ -1144,7 +1204,8 @@ def _wiz_step_bugreports() -> None:
     with b2:
         if st.button("↺ Start over", use_container_width=True, key="wiz_restart2"):
             for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension",
-                       "repo_context", "execution_result", "report_path"):
+                       "repo_context", "execution_result", "report_path",
+                       "critic_result"):
                 st.session_state[_k] = None
             _wiz_go(1)
 
