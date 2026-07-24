@@ -418,8 +418,15 @@ class APIRunner:
             return self._step_error(step, "APIRunner not set up — call setup() first")
 
         headers = {}
-        if step.get("use_auth") and variables.get("token"):
-            headers["Authorization"] = f"Bearer {variables['token']}"
+        # use_auth: true → the default "token"; use_auth: "token_b" → that named
+        # token. Named tokens let one test hold two users at once (userA vs userB)
+        # so ownership / IDOR attacks are executable.
+        auth = step.get("use_auth")
+        if auth:
+            token_var = auth if isinstance(auth, str) else "token"
+            tok = variables.get(token_var)
+            if tok:
+                headers["Authorization"] = f"Bearer {tok}"
 
         t0 = time.time()
         try:
