@@ -394,6 +394,78 @@ class AppModel:
 
 
 @dataclass
+class Finding:
+    """
+    One suspected defect surfaced by a detector over the AppModel — a candidate to
+    be tested and proven later, not yet a confirmed bug.
+
+    Attributes:
+        title (str): Short description of the suspected issue.
+        pattern (str): The failure-pattern id it matches (e.g. "hardcoded-secret").
+        severity (str): "P1" | "P2" | "P3" | "P4".
+        evidence (str): What in the app triggered it.
+        where (str): File / endpoint / field the finding points at.
+        source (str): "static" (deterministic rule) or "knowledge" (model pass).
+        confidence (str): "low" | "medium" | "high".
+    """
+
+    title: str = ""
+    pattern: str = ""
+    severity: str = "P3"
+    evidence: str = ""
+    where: str = ""
+    source: str = "static"
+    confidence: str = "medium"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class DetectionResult:
+    """
+    The outcome of DetectorService.detect() — suspected defects found by scanning
+    the AppModel against the failure-mode knowledge base.
+
+    Attributes:
+        findings (list[Finding]): Suspected issues, most-severe first.
+        error (str | None): Set only when detection failed outright.
+    """
+
+    findings: list = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    def by_severity(self, sev: str) -> list:
+        """Findings at a given severity (P1..P4)."""
+        return [f for f in self.findings if f.severity == sev]
+
+    @property
+    def critical(self) -> list:
+        """P1 findings — the ones that matter most."""
+        return self.by_severity("P1")
+
+    def summary(self) -> str:
+        """One-line human summary by severity."""
+        counts = {}
+        for f in self.findings:
+            counts[f.severity] = counts.get(f.severity, 0) + 1
+        parts = [f"{counts[s]}×{s}" for s in ("P1", "P2", "P3", "P4") if counts.get(s)]
+        return f"{len(self.findings)} suspect(s): " + (", ".join(parts) if parts else "none")
+
+    def to_dict(self) -> dict:
+        return {
+            "count": len(self.findings),
+            "findings": [f.to_dict() for f in self.findings],
+            "error": self.error,
+            "success": self.success,
+        }
+
+
+@dataclass
 class TourResult:
     """
     The outcome of TourService.tour() — the app's real UI surface, observed by

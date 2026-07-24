@@ -44,9 +44,11 @@ from services.results import (
     BugReportResult,
     ComprehensionResult,
     CriticResult,
+    DetectionResult,
     ExecutionResult,
     ExportResult,
     FailureVerdict,
+    Finding,
     GenerationResult,
     InvestigationResult,
     InvestigationVerdict,
@@ -78,4 +80,6 @@ __all__ = [
     "BugReportEntry",
     "BugReportResult",
     "AppModel",
+    "Finding",
+    "DetectionResult",
 ]
