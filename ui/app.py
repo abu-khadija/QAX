@@ -1195,10 +1195,33 @@ def _run_wizard_investigator() -> None:
         st.error(f"Investigator error: {exc}")
         return
     st.session_state["investigation_result"] = inv
+    st.session_state["bug_report"] = None   # stale once the investigation re-runs
     if inv.error:
         st.warning(inv.error)
     else:
         st.toast(inv.summary(), icon="✅")
+
+
+def _run_wizard_reporter() -> None:
+    """Group the confirmed bugs by root cause and write professional reports."""
+    from services.context import QAXContext
+    from services.reporter_service import ReporterService
+
+    inv = st.session_state.get("investigation_result")
+    if not inv:
+        return
+    ctx = QAXContext.from_env()
+    try:
+        with st.spinner("Writing the bug report (grouping by root cause)…"):
+            rep = ReporterService(ctx).report(inv)
+    except Exception as exc:
+        st.error(f"Reporter error: {exc}")
+        return
+    st.session_state["bug_report"] = rep
+    if rep.error:
+        st.warning(rep.error)
+    else:
+        st.toast(rep.summary(), icon="📄")
 
 
 def _wiz_step_bugreports() -> None:
@@ -1261,6 +1284,22 @@ def _wiz_step_bugreports() -> None:
                         st.caption(f"↳ {str(v.reason)[:180]}")
                         if v.evidence:
                             st.caption(f"↳ evidence: {str(v.evidence)[:160]}")
+                    rep = st.session_state.get("bug_report")
+                    if not rep:
+                        if st.button("📄 Write bug report (group by root cause)",
+                                     type="primary", key="wiz_reporter_run",
+                                     help="Fold the confirmed bugs into one report per "
+                                          "root cause, with severity, evidence and impact."):
+                            _run_wizard_reporter()
+                    elif not rep.error:
+                        st.success(rep.summary())
+                        for e in rep.entries:
+                            with st.expander(f"[{e.severity}] {str(e.title)[:80]}"):
+                                st.markdown(e.to_markdown())
+                        st.download_button(
+                            "⬇️ Download bug report (Markdown)",
+                            data=rep.to_markdown(), file_name="qax_bug_report.md",
+                            mime="text/markdown", use_container_width=True)
                 if inv.not_reproduced:
                     with st.expander(f"🚫 {len(inv.not_reproduced)} false alarm(s) — "
                                      f"did not hold up on the live app"):
@@ -1313,7 +1352,8 @@ def _wiz_step_bugreports() -> None:
         if st.button("↺ Start over", use_container_width=True, key="wiz_restart2"):
             for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension",
                        "repo_context", "execution_result", "report_path",
-                       "critic_result", "investigation_result", "tour_result"):
+                       "critic_result", "investigation_result", "tour_result",
+                       "bug_report"):
                 st.session_state[_k] = None
             _wiz_go(1)
 

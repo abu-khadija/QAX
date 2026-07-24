@@ -460,6 +460,111 @@ class InvestigationResult:
 
 
 @dataclass
+class BugReportEntry:
+    """
+    One professional bug report — a single root-cause family, however many tests
+    surfaced it. Modelled on the user's real bug-report craft.
+
+    Attributes:
+        title (str): Summary-line — "[Area] symptom — decisive detail".
+        severity (str): "P1" | "P2" | "P3" | "P4".
+        severity_reason (str): One-line justification for the severity.
+        description (str): What happens and why it matters.
+        steps_to_reproduce (list[str]): Numbered steps, from a clean start.
+        expected (str): What should happen.
+        actual (str): What actually happens (with evidence).
+        root_cause (str): Mechanism-level hypothesis.
+        impact (str): Who/what this affects.
+        occurrences (list[str]): Titles of the failing tests in this family.
+    """
+
+    title: str = ""
+    severity: str = "P3"
+    severity_reason: str = ""
+    description: str = ""
+    steps_to_reproduce: list = field(default_factory=list)
+    expected: str = ""
+    actual: str = ""
+    root_cause: str = ""
+    impact: str = ""
+    occurrences: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def to_markdown(self) -> str:
+        """Render this entry as a self-contained markdown bug report."""
+        sev = {"P1": "P1 / Critical", "P2": "P2 / High",
+               "P3": "P3 / Medium", "P4": "P4 / Low"}.get(self.severity, self.severity)
+        lines = [f"## {self.title}", ""]
+        lines.append(f"**Severity:** {sev}"
+                     + (f" — {self.severity_reason}" if self.severity_reason else ""))
+        if self.occurrences:
+            lines.append(f"**Surfaced by:** {len(self.occurrences)} test(s) — "
+                         + "; ".join(str(o) for o in self.occurrences[:6]))
+        if self.description:
+            lines += ["", "### Description", self.description]
+        if self.steps_to_reproduce:
+            lines += ["", "### Steps to reproduce"]
+            lines += [f"{i}. {s}" for i, s in enumerate(self.steps_to_reproduce, 1)]
+        if self.expected or self.actual:
+            lines += ["", "### Expected vs actual",
+                      f"- **Expected:** {self.expected}",
+                      f"- **Actual:** {self.actual}"]
+        if self.root_cause:
+            lines += ["", "### Root cause (hypothesis)", self.root_cause]
+        if self.impact:
+            lines += ["", "### Impact", self.impact]
+        return "\n".join(lines)
+
+
+@dataclass
+class BugReportResult:
+    """
+    The outcome of ReporterService.report() — confirmed bugs grouped into
+    root-cause families and written up as professional reports.
+
+    Attributes:
+        entries (list[BugReportEntry]): One per root-cause family.
+        error (str | None): Set only when reporting failed outright.
+    """
+
+    entries: list = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    @property
+    def occurrence_count(self) -> int:
+        """Total failing tests folded into the reports."""
+        return sum(len(e.occurrences) for e in self.entries)
+
+    def summary(self) -> str:
+        """One-line human summary."""
+        n = len(self.entries)
+        return (f"{n} bug{'' if n == 1 else 's'} "
+                f"from {self.occurrence_count} failing test(s)")
+
+    def to_markdown(self) -> str:
+        """Render the whole report as one markdown document."""
+        if not self.entries:
+            return "# Bug report\n\nNo confirmed bugs.\n"
+        head = [f"# Bug report — {self.summary()}", ""]
+        return "\n".join(head) + "\n\n---\n\n".join(e.to_markdown() for e in self.entries)
+
+    def to_dict(self) -> dict:
+        return {
+            "count": len(self.entries),
+            "occurrence_count": self.occurrence_count,
+            "entries": [e.to_dict() for e in self.entries],
+            "error": self.error,
+            "success": self.success,
+        }
+
+
+@dataclass
 class ExportResult:
     """
     The outcome of an ExportService.export() call.

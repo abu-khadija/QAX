@@ -39,6 +39,8 @@ from services.progress import (
 )
 from services.results import (
     BatchGenerationResult,
+    BugReportEntry,
+    BugReportResult,
     ComprehensionResult,
     CriticResult,
     ExecutionResult,
@@ -72,4 +74,6 @@ __all__ = [
     "InvestigationResult",
     "InvestigationVerdict",
     "TourResult",
+    "BugReportEntry",
+    "BugReportResult",
 ]
