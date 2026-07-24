@@ -1,0 +1,88 @@
+"""
+services/probe_service.py — ProbeService (Phase 3: broaden execution)
+=====================================================================
+The Investigator can only verify what the HTTP/UI runner can express. Some
+exploits need more — forging a token, crashing an endpoint with oversized input.
+ProbeService runs those active probes against the live app, driven by what the
+AppModel found (a hardcoded secret → try forging a JWT). A probe that succeeds is
+proof on its own, so its findings come back already confirmed — no Critic needed.
+
+Never prints, never calls sys.exit(); probe failures are captured, never raised.
+
+Usage:
+    from services.probe_service import ProbeService
+    result = ProbeService(ctx).run(app_model, base_url="http://localhost:8000")
+    for f in result.exploited:
+        print(f.title, "—", f.evidence)
+"""
+
+from __future__ import annotations
+
+import logging
+
+from services.context import QAXContext
+from services.progress import NullProgressReporter, ProgressReporter
+from services.results import AppModel, ProbeResult
+
+logger = logging.getLogger(__name__)
+
+
+class ProbeService:
+    """Run active exploit probes against a live app, driven by the AppModel."""
+
+    def __init__(self, context: QAXContext | None = None) -> None:
+        """
+        Args:
+            context (QAXContext | None): Config/credentials. Built from the
+                environment when None. (Probes make no model calls.)
+        """
+        self.context = context or QAXContext.from_env()
+
+    def run(
+        self,
+        model: AppModel,
+        base_url: str,
+        *,
+        progress: ProgressReporter | None = None,
+    ) -> ProbeResult:
+        """
+        Run the probes relevant to this app against the live target.
+
+        Args:
+            model (AppModel): The whole-system model (selects which probes to run).
+            base_url (str): The running app to probe.
+            progress (ProgressReporter | None): Progress sink.
+
+        Returns:
+            ProbeResult: Probe outcomes; the exploited ones are confirmed bugs.
+                Never raises at runtime.
+        """
+        prog = progress or NullProgressReporter()
+        if not isinstance(model, AppModel) or not model.success:
+            return ProbeResult(error="No valid AppModel to drive probes.")
+        if not base_url or not str(base_url).strip():
+            return ProbeResult(error="No base_url to probe against.")
+
+        from execution.probes import crash_fuzz_probe, forge_jwt_probe
+
+        prog.emit("probe", "start", "running active probes")
+        findings = []
+
+        # Forge-JWT — only when the model found a hardcoded secret to forge with.
+        if model.exposed_secrets:
+            try:
+                f = forge_jwt_probe(model, base_url)
+                if f is not None:
+                    findings.append(f)
+            except Exception as exc:
+                logger.error("forge_jwt probe failed: %s", exc)
+
+        # Crash-fuzz — oversized inputs on auth endpoints.
+        try:
+            findings.extend(crash_fuzz_probe(model, base_url))
+        except Exception as exc:
+            logger.error("crash_fuzz probe failed: %s", exc)
+
+        result = ProbeResult(findings=findings)
+        prog.emit("probe", "ok", result.summary())
+        return result

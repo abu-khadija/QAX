@@ -52,6 +52,8 @@ from services.results import (
     GenerationResult,
     InvestigationResult,
     InvestigationVerdict,
+    ProbeFinding,
+    ProbeResult,
     ReportResult,
     TourResult,
 )
@@ -82,4 +84,6 @@ __all__ = [
     "AppModel",
     "Finding",
     "DetectionResult",
+    "ProbeFinding",
+    "ProbeResult",
 ]

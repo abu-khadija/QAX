@@ -394,6 +394,69 @@ class AppModel:
 
 
 @dataclass
+class ProbeFinding:
+    """
+    The result of one active probe that tried to PROVE an exploit the standard
+    HTTP/UI runner can't express (forging a token, crashing with oversized input).
+
+    Attributes:
+        probe (str): Probe id (e.g. "forge-jwt", "crash-fuzz").
+        title (str): What was proven (or attempted).
+        exploited (bool): True when the exploit actually worked — a confirmed bug.
+        severity (str): "P1".."P4".
+        evidence (str): The concrete proof captured.
+        target (str): Endpoint/asset the probe hit.
+    """
+
+    probe: str = ""
+    title: str = ""
+    exploited: bool = False
+    severity: str = "P3"
+    evidence: str = ""
+    target: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class ProbeResult:
+    """
+    The outcome of ProbeService.run() — active exploit attempts. A probe that
+    succeeds is proof on its own (deterministic), so its findings are confirmed.
+
+    Attributes:
+        findings (list[ProbeFinding]): All probe outcomes.
+        error (str | None): Set only when the run failed outright.
+    """
+
+    findings: list = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    @property
+    def exploited(self) -> list:
+        """Probes that actually broke in — confirmed bugs."""
+        return [f for f in self.findings if f.exploited]
+
+    def summary(self) -> str:
+        """One-line human summary."""
+        return f"{len(self.exploited)} exploit(s) proven of {len(self.findings)} probe(s) run"
+
+    def to_dict(self) -> dict:
+        return {
+            "exploited": len(self.exploited),
+            "run": len(self.findings),
+            "findings": [f.to_dict() for f in self.findings],
+            "error": self.error,
+            "success": self.success,
+        }
+
+
+@dataclass
 class Finding:
     """
     One suspected defect surfaced by a detector over the AppModel — a candidate to
