@@ -367,6 +367,12 @@ class APIRunner:
         import re
 
         if isinstance(obj, str):
+            # A sole placeholder ("{{my_id}}") returns the RAW value (int/etc.), so a
+            # body/assertion value keeps its type — needed to compare an int id.
+            sole = re.fullmatch(r"\{\{(\w+)\}\}", obj)
+            if sole and variables.get(sole.group(1)) is not None:
+                return variables[sole.group(1)]
+
             def _sub(m):
                 val = variables.get(m.group(1))
                 return str(val) if val is not None else m.group(0)
@@ -453,8 +459,10 @@ class APIRunner:
                             variables[var_name] = data[resp_key]
                 # Assert values INSIDE the response body (not just the status) —
                 # this is what catches computed/persistence bugs the status hides.
+                # Rendered through variables so a control experiment can assert e.g.
+                # a record's owner equals the ATTACKER's own id ({{my_id}}).
                 if step.get("expect_json"):
-                    self._assert_body(result, data, step["expect_json"])
+                    self._assert_body(result, data, self._render(step["expect_json"], variables))
         except Exception as exc:
             result["status"] = "FAIL"
             result["error"]  = str(exc)

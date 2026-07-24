@@ -72,3 +72,29 @@ def test_assert_body_no_json_fails():
     APIRunner._assert_body(r, None, {"total": 5})
     assert r["status"] == "FAIL"
     assert "JSON" in r["error"]
+
+
+# ── rendered expect_json (control experiments) ───────────────────────────────
+
+def test_render_sole_placeholder_keeps_type():
+    # "{{my_id}}" alone must render to the raw int, not the string "190".
+    assert APIRunner._render("{{my_id}}", {"my_id": 190}) == 190
+    # embedded placeholder still renders as a string path.
+    assert APIRunner._render("/todos/{{rid}}", {"rid": 7}) == "/todos/7"
+
+
+def test_mass_assignment_control_passes_when_safe():
+    # Safe app: the created record is owned by the attacker (my_id), not 999999.
+    expect = APIRunner._render({"user_id": "{{my_id}}"}, {"my_id": 190})
+    r = _fresh()
+    APIRunner._assert_body(r, {"user_id": 190, "title": "x"}, expect)
+    assert r["status"] == "PASS"            # no false alarm
+
+
+def test_mass_assignment_control_fails_when_vulnerable():
+    # Vulnerable app: the injected user_id actually took effect.
+    expect = APIRunner._render({"user_id": "{{my_id}}"}, {"my_id": 190})
+    r = _fresh()
+    APIRunner._assert_body(r, {"user_id": 999999, "title": "x"}, expect)
+    assert r["status"] == "FAIL"
+    assert "user_id" in r["error"]
