@@ -38,6 +38,7 @@ from services.progress import (
     ProgressReporter,
 )
 from services.results import (
+    AppModel,
     BatchGenerationResult,
     BugReportEntry,
     BugReportResult,
@@ -76,4 +77,5 @@ __all__ = [
     "TourResult",
     "BugReportEntry",
     "BugReportResult",
+    "AppModel",
 ]

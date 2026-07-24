@@ -301,6 +301,99 @@ class CriticResult:
 
 
 @dataclass
+class AppModel:
+    """
+    A whole-system model of an application, built by reading the ENTIRE repo (not
+    one file). This is the substrate every later phase reasons over — the fix for
+    QAX's file-centric blindness, where the worst bugs live BETWEEN files (a secret
+    in config, a schema-vs-security contradiction, a frontend/backend contract gap).
+
+    All sections are plain lists/dicts (the shape comes from one comprehension
+    call), with convenience views on top.
+
+    Attributes:
+        root (str): The repo path that was modelled.
+        files (list[dict]): [{path, role}] — role e.g. router/config/security/
+            schema/model/frontend-api/frontend-component/other.
+        endpoints (list[dict]): [{method, path, auth_required, request_fields,
+            response_fields, status_codes, file}].
+        entities (list[dict]): [{name, fields:[{name, type, constraints}], file}].
+        config (list[dict]): [{key, default, is_secret, risk}] — secrets with a
+            hardcoded/placeholder default are the crown-jewel finding here.
+        auth (dict): {scheme, token_type, secret_source, password_hash}.
+        contracts (list[dict]): [{frontend_call, backend_endpoint, mismatch}].
+        risks (list[str]): High-level cross-file concerns worth testing hardest.
+        file_count (int): How many source files were read.
+        error (str | None): Set only when modelling failed outright.
+    """
+
+    root: str = ""
+    files: list = field(default_factory=list)
+    endpoints: list = field(default_factory=list)
+    entities: list = field(default_factory=list)
+    config: list = field(default_factory=list)
+    auth: dict = field(default_factory=dict)
+    contracts: list = field(default_factory=list)
+    risks: list = field(default_factory=list)
+    file_count: int = 0
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    @property
+    def exposed_secrets(self) -> list:
+        """Config entries that are secrets AND carry a hardcoded/placeholder default."""
+        out = []
+        for c in self.config:
+            if not isinstance(c, dict):
+                continue
+            default = c.get("default")
+            if c.get("is_secret") and default not in (None, "", "None"):
+                out.append(c)
+        return out
+
+    @property
+    def contract_mismatches(self) -> list:
+        """Frontend/backend contract entries that disagree."""
+        return [c for c in self.contracts if isinstance(c, dict) and c.get("mismatch")]
+
+    def as_context(self) -> str:
+        """
+        Render a compact whole-system brief for injection into generation,
+        detectors, and red-team — so tests reason over the system, not one file.
+        """
+        lines: list[str] = []
+        if self.auth:
+            lines.append("Auth: " + ", ".join(f"{k}={v}" for k, v in self.auth.items() if v))
+        if self.endpoints:
+            lines.append(f"Endpoints ({len(self.endpoints)}):")
+            for e in self.endpoints[:30]:
+                a = " [auth]" if e.get("auth_required") else ""
+                lines.append(f"  {e.get('method','?')} {e.get('path','?')}{a}"
+                             + (f" → {e.get('status_codes')}" if e.get('status_codes') else ""))
+        if self.exposed_secrets:
+            lines.append("EXPOSED SECRETS (hardcoded/placeholder default — high risk):")
+            for s in self.exposed_secrets:
+                lines.append(f"  {s.get('key')} = {str(s.get('default'))[:40]!r} ({s.get('risk','')})")
+        if self.contract_mismatches:
+            lines.append("CONTRACT MISMATCHES (frontend vs backend):")
+            for c in self.contract_mismatches[:10]:
+                lines.append(f"  {c.get('frontend_call')} vs {c.get('backend_endpoint')}: {c.get('mismatch')}")
+        if self.risks:
+            lines.append("Cross-file risks: " + "; ".join(str(r) for r in self.risks[:10]))
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["success"] = self.success
+        data["exposed_secret_count"] = len(self.exposed_secrets)
+        data["contract_mismatch_count"] = len(self.contract_mismatches)
+        return data
+
+
+@dataclass
 class TourResult:
     """
     The outcome of TourService.tour() — the app's real UI surface, observed by
