@@ -548,6 +548,17 @@ class ClaudeClient:
                 "on later steps that need it.\n"
                 "- For values that must be unique per run (e.g. a new user email), use {{random}} "
                 "as a placeholder — the SAME {{random}} resolves to the same value within a test case.\n"
+                "- ASSERT THE RESPONSE BODY, not just the status. Add \"expect_json\" to a read step "
+                "to check values INSIDE the response — a dot-path mapped to its expected value, with "
+                "a trailing .length for a collection size, e.g. "
+                "{\"total\": 5, \"total_pages\": 3, \"items.length\": 5}.\n"
+                "  * Computed values: when an endpoint returns a count, total, page count, or any "
+                "derived number, SET UP a known state (e.g. create exactly 5 items) and assert the "
+                "computed result you calculate yourself (e.g. with page_size 2, total_pages must be "
+                "ceil(5/2)=3). Pick a count that is NOT a multiple of the page size so an off-by "
+                "computation is exposed.\n"
+                "  * Persistence: after a create/update, add a GET step that re-fetches the resource "
+                "and use expect_json to assert the value actually persisted.\n"
                 "- Keep api_steps minimal and derived only from the code."
             )
 

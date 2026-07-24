@@ -36,6 +36,10 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Sentinel: a response-body path that resolved to nothing (distinct from a real
+# value of None), used by the expect_json body assertions.
+_MISSING = object()
+
 
 class APIRunner:
     """
@@ -431,21 +435,79 @@ class APIRunner:
                 result["status"] = "FAIL"
                 result["error"]  = (f"Expected status {expected}, got "
                                     f"{resp.status_code} — {resp.text[:150]}")
-            elif save:
+            else:
                 try:
                     data = resp.json()
-                    if isinstance(data, dict):
-                        for var_name, resp_key in save.items():
-                            if resp_key in data:
-                                variables[var_name] = data[resp_key]
                 except Exception:
-                    pass
+                    data = None
+                if save and isinstance(data, dict):
+                    for var_name, resp_key in save.items():
+                        if resp_key in data:
+                            variables[var_name] = data[resp_key]
+                # Assert values INSIDE the response body (not just the status) —
+                # this is what catches computed/persistence bugs the status hides.
+                if step.get("expect_json"):
+                    self._assert_body(result, data, step["expect_json"])
         except Exception as exc:
             result["status"] = "FAIL"
             result["error"]  = str(exc)
 
         result["duration_ms"] = int((time.time() - t0) * 1000)
         return result
+
+    @staticmethod
+    def _assert_body(result: dict, data, expect: dict) -> None:
+        """
+        Assert expected values inside a JSON response body.
+
+        `expect` maps a dot-path to an expected value; the path walks dict keys
+        and list indices, and a trailing `.length` (or `.#`) yields a collection's
+        length — e.g. {"total": 5, "total_pages": 3, "items.length": 5}. The first
+        mismatch or missing path flips the step to FAIL with a precise message.
+
+        Args:
+            result (dict): The step result to mutate on failure.
+            data: The parsed JSON response (or None if the body was not JSON).
+            expect (dict): path → expected value assertions.
+        """
+        if not isinstance(expect, dict):
+            return
+        if data is None:
+            result["status"] = "FAIL"
+            result["error"] = "Expected a JSON response body to assert on, got none"
+            return
+        for path, exp_val in expect.items():
+            got = APIRunner._resolve_path(data, path)
+            if got is _MISSING:
+                result["status"] = "FAIL"
+                result["error"] = f"Body assertion: path '{path}' not found in response"
+                return
+            if got != exp_val:
+                result["status"] = "FAIL"
+                result["error"] = (f"Body assertion failed: {path} expected "
+                                   f"{exp_val!r}, got {got!r}")
+                return
+
+    @staticmethod
+    def _resolve_path(data, path):
+        """Walk a dot-path into a JSON value; `.length`/`.#` gives a length."""
+        cur = data
+        for part in str(path).split("."):
+            if part in ("length", "#"):
+                return len(cur) if hasattr(cur, "__len__") else _MISSING
+            if isinstance(cur, list):
+                try:
+                    cur = cur[int(part)]
+                except (ValueError, IndexError):
+                    return _MISSING
+            elif isinstance(cur, dict):
+                if part in cur:
+                    cur = cur[part]
+                else:
+                    return _MISSING
+            else:
+                return _MISSING
+        return cur
 
     # ── Test case / batch execution ────────────────────────────────────────────
 

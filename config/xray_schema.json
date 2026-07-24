@@ -224,7 +224,8 @@
             "body": { "description": "Optional JSON request body. May contain {{var}} placeholders." },
             "expected_status": { "type": "integer", "description": "Expected HTTP status code." },
             "save": { "type": "object", "description": "Map of variable name to response JSON key to capture, e.g. {\"token\": \"access_token\"}." },
-            "use_auth": { "type": "boolean", "description": "Send the saved token as an Authorization: Bearer header." }
+            "use_auth": { "type": "boolean", "description": "Send the saved token as an Authorization: Bearer header." },
+            "expect_json": { "type": "object", "description": "Assertions on values INSIDE the response body. Maps a dot-path to its expected value; a trailing .length gives a collection size. Example: {\"total\": 5, \"total_pages\": 3, \"items.length\": 5}." }
           }
         }
       }
