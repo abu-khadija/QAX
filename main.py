@@ -2446,6 +2446,92 @@ def _find_test_case_in_output(tc_id: str) -> dict | None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SCAN COMMAND — the full autonomous agent team (Orchestrator)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_scan_command() -> None:
+    """
+    Handle the 'scan' subcommand — a deep, autonomous security + QA scan.
+
+    Runs the whole agent team over a repository against a live app in one call:
+    whole-system model → detectors → active probes → generation + red-team →
+    coverage loop → execute → critic → investigator. Prints the confirmed bugs
+    (from the Investigator and the probes) and the coverage it guaranteed.
+
+    Called when sys.argv[1] == "scan".
+    """
+    parser = argparse.ArgumentParser(
+        prog="qax scan",
+        description="Deep autonomous scan: model the whole app, hunt and PROVE bugs.")
+    parser.add_argument("--repo", required=True, help="Path to the repository to scan.")
+    parser.add_argument("--url", required=True,
+                        help="Base URL of the running app (e.g. http://localhost:8000).")
+    parser.add_argument("--project", default=None, help="QAX project name (optional).")
+    parser.add_argument("--max-router-files", type=int, default=4,
+                        help="Cap on router files to generate functional tests from.")
+    parser.add_argument("--out", default=None, help="Write the full result to this JSON file.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="No external side effects (exports); the scan still runs.")
+    args = parser.parse_args(sys.argv[2:])
+
+    from services.context import QAXContext
+    from services.orchestrator_service import OrchestratorService
+    from services.progress import PrintProgressReporter
+
+    if not Path(args.repo).exists():
+        print(f"\n  Repo path not found: {args.repo}\n")
+        sys.exit(1)
+
+    try:
+        ctx = QAXContext.from_env(project=args.project or "", dry_run=args.dry_run)
+        ctx.require_anthropic_key()
+    except Exception as exc:
+        print(f"\n  {exc}\n")
+        sys.exit(1)
+
+    print(f"\n  QAX deep scan — repo: {args.repo}  ·  app: {args.url}\n")
+    result = OrchestratorService(ctx).run(
+        args.repo, args.url,
+        max_router_files=args.max_router_files,
+        progress=PrintProgressReporter())
+
+    if result.error:
+        print(f"\n  Scan failed: {result.error}\n")
+        sys.exit(1)
+
+    print("\n" + "─" * 66)
+    print(f"  RESULT — {result.summary()}")
+    print("─" * 66)
+
+    if result.coverage:
+        print("\n  Coverage goals:")
+        for goal, status in result.coverage.items():
+            mark = {"generation": "✓ covered", "template": "✓ covered (gap filled by QAX)",
+                    "uncovered": "✗ uncovered"}.get(status, status)
+            print(f"    · {goal} — {mark}")
+
+    if result.confirmed:
+        print(f"\n  🐞 Confirmed bugs ({len(result.confirmed)}):")
+        for b in result.confirmed:
+            sev = f"[{b.get('severity')}] " if b.get("severity") else ""
+            src = b.get("source", "")
+            print(f"    {sev}{b.get('title', '')}  ({src})")
+            if b.get("evidence"):
+                print(f"        {str(b['evidence'])[:150]}")
+    else:
+        print("\n  No confirmed bugs — the app held up to the scan.")
+    print()
+
+    if args.out:
+        try:
+            Path(args.out).write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False),
+                                      encoding="utf-8")
+            print(f"  Full result written to {args.out}\n")
+        except Exception as exc:
+            logger.warning("Could not write --out file: %s", exc)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2483,13 +2569,14 @@ def main() -> None:
         "cache":            run_cache_command,
         "ui":               run_ui_command,
         "pipeline":         run_pipeline_command,
+        "scan":             run_scan_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

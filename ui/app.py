@@ -1567,9 +1567,10 @@ def render_analyze_wizard(project: str) -> None:
 
 
 _ap = st.session_state.get("active_project", os.getenv("DEFAULT_PROJECT", "example")).upper()
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab5, tab3, tab4 = st.tabs([
     f"🔍 Analyze · {_ap}",
     f"▶ Run · {_ap}",
+    "🛡️ Deep Scan",
     "📊 Dashboard",
     "⚙️ Settings",
 ])
@@ -1752,6 +1753,91 @@ with tab2:
                     f"- **{tc.get('test_case_id','')}** {tc.get('title','')[:60]} "
                     f"({tc.get('confidence_score',0)}/10)"
                 )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB — DEEP SCAN (the full autonomous agent team / Orchestrator)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _run_deep_scan(repo: str, url: str, max_router_files: int) -> None:
+    """Run the Orchestrator over a repo + live app and store the result."""
+    from services.context import QAXContext
+    from services.orchestrator_service import OrchestratorService
+
+    ctx = QAXContext.from_env(project=st.session_state.get("active_project", ""))
+    try:
+        with st.spinner("Deep scan running — model → detect → probe → generate → "
+                        "attack → execute → verify. This takes a few minutes…"):
+            result = OrchestratorService(ctx).run(repo, url, max_router_files=max_router_files)
+    except Exception as exc:
+        st.error(f"Scan error: {exc}")
+        return
+    st.session_state["deep_scan_result"] = result
+    if result.error:
+        st.warning(result.error)
+    else:
+        st.toast(result.summary(), icon="🛡️")
+
+
+with tab5:
+    st.subheader("🛡️ Deep Scan — the whole QA team, autonomously")
+    st.caption("Point QAX at a repository and its running app. It models the whole system, "
+               "hunts for bugs with the failure-mode knowledge base, attacks them (red-team), "
+               "and PROVES the exploits it can (JWT forgery, crashes) — then verifies every "
+               "finding on the live app so it only reports real bugs.")
+
+    st.session_state.setdefault("scan_repo", os.getcwd())
+    st.session_state.setdefault("scan_url", "http://localhost:8000")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.text_input("Repository path", key="scan_repo",
+                      help="Root of the codebase to scan.")
+    with c2:
+        st.text_input("Running app URL", key="scan_url",
+                      help="The live app to execute and probe against.")
+    st.slider("Router files to cover", 1, 10, 4, key="scan_max_files",
+              help="How many endpoint files to generate functional tests from.")
+
+    _scan_conn = get_connection_status()
+    if not _scan_conn["claude"]:
+        st.warning("Claude API key not configured — Deep Scan needs it. Add ANTHROPIC_API_KEY in .env.")
+
+    if st.button("🛡️ Run deep scan", type="primary", key="deep_scan_run",
+                 disabled=not _scan_conn["claude"]):
+        _repo = st.session_state.get("scan_repo", "").strip()
+        if not _repo or not Path(_repo).exists():
+            st.error("Enter a valid repository path.")
+        elif not st.session_state.get("scan_url", "").strip():
+            st.error("Enter the running app URL.")
+        else:
+            _run_deep_scan(_repo, st.session_state["scan_url"].strip(),
+                           st.session_state.get("scan_max_files", 4))
+
+    _scan = st.session_state.get("deep_scan_result")
+    if _scan and not _scan.error:
+        st.divider()
+        m1, m2, m3 = st.columns(3)
+        m1.metric("🐞 Confirmed bugs", len(_scan.confirmed))
+        m2.metric("Tests run", _scan.tests_run)
+        m3.metric("Suspects considered", _scan.suspects)
+
+        if _scan.coverage:
+            st.markdown("#### Coverage goals")
+            for goal, status in _scan.coverage.items():
+                icon = {"generation": "✅", "template": "✅", "uncovered": "⚠️"}.get(status, "•")
+                note = " (gap filled by QAX)" if status == "template" else ""
+                st.caption(f"{icon} {goal} — {status}{note}")
+
+        if _scan.confirmed:
+            st.markdown("#### 🐞 Confirmed bugs — proven on the live app")
+            for b in _scan.confirmed:
+                sev = f"**[{b.get('severity')}]** " if b.get("severity") else ""
+                src = b.get("source", "")
+                st.markdown(f"{sev}{str(b.get('title',''))[:80]}  · _{src}_")
+                if b.get("evidence"):
+                    st.caption(f"↳ {str(b['evidence'])[:200]}")
+        else:
+            st.success("No confirmed bugs — the app held up to the scan.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
