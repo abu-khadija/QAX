@@ -24,7 +24,9 @@ def _paginated_model() -> AppModel:
 
 def test_finds_paginated_endpoint_and_create_sibling():
     pag = OrchestratorService._paginated_endpoint(_paginated_model())
-    assert pag == {"list": "/todos", "create": "/todos"}
+    assert pag["list"] == "/todos"
+    assert pag["create"] == "/todos"
+    assert pag["pages_field"] == "total_pages"   # derived from the response fields
 
 
 def test_no_pagination_when_absent():
@@ -69,7 +71,9 @@ def test_missing_total_pages_assertion_is_not_coverage():
 # ── the deterministic template that fills the gap ────────────────────────────
 
 def test_template_creates_non_multiple_count_and_asserts_ceil():
-    tpl = OrchestratorService._pagination_boundary_template(_pag())
+    from services.context import QAXContext
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    tpl = svc._pagination_boundary_template(_pag(), _paginated_model())
     assert tpl is not None
     creates = [s for s in tpl["api_steps"] if s["method"] == "POST" and s["path"] == "/todos"]
     assert len(creates) == 3                      # 3 is not a multiple of page_size 2

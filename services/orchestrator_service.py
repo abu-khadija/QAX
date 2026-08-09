@@ -147,7 +147,7 @@ class OrchestratorService:
             if self._has_pagination_boundary_test(tests, pag):
                 coverage[goal] = "generation"
             else:
-                template = self._pagination_boundary_template(pag)
+                template = self._pagination_boundary_template(pag, model)
                 if template:
                     tests.append(template)
                     coverage[goal] = "template"
@@ -177,7 +177,17 @@ class OrchestratorService:
                 if (isinstance(e, dict) and str(e.get("method", "")).upper() == "POST"
                         and str(e.get("path", "")).rstrip("/") == list_path.rstrip("/")):
                     create_path = str(e.get("path", ""))
-        return {"list": list_path, "create": create_path or list_path}
+        # Derive the pagination response field names from the list endpoint.
+        from core.auth_recipe import field_names
+        list_ep = next((e for e in model.endpoints if isinstance(e, dict)
+                        and str(e.get("method", "")).upper() == "GET"
+                        and str(e.get("path", "")) == list_path), {})
+        resp = field_names(list_ep.get("response_fields"))
+        pages_field = next((f for f in resp if f.lower() in
+                            ("total_pages", "totalpages", "pages", "page_count", "num_pages")), "total_pages")
+        total_field = next((f for f in resp if f.lower() in ("total", "count", "total_count")), "total")
+        return {"list": list_path, "create": create_path or list_path,
+                "pages_field": pages_field, "total_field": total_field}
 
     @staticmethod
     def _has_pagination_boundary_test(tests: list[dict], pag: dict) -> bool:
@@ -210,37 +220,68 @@ class OrchestratorService:
         m = re.search(r"page_size=(\d+)", str(step.get("path", "")))
         return int(m.group(1)) if m else None
 
-    @staticmethod
-    def _pagination_boundary_template(pag: dict) -> dict | None:
+    def _pagination_boundary_template(self, pag: dict, model: AppModel) -> dict | None:
         """
         A deterministic pagination boundary test: create 3 items, list with
         page_size=2, and assert total_pages == ceil(3/2) == 2 and total == 3. This
         GUARANTEES the boundary is covered rather than hoping generation picks it.
+
+        All paths and field names are derived from the AppModel (auth flow, the
+        create body field, the page-size query param, the total_pages field), so
+        the template generalises beyond one app.
         """
         create = pag["create"]
         list_path = pag["list"]
         if not create or not list_path:
             return None
+
+        from core.auth_recipe import derive_auth_recipe
+        r = derive_auth_recipe(model)
+        create_field = self._create_body_field(model, create)
+        size_param = self._page_size_param(pag)
+        total_field = pag.get("total_field", "total")
+        pages_field = pag.get("pages_field", "total_pages")
+
         steps = [
-            {"step_number": 1, "method": "POST", "path": "/auth/register",
-             "body": {"email": "pg_{{random}}@example.com", "password": "Secret123!"},
+            {"step_number": 1, "method": "POST", "path": r["register_path"],
+             "body": {r["id_field"]: "pg_{{random}}@example.com", r["secret_field"]: "Secret123!"},
              "expected_status": 201},
-            {"step_number": 2, "method": "POST", "path": "/auth/login",
-             "body": {"email": "pg_{{random}}@example.com", "password": "Secret123!"},
-             "expected_status": 200, "save": {"token": "access_token"}},
+            {"step_number": 2, "method": "POST", "path": r["login_path"],
+             "body": {r["id_field"]: "pg_{{random}}@example.com", r["secret_field"]: "Secret123!"},
+             "expected_status": 200, "save": {"token": r["token_field"]}},
         ]
         for i in range(3):
             steps.append({"step_number": 3 + i, "method": "POST", "path": create,
-                          "body": {"title": f"pg{i}"}, "expected_status": 201, "use_auth": True})
+                          "body": {create_field: f"pg{i}"}, "expected_status": 201, "use_auth": True})
         steps.append({"step_number": 6, "method": "GET",
-                      "path": f"{list_path}?page=1&page_size=2", "expected_status": 200,
-                      "use_auth": True, "expect_json": {"total": 3, "total_pages": 2}})
+                      "path": f"{list_path}?page=1&{size_param}=2", "expected_status": 200,
+                      "use_auth": True, "expect_json": {total_field: 3, pages_field: 2}})
         return {
             "test_case_id": "COV-PAG-0001",
             "title": "Coverage: pagination total_pages is correct at a boundary (3 items, size 2)",
             "test_type": "boundary", "module": "coverage", "attack": "coverage-template",
             "api_steps": steps,
         }
+
+    @staticmethod
+    def _create_body_field(model: AppModel, create_path: str) -> str:
+        """The field a create needs — prefer a title/name-like text field."""
+        from core.auth_recipe import field_names
+        for e in model.endpoints:
+            if (isinstance(e, dict) and str(e.get("method", "")).upper() == "POST"
+                    and str(e.get("path", "")).rstrip("/") == create_path.rstrip("/")):
+                names = field_names(e.get("request_fields"))
+                for pref in ("title", "name", "label", "text"):
+                    if pref in names:
+                        return pref
+                if names:
+                    return names[0]
+        return "title"
+
+    @staticmethod
+    def _page_size_param(pag: dict) -> str:
+        """The query param that controls page size (page_size / per_page / limit)."""
+        return pag.get("size_param", "page_size")
 
     # ── Router discovery + result unification ─────────────────────────────────
 

