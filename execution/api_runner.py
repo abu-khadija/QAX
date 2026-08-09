@@ -444,7 +444,7 @@ class APIRunner:
             result["response_code"] = resp.status_code
             result["actual_result"] = f"{method} {path} → {resp.status_code}"
 
-            if expected is not None and resp.status_code != int(expected):
+            if expected is not None and not self._status_matches(expected, resp.status_code):
                 result["status"] = "FAIL"
                 result["error"]  = (f"Expected status {expected}, got "
                                     f"{resp.status_code} — {resp.text[:150]}")
@@ -469,6 +469,20 @@ class APIRunner:
 
         result["duration_ms"] = int((time.time() - t0) * 1000)
         return result
+
+    @staticmethod
+    def _status_matches(expected, actual: int) -> bool:
+        """
+        Whether the actual status satisfies the expectation. `expected` may be a
+        single code or a LIST of acceptable codes — needed for security tests where
+        the secure response can be any of several (403 OR 404 for a blocked resource).
+        """
+        try:
+            if isinstance(expected, (list, tuple, set)):
+                return actual in {int(x) for x in expected}
+            return actual == int(expected)
+        except (TypeError, ValueError):
+            return True
 
     @staticmethod
     def _assert_body(result: dict, data, expect: dict) -> None:

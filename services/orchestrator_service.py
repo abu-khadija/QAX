@@ -154,6 +154,16 @@ class OrchestratorService:
                     prog.emit("orchestrate", "info", f"filled coverage gap: {goal}")
                 else:
                     coverage[goal] = "uncovered"
+
+        # Deterministic guarantees for the high-value security/validation classes,
+        # so they're covered every run regardless of what generation happened to do.
+        from core.auth_recipe import derive_auth_recipe
+        from services.coverage_goals import all_templates
+        for goal, tpls in all_templates(model, derive_auth_recipe(model)).items():
+            tests.extend(tpls)
+            coverage[goal] = "template"
+            prog.emit("orchestrate", "info",
+                      f"coverage goal '{goal}': {len(tpls)} guaranteed test(s)")
         return coverage
 
     @staticmethod
