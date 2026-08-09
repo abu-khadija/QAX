@@ -141,8 +141,12 @@ class OrchestratorService:
             logger.warning("orchestrator verify legs skipped: %s", exc)
             prog.emit("orchestrate", "info", f"verify skipped ({exc})")
 
-        # 7) Unify confirmed bugs (tests + probes).
+        # 7) Unify confirmed bugs: Investigator (LLM) + probes + self-proving
+        #    deterministic templates (a template that fails its own assertion is a
+        #    proven bug, no LLM judgement needed — this is what makes a quick scan
+        #    find bugs with zero model calls).
         confirmed = self._unify(investigation, probe_result)
+        confirmed += self._confirmed_from_templates(execution, executable, confirmed)
 
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=1,
@@ -324,6 +328,44 @@ class OrchestratorService:
                 p = root / f["path"]
                 if p.exists():
                     out.append(str(p))
+        return out
+
+    _COV_SEVERITY = {"COV-AUTH": "P1", "COV-IDOR": "P1", "COV-VAL": "P3", "COV-PAG": "P2"}
+
+    @classmethod
+    def _confirmed_from_templates(cls, execution, tests: list[dict], already: list[dict]) -> list[dict]:
+        """
+        A deterministic coverage template that FAILS at its own assertion step is a
+        proven bug — no LLM verdict needed. Setup failures (register/login/create)
+        are ignored; only a failure at the final assertion step counts.
+        """
+        by_key = {}
+        for t in tests:
+            by_key[t.get("test_case_id", "")] = t
+            by_key[t.get("title", "")] = t
+        seen_titles = {b.get("title") for b in already}
+        out = []
+        for r in getattr(execution, "results", []):
+            if r.get("status") not in ("FAIL", "ERROR"):
+                continue
+            tc = by_key.get(r.get("test_case_id", "")) or by_key.get(r.get("title", ""))
+            if not tc or tc.get("attack") != "coverage-template":
+                continue
+            steps = tc.get("api_steps") or []
+            if not steps:
+                continue
+            last_step_no = steps[-1].get("step_number")
+            fstep = next((s for s in (r.get("steps") or [])
+                          if s.get("status") in ("FAIL", "ERROR")), None)
+            if not fstep or fstep.get("step_number") != last_step_no:
+                continue  # failed at setup, not at the assertion — not a proven bug
+            title = str(r.get("title", ""))
+            if title in seen_titles:
+                continue
+            sev = next((v for k, v in cls._COV_SEVERITY.items()
+                        if str(tc.get("test_case_id", "")).startswith(k)), "P2")
+            out.append({"title": title, "severity": sev,
+                        "evidence": str(fstep.get("error", ""))[:200], "source": "coverage"})
         return out
 
     @staticmethod

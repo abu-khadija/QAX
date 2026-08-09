@@ -84,6 +84,34 @@ def test_template_creates_non_multiple_count_and_asserts_ceil():
     assert OrchestratorService._has_pagination_boundary_test([tpl], _pag()) is True
 
 
+def test_failed_template_at_assertion_is_a_proven_bug():
+    tc = {"test_case_id": "COV-VAL-0001", "title": "Coverage: POST /todos rejects empty 'title'",
+          "attack": "coverage-template",
+          "api_steps": [{"step_number": 1}, {"step_number": 2}, {"step_number": 3}]}
+
+    class Ex:
+        results = [{"test_case_id": "COV-VAL-0001",
+                    "title": "Coverage: POST /todos rejects empty 'title'", "status": "FAIL",
+                    "steps": [{"step_number": 3, "status": "FAIL",
+                               "error": "Expected status [422, 400], got 201"}]}]
+    out = OrchestratorService._confirmed_from_templates(Ex(), [tc], already=[])
+    assert len(out) == 1
+    assert out[0]["severity"] == "P3" and out[0]["source"] == "coverage"
+
+
+def test_failed_template_at_setup_is_not_a_bug():
+    tc = {"test_case_id": "COV-IDOR-0001", "title": "Coverage: GET /todos/{id} blocks another user",
+          "attack": "coverage-template",
+          "api_steps": [{"step_number": 1}, {"step_number": 2}, {"step_number": 6}]}
+
+    class Ex:
+        results = [{"test_case_id": "COV-IDOR-0001",
+                    "title": "Coverage: GET /todos/{id} blocks another user", "status": "FAIL",
+                    "steps": [{"step_number": 2, "status": "FAIL", "error": "login 401"}]}]
+    # failed at step 2 (login setup), not the assertion (step 6) → not a proven bug
+    assert OrchestratorService._confirmed_from_templates(Ex(), [tc], already=[]) == []
+
+
 def test_measure_and_fill_injects_template_when_uncovered():
     from services.context import QAXContext
     from services.progress import NullProgressReporter
