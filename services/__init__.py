@@ -52,6 +52,7 @@ from services.results import (
     GenerationResult,
     InvestigationResult,
     InvestigationVerdict,
+    OrchestratorResult,
     ProbeFinding,
     ProbeResult,
     ReportResult,
@@ -86,4 +87,5 @@ __all__ = [
     "DetectionResult",
     "ProbeFinding",
     "ProbeResult",
+    "OrchestratorResult",
 ]

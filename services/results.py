@@ -394,6 +394,59 @@ class AppModel:
 
 
 @dataclass
+class OrchestratorResult:
+    """
+    The outcome of a full autonomous run — the whole agent team conducted end to
+    end (model → detect → generate + red-team → execute → critic → investigate →
+    probe), with a coverage loop that guarantees the high-value goals are tested
+    rather than left to a lucky generation.
+
+    Attributes:
+        confirmed (list[dict]): Unified confirmed bugs — {title, severity, evidence,
+            source} from the Investigator and the probes.
+        coverage (dict): {goal: status} where status is "generation" (covered by a
+            generated test), "template" (a gap the orchestrator filled itself), or
+            "uncovered".
+        rounds (int): Generation rounds run.
+        tests_run (int): Total tests executed.
+        suspects (int): Detector suspects considered.
+        error (str | None): Set only when the run failed outright.
+    """
+
+    confirmed: list = field(default_factory=list)
+    coverage: dict = field(default_factory=dict)
+    rounds: int = 0
+    tests_run: int = 0
+    suspects: int = 0
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+    @property
+    def gaps_filled(self) -> list:
+        """Goals a generated test missed that the orchestrator filled itself."""
+        return [g for g, s in self.coverage.items() if s == "template"]
+
+    def summary(self) -> str:
+        """One-line human summary."""
+        return (f"{len(self.confirmed)} confirmed bug(s) · {self.tests_run} test(s) · "
+                f"{self.rounds} round(s) · {len(self.gaps_filled)} coverage gap(s) filled")
+
+    def to_dict(self) -> dict:
+        return {
+            "confirmed": self.confirmed,
+            "coverage": self.coverage,
+            "rounds": self.rounds,
+            "tests_run": self.tests_run,
+            "suspects": self.suspects,
+            "error": self.error,
+            "success": self.success,
+        }
+
+
+@dataclass
 class ProbeFinding:
     """
     The result of one active probe that tried to PROVE an exploit the standard
