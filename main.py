@@ -2469,6 +2469,12 @@ def run_scan_command() -> None:
     parser.add_argument("--project", default=None, help="QAX project name (optional).")
     parser.add_argument("--max-router-files", type=int, default=4,
                         help="Cap on router files to generate functional tests from.")
+    parser.add_argument("--quick", action="store_true",
+                        help="Quick scan — skip the LLM-heavy passes (knowledge, functional "
+                             "generation, red-team). Uses probes + deterministic coverage only; "
+                             "near-free, still proves JWT forgery/crashes and the security classes.")
+    parser.add_argument("--refresh", action="store_true",
+                        help="Ignore the cached app model and rebuild it.")
     parser.add_argument("--out", default=None, help="Write the full result to this JSON file.")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
@@ -2489,10 +2495,13 @@ def run_scan_command() -> None:
         print(f"\n  {exc}\n")
         sys.exit(1)
 
-    print(f"\n  QAX deep scan — repo: {args.repo}  ·  app: {args.url}\n")
+    mode = "quick" if args.quick else "deep"
+    print(f"\n  QAX {mode} scan — repo: {args.repo}  ·  app: {args.url}\n")
     result = OrchestratorService(ctx).run(
         args.repo, args.url,
+        deep=not args.quick,
         max_router_files=args.max_router_files,
+        use_cache=not args.refresh,
         progress=PrintProgressReporter())
 
     if result.error:

@@ -49,17 +49,25 @@ class OrchestratorService:
         repo_path: str,
         base_url: str,
         *,
+        deep: bool = True,
         max_router_files: int = 4,
+        use_cache: bool = True,
         progress: ProgressReporter | None = None,
     ) -> OrchestratorResult:
         """
-        Run the full autonomous pipeline over a repo against a live app.
+        Run the autonomous pipeline over a repo against a live app.
 
         Args:
             repo_path (str): Repository root to model and test.
             base_url (str): The running app to execute/probe against.
-            max_router_files (int): Cap on router files to generate functional
-                tests from.
+            deep (bool): Full run when True. When False ("quick scan"), skip the
+                LLM-heavy passes — the knowledge-pass, per-router functional
+                generation, and red-team — and rely on the model, the static
+                detectors, the active probes, and the deterministic coverage
+                templates. A quick scan makes ~1 model call (or 0 when cached) yet
+                still proves the exploit probes and the guaranteed security classes.
+            max_router_files (int): Cap on router files for functional generation.
+            use_cache (bool): Reuse a cached AppModel for unchanged source.
             progress (ProgressReporter | None): Progress sink.
 
         Returns:
@@ -67,10 +75,10 @@ class OrchestratorService:
                 runtime.
 
         Raises:
-            QAXConfigError: If the Anthropic API key is missing.
+            QAXConfigError: If the Anthropic API key is missing and a fresh model
+                (or an LLM pass) is needed.
         """
         prog = progress or NullProgressReporter()
-        self.context.require_anthropic_key()
 
         from services.appmodel_service import AppModelService
         from services.critic_service import CriticService
@@ -81,46 +89,57 @@ class OrchestratorService:
         from services.probe_service import ProbeService
         from services.redteam_service import RedTeamService
 
-        # 1) Understand the whole system.
+        # 1) Understand the whole system (cached when the source is unchanged).
         prog.emit("orchestrate", "step", "modelling the system")
-        model = AppModelService(self.context).build(repo_path, progress=prog)
+        model = AppModelService(self.context).build(repo_path, use_cache=use_cache, progress=prog)
         if not model.success:
             return OrchestratorResult(error=model.error or "AppModel failed")
 
-        # 2) Suspect where the bugs are.
-        detection = DetectorService(self.context).detect(model, progress=prog)
+        # 2) Suspect where the bugs are (the knowledge pass is an LLM call — deep only).
+        detection = DetectorService(self.context).detect(
+            model, use_knowledge_pass=deep, progress=prog)
 
-        # 3) Prove the exploits HTTP steps can't express (JWT forgery, crashes).
+        # 3) Prove the exploits HTTP steps can't express (JWT forgery, crashes) — free.
         probe_result = ProbeService(self.context).run(model, base_url, progress=prog)
 
-        # 4) Generate: functional (per router) + adversarial (red-team).
-        prog.emit("orchestrate", "step", "generating tests")
+        # 4) Generate: functional (per router) + adversarial (red-team) — deep only.
         tests: list[dict] = []
-        for fpath in self._router_files(model, repo_path)[:max_router_files]:
+        if deep:
+            prog.emit("orchestrate", "step", "generating tests")
+            for fpath in self._router_files(model, repo_path)[:max_router_files]:
+                try:
+                    gen = GenerationService(self.context).generate(
+                        fpath, options=GenerationOptions(
+                            test_type="api", repo_context=model.as_context(), use_cache=False))
+                    tests.extend(gen.test_cases)
+                except Exception as exc:
+                    logger.warning("orchestrator generation failed for %s: %s", fpath, exc)
             try:
-                gen = GenerationService(self.context).generate(
-                    fpath, options=GenerationOptions(
-                        test_type="api", repo_context=model.as_context(), use_cache=False))
-                tests.extend(gen.test_cases)
+                rt = RedTeamService(self.context).generate(model, detection, progress=prog)
+                tests.extend(rt.test_cases)
             except Exception as exc:
-                logger.warning("orchestrator generation failed for %s: %s", fpath, exc)
-        try:
-            rt = RedTeamService(self.context).generate(model, detection, progress=prog)
-            tests.extend(rt.test_cases)
-        except Exception as exc:
-            logger.warning("orchestrator red-team failed: %s", exc)
+                logger.warning("orchestrator red-team failed: %s", exc)
+        else:
+            prog.emit("orchestrate", "info", "quick scan — probes + deterministic coverage only")
 
         # 5) Coverage loop: check the high-value goals; fill gaps with templates.
         coverage = self._measure_and_fill(model, tests, prog)
 
-        # 6) Execute → Critic → Investigator.
+        # 6) Execute → Critic → Investigator. The verify legs make LLM calls only
+        #    when there are failures; wrapped so a missing key/credit degrades to
+        #    the probe-proven bugs instead of crashing the scan.
         executable = [t for t in tests if t.get("api_steps")]
         prog.emit("orchestrate", "step", f"executing {len(executable)} test(s)")
         execution = ExecutionService(self.context).execute(
             executable, mode="api", base_url=base_url)
-        critic = CriticService(self.context).review(execution, executable)
-        investigation = InvestigatorService(self.context).investigate(
-            critic, executable, base_url=base_url)
+        investigation = None
+        try:
+            critic = CriticService(self.context).review(execution, executable)
+            investigation = InvestigatorService(self.context).investigate(
+                critic, executable, base_url=base_url)
+        except Exception as exc:
+            logger.warning("orchestrator verify legs skipped: %s", exc)
+            prog.emit("orchestrate", "info", f"verify skipped ({exc})")
 
         # 7) Unify confirmed bugs (tests + probes).
         confirmed = self._unify(investigation, probe_result)

@@ -1759,16 +1759,18 @@ with tab2:
 # TAB — DEEP SCAN (the full autonomous agent team / Orchestrator)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_deep_scan(repo: str, url: str, max_router_files: int) -> None:
+def _run_deep_scan(repo: str, url: str, max_router_files: int, deep: bool = True) -> None:
     """Run the Orchestrator over a repo + live app and store the result."""
     from services.context import QAXContext
     from services.orchestrator_service import OrchestratorService
 
     ctx = QAXContext.from_env(project=st.session_state.get("active_project", ""))
+    _msg = ("Deep scan — model → detect → probe → generate → attack → execute → verify"
+            if deep else "Quick scan — model → probes → deterministic coverage → verify")
     try:
-        with st.spinner("Deep scan running — model → detect → probe → generate → "
-                        "attack → execute → verify. This takes a few minutes…"):
-            result = OrchestratorService(ctx).run(repo, url, max_router_files=max_router_files)
+        with st.spinner(f"{_msg}. This takes a bit…"):
+            result = OrchestratorService(ctx).run(
+                repo, url, deep=deep, max_router_files=max_router_files)
     except Exception as exc:
         st.error(f"Scan error: {exc}")
         return
@@ -1795,15 +1797,23 @@ with tab5:
     with c2:
         st.text_input("Running app URL", key="scan_url",
                       help="The live app to execute and probe against.")
-    st.slider("Router files to cover", 1, 10, 4, key="scan_max_files",
-              help="How many endpoint files to generate functional tests from.")
+    sc1, sc2 = st.columns([2, 1])
+    with sc1:
+        st.slider("Router files to cover", 1, 10, 4, key="scan_max_files",
+                  help="How many endpoint files to generate functional tests from (deep scan).")
+    with sc2:
+        st.checkbox("⚡ Quick scan", key="scan_quick",
+                    help="Skip the costly LLM passes — run the active probes and the deterministic "
+                         "security/validation coverage only. Near-free; still proves JWT forgery, "
+                         "crashes, auth, IDOR and validation.")
 
     _scan_conn = get_connection_status()
     if not _scan_conn["claude"]:
         st.warning("Claude API key not configured — Deep Scan needs it. Add ANTHROPIC_API_KEY in .env.")
 
-    if st.button("🛡️ Run deep scan", type="primary", key="deep_scan_run",
-                 disabled=not _scan_conn["claude"]):
+    _quick = st.session_state.get("scan_quick", False)
+    if st.button(("⚡ Run quick scan" if _quick else "🛡️ Run deep scan"),
+                 type="primary", key="deep_scan_run", disabled=not _scan_conn["claude"]):
         _repo = st.session_state.get("scan_repo", "").strip()
         if not _repo or not Path(_repo).exists():
             st.error("Enter a valid repository path.")
@@ -1811,7 +1821,7 @@ with tab5:
             st.error("Enter the running app URL.")
         else:
             _run_deep_scan(_repo, st.session_state["scan_url"].strip(),
-                           st.session_state.get("scan_max_files", 4))
+                           st.session_state.get("scan_max_files", 4), deep=not _quick)
 
     _scan = st.session_state.get("deep_scan_result")
     if _scan and not _scan.error:

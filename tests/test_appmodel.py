@@ -62,7 +62,7 @@ def test_builds_model_and_surfaces_exposed_secret(tmp_path):
     (tmp_path / "app" / "config.py").write_text('jwt_secret = "change-this"\n')
     (tmp_path / "app" / "main.py").write_text("x = 1\n")
     with patch("anthropic.Anthropic", return_value=_fake_anthropic(_model_json())):
-        model = AppModelService(_ctx()).build(str(tmp_path))
+        model = AppModelService(_ctx()).build(str(tmp_path), use_cache=False)
     assert model.success
     assert len(model.endpoints) == 1
     # The crown-jewel finding: a hardcoded secret is surfaced.
@@ -75,7 +75,7 @@ def test_builds_model_and_surfaces_exposed_secret(tmp_path):
 def test_contract_mismatch_view(tmp_path):
     (tmp_path / "f.py").write_text("x=1\n")
     with patch("anthropic.Anthropic", return_value=_fake_anthropic(_model_json())):
-        model = AppModelService(_ctx()).build(str(tmp_path))
+        model = AppModelService(_ctx()).build(str(tmp_path), use_cache=False)
     assert len(model.contract_mismatches) == 1
     ctx_text = model.as_context()
     assert "EXPOSED SECRETS" in ctx_text
@@ -87,16 +87,32 @@ def test_non_secret_default_is_not_flagged(tmp_path):
     reply = json.dumps({"config": [{"key": "jwt_expire_minutes", "default": 60,
                                     "is_secret": False, "risk": ""}]})
     with patch("anthropic.Anthropic", return_value=_fake_anthropic(reply)):
-        model = AppModelService(_ctx()).build(str(tmp_path))
+        model = AppModelService(_ctx()).build(str(tmp_path), use_cache=False)
     assert model.exposed_secrets == []
 
 
 def test_bad_json_captured_not_crash(tmp_path):
     (tmp_path / "f.py").write_text("x=1\n")
     with patch("anthropic.Anthropic", return_value=_fake_anthropic("not json")):
-        model = AppModelService(_ctx()).build(str(tmp_path))
+        model = AppModelService(_ctx()).build(str(tmp_path), use_cache=False)
     assert model.success            # empty model, not an error
     assert model.endpoints == []
+
+
+def test_cache_hit_skips_the_model_call(tmp_path, monkeypatch):
+    # Point the cache at a temp dir so the test is isolated.
+    monkeypatch.setattr(AppModelService, "_CACHE_DIR", tmp_path / "cache")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "config.py").write_text('jwt_secret = "x"\n')
+
+    fake = _fake_anthropic(_model_json())
+    with patch("anthropic.Anthropic", return_value=fake):
+        m1 = AppModelService(_ctx()).build(str(tmp_path))       # builds + caches
+        m2 = AppModelService(_ctx()).build(str(tmp_path))       # cache hit
+    assert m1.success and m2.success
+    assert len(m2.exposed_secrets) == 1                          # same result from cache
+    # The model call happened exactly once — the second build was free.
+    assert fake.messages.create.call_count == 1
 
 
 def test_skips_vendored_dirs(tmp_path):

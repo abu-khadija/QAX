@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -61,6 +62,7 @@ class AppModelService:
         repo_path: str,
         *,
         max_files: int = 60,
+        use_cache: bool = True,
         progress: ProgressReporter | None = None,
     ) -> AppModel:
         """
@@ -69,27 +71,40 @@ class AppModelService:
         Args:
             repo_path (str): Root of the repository to model.
             max_files (int): Safety cap on files read into the digest.
+            use_cache (bool): Reuse a cached model when the source is unchanged —
+                the App Model is the most expensive single call, so re-scans of the
+                same code cost nothing.
             progress (ProgressReporter | None): Progress sink.
 
         Returns:
             AppModel: The structured model. Never raises at runtime.
 
         Raises:
-            QAXConfigError: If the Anthropic API key is missing.
+            QAXConfigError: If the Anthropic API key is missing (only when a fresh
+                model must be built).
         """
         prog = progress or NullProgressReporter()
         root = Path(repo_path)
         if not root.exists():
             return AppModel(root=str(repo_path), error=f"Path not found: {repo_path}")
 
-        self.context.require_anthropic_key()
         prog.emit("appmodel", "start", f"reading {root}")
-
         files = self._collect_files(root, max_files)
         if not files:
             return AppModel(root=str(root), error="No source files found to model.")
 
         digest = self._build_digest(root, files)
+
+        # Cache on the digest — unchanged source ⇒ no model call.
+        cache_key = hashlib.sha256(digest.encode("utf-8")).hexdigest()[:20]
+        if use_cache:
+            cached = self._load_cache(cache_key)
+            if cached is not None:
+                prog.emit("appmodel", "ok", f"cache hit ({len(files)} file(s))")
+                cached.root = str(root)
+                return cached
+
+        self.context.require_anthropic_key()
         prog.emit("appmodel", "info", f"modelling {len(files)} file(s)")
 
         try:
@@ -110,9 +125,46 @@ class AppModelService:
             risks=data.get("risks") or [],
             file_count=len(files),
         )
+        if use_cache:
+            self._save_cache(cache_key, model)
         prog.emit("appmodel", "ok",
                   f"{len(model.endpoints)} endpoint(s), {len(model.exposed_secrets)} exposed secret(s)")
         return model
+
+    # ── Cache ─────────────────────────────────────────────────────────────────
+
+    _CACHE_DIR = Path("output/cache")
+
+    @classmethod
+    def _cache_path(cls, key: str) -> Path:
+        return cls._CACHE_DIR / f"appmodel_{key}.json"
+
+    @classmethod
+    def _load_cache(cls, key: str) -> AppModel | None:
+        """Load a cached AppModel by digest key, or None on any miss/error."""
+        path = cls._cache_path(key)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return AppModel(
+                root=data.get("root", ""), files=data.get("files") or [],
+                endpoints=data.get("endpoints") or [], entities=data.get("entities") or [],
+                config=data.get("config") or [], auth=data.get("auth") or {},
+                contracts=data.get("contracts") or [], risks=data.get("risks") or [],
+                file_count=data.get("file_count", 0))
+        except Exception:
+            return None
+
+    @classmethod
+    def _save_cache(cls, key: str, model: AppModel) -> None:
+        """Persist an AppModel so an unchanged repo is not re-modelled."""
+        try:
+            cls._CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cls._cache_path(key).write_text(
+                json.dumps(model.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug("AppModel cache save failed (non-fatal): %s", exc)
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
