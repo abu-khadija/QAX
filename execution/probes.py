@@ -409,6 +409,92 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
     return out
 
 
+def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+    """
+    Cookie hardening (QA knowledge base sec 1.3): a cookie set at login should carry
+    HttpOnly (and Secure over HTTPS). Reads the raw Set-Cookie header(s) from the
+    register/login responses. Bearer-token APIs (no cookies) no-op cleanly, so this
+    only speaks when there is a real cookie to judge — low false positives. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, register_body
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    is_https = base.lower().startswith("https")
+
+    ident = f"cookie_{uuid.uuid4().hex[:8]}@example.com"
+    set_cookies: list[str] = []
+    for path, body in ((recipe["register_path"], register_body(recipe, model, ident)),
+                       (recipe["login_path"], None)):
+        try:
+            if body is not None:
+                r = sess.post(f"{base}{path}", json=body, timeout=15)
+            else:
+                # Reuse the login identifier the register body used.
+                lb = {recipe["id_field"]: ident, recipe["secret_field"]: "Secret123!"}
+                r = sess.post(f"{base}{path}", json=lb, timeout=15)
+        except Exception:
+            continue
+        # requests joins multiple Set-Cookie values; split defensively on ", <name>=".
+        raw = r.headers.get("Set-Cookie") or ""
+        if raw:
+            set_cookies.append(raw)
+
+    seen: set = set()
+    for raw in set_cookies:
+        for piece in re.split(r",(?=[^;=]+=)", raw):
+            attrs = piece.strip().lower()
+            name = piece.strip().split("=", 1)[0].strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            missing = []
+            if "httponly" not in attrs:
+                missing.append("HttpOnly")
+            if is_https and "secure" not in attrs:
+                missing.append("Secure")
+            if missing:
+                sev = "P2" if "HttpOnly" in missing else "P3"
+                out.append(ProbeFinding(
+                    probe="cookie-flags",
+                    title=f"Cookie '{name}' is missing {', '.join(missing)}",
+                    exploited=True, severity=sev,
+                    evidence=(f"Login set cookie '{name}' without {', '.join(missing)}. "
+                              + ("Without HttpOnly it is readable by JavaScript (XSS → session theft). "
+                                 if "HttpOnly" in missing else "")
+                              + ("Without Secure it can leak over plain HTTP. " if "Secure" in missing else "")),
+                    target=recipe["login_path"]))
+    return out
+
+
+def error_handling_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+    """
+    Robustness: an unknown route must return 404, not a 5xx (QA knowledge base sec
+    1.8). A 500 on a path that CANNOT exist pollutes monitoring/alerting and makes
+    real faults indistinguishable from scanner noise. Uses a guaranteed-nonexistent
+    control path, so any 5xx is unambiguous — near-zero false positives. No model calls.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    nonsense = f"/qax_nonexistent_{uuid.uuid4().hex[:12]}/does/not/exist"
+    try:
+        r = sess.get(f"{base}{nonsense}", timeout=15)
+    except Exception:
+        return out
+    if r.status_code >= 500:
+        out.append(ProbeFinding(
+            probe="error-handling",
+            title="Unknown routes return a server error (5xx) instead of 404",
+            exploited=True, severity="P3",
+            evidence=(f"GET {nonsense} — a path that cannot exist — returned HTTP {r.status_code}. "
+                      f"Unknown routes should return 404; a 5xx pollutes monitoring and makes real "
+                      f"faults and scans indistinguishable from crashes."),
+            target=nonsense))
+    return out
+
+
 def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """Send oversized inputs to auth endpoints and flag any 5xx (unhandled crash)."""
     sess = session or requests.Session()

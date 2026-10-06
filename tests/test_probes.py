@@ -12,7 +12,8 @@ from unittest.mock import MagicMock
 
 import json as _json
 
-from execution.probes import (bola_probe, crash_fuzz_probe, excessive_data_probe,
+from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
+                               error_handling_probe, excessive_data_probe,
                                forge_jwt_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
@@ -268,6 +269,60 @@ def test_excessive_data_flags_password_in_response():
 
 def test_excessive_data_quiet_on_clean_responses():
     assert excessive_data_probe(_model_listings(), "http://x", session=_EdeSession(leak=False)) == []
+
+
+# ── error-handling probe (unknown route should 404, not 5xx) ─────────────────
+
+def test_error_handling_flags_5xx_on_nonsense_route():
+    class Sess:
+        def get(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=500, text="boom")
+    out = error_handling_probe(AppModel(root="/x"), "http://x", session=Sess())
+    assert len(out) == 1 and out[0].probe == "error-handling" and out[0].severity == "P3"
+
+
+def test_error_handling_quiet_on_404():
+    class Sess:
+        def get(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=404, text="not found")
+    assert error_handling_probe(AppModel(root="/x"), "http://x", session=Sess()) == []
+
+
+# ── cookie-flags probe ───────────────────────────────────────────────────────
+
+def _model_cookie_auth() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/auth/register", "auth_required": False,
+         "request_fields": ["email", "password"]},
+        {"method": "POST", "path": "/auth/login", "auth_required": False,
+         "request_fields": ["email", "password"]},
+    ])
+
+
+class _CookieSession:
+    def __init__(self, set_cookie):
+        self._sc = set_cookie
+
+    def post(self, url, json=None, timeout=None):
+        headers = {"Set-Cookie": self._sc} if "login" in url else {}
+        return MagicMock(status_code=200, headers=headers, text="{}")
+
+
+def test_cookie_flags_flags_missing_httponly():
+    sess = _CookieSession("session=abc123; Path=/; SameSite=Lax")
+    out = cookie_flags_probe(_model_cookie_auth(), "https://x", session=sess)
+    assert any(f.probe == "cookie-flags" and "HttpOnly" in f.title and f.severity == "P2" for f in out)
+
+
+def test_cookie_flags_quiet_when_hardened():
+    sess = _CookieSession("session=abc123; Path=/; HttpOnly; Secure; SameSite=Lax")
+    assert cookie_flags_probe(_model_cookie_auth(), "https://x", session=sess) == []
+
+
+def test_cookie_flags_noop_on_bearer_api():
+    # No Set-Cookie anywhere (token APIs) → nothing to judge.
+    sess = _CookieSession("")
+    assert cookie_flags_probe(_model_cookie_auth(), "https://x", session=sess) == []
 
 
 # ── ProbeService ─────────────────────────────────────────────────────────────
