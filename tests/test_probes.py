@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 import json as _json
 
 from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
-                               error_handling_probe, excessive_data_probe,
-                               forge_jwt_probe, sign_jwt_hs, sqli_probe)
+                               debug_disclosure_probe, error_handling_probe,
+                               excessive_data_probe, forge_jwt_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -323,6 +323,34 @@ def test_cookie_flags_noop_on_bearer_api():
     # No Set-Cookie anywhere (token APIs) → nothing to judge.
     sess = _CookieSession("")
     assert cookie_flags_probe(_model_cookie_auth(), "https://x", session=sess) == []
+
+
+# ── debug-disclosure probe ───────────────────────────────────────────────────
+
+class _DebugSession:
+    def __init__(self, body):
+        self._body = body
+
+    def get(self, url, headers=None, timeout=None):
+        return MagicMock(status_code=500, text=self._body)
+
+
+def test_debug_disclosure_flags_interactive_debugger_p1():
+    body = "<title>OperationalError // Werkzeug Debugger</title><script src='?__debugger__=yes'>"
+    out = debug_disclosure_probe(_model_lookup(), "http://x", session=_DebugSession(body))
+    assert len(out) == 1 and out[0].severity == "P1" and out[0].probe == "debug-disclosure"
+
+
+def test_debug_disclosure_flags_stack_trace_p2():
+    body = 'Traceback (most recent call last):\n  File "/app/x.py", line 5, in get'
+    out = debug_disclosure_probe(_model_lookup(), "http://x", session=_DebugSession(body))
+    assert len(out) == 1 and out[0].severity == "P2"
+
+
+def test_debug_disclosure_quiet_on_generic_error():
+    out = debug_disclosure_probe(_model_lookup(), "http://x",
+                                 session=_DebugSession('{"error":"Internal Server Error"}'))
+    assert out == []
 
 
 # ── ProbeService ─────────────────────────────────────────────────────────────

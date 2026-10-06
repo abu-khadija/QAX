@@ -468,6 +468,67 @@ def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None
     return out
 
 
+# Interactive debuggers (exposed = source disclosure AND often remote code execution).
+_DEBUG_INTERACTIVE = ("werkzeug debugger", "__debugger__", "flask debugtoolbar",
+                      "console.png?__debugger__", "werkzeug powered traceback interpreter")
+# Stack-trace / internal-error disclosure (source paths, framework internals).
+_DEBUG_TRACE = ("traceback (most recent call last)", "sqlalchemy.exc", "psycopg2.",
+                "application trace", "exception value:", "request method:",
+                'at object.<anonymous>', ".py&#34;, line ", '.py", line ', "stack trace:")
+
+
+def debug_disclosure_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+    """
+    Debug-mode / stack-trace disclosure (QA knowledge base sec 1.9): a deployed app
+    should never return an interactive debugger or a raw stack trace. Provokes an
+    error with a malformed path value, then looks for HIGH-CONFIDENCE signatures
+    only (a regex hit is a lead, not a finding — so weak matches are excluded).
+    An exposed interactive debugger is P1 (often RCE); a bare stack trace is P2.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    lookups = [e for e in getattr(model, "endpoints", [])
+               if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+               and "{" in str(e.get("path", ""))]
+    seen: set = set()
+    for e in lookups[:4]:
+        path = str(e.get("path", ""))
+        m = re.search(r"\{([^}]+)\}", path)
+        if not m:
+            continue
+        resolved = path.replace("{" + m.group(1) + "}", "qax%27%22bad")
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            r = sess.get(f"{base}{resolved}", timeout=15)
+        except Exception:
+            continue
+        body = (r.text or "").lower()
+        if any(s in body for s in _DEBUG_INTERACTIVE):
+            out.append(ProbeFinding(
+                probe="debug-disclosure",
+                title=f"Interactive debugger exposed on {e.get('method')} {path}",
+                exploited=True, severity="P1",
+                evidence=(f"An error on {path} returned an interactive debugger page (HTTP "
+                          f"{r.status_code}). This leaks source and stack frames and its console "
+                          f"can lead to remote code execution — debug mode must be off in a "
+                          f"deployed app."),
+                target=path))
+        elif any(s in body for s in _DEBUG_TRACE):
+            out.append(ProbeFinding(
+                probe="debug-disclosure",
+                title=f"Stack trace / internal error disclosed on {e.get('method')} {path}",
+                exploited=True, severity="P2",
+                evidence=(f"An error on {path} returned a raw stack trace / framework internals "
+                          f"(HTTP {r.status_code}), disclosing source paths and implementation "
+                          f"detail that aid an attacker. Errors should be generic."),
+                target=path))
+    return out
+
+
 def error_handling_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """
     Robustness: an unknown route must return 404, not a 5xx (QA knowledge base sec

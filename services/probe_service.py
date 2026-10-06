@@ -64,8 +64,8 @@ class ProbeService:
             return ProbeResult(error="No base_url to probe against.")
 
         from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
-                                       error_handling_probe, excessive_data_probe,
-                                       forge_jwt_probe, sqli_probe)
+                                       debug_disclosure_probe, error_handling_probe,
+                                       excessive_data_probe, forge_jwt_probe, sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -114,6 +114,12 @@ class ProbeService:
             findings.extend(cookie_flags_probe(model, base_url))
         except Exception as exc:
             logger.error("cookie_flags probe failed: %s", exc)
+
+        # Debug disclosure — an interactive debugger / stack trace on an error.
+        try:
+            findings.extend(debug_disclosure_probe(model, base_url))
+        except Exception as exc:
+            logger.error("debug_disclosure probe failed: %s", exc)
 
         result = ProbeResult(findings=findings)
         prog.emit("probe", "ok", result.summary())
