@@ -95,6 +95,19 @@ class OrchestratorService:
         if not model.success:
             return OrchestratorResult(error=model.error or "AppModel failed")
 
+        # 1b) Ground the endpoints in the RUNNING app (rule #1: the running app is
+        #     the source of truth; the code only says WHAT is risky). The code model
+        #     keeps config/secrets/risks; the live OpenAPI spec supplies exact paths.
+        try:
+            from services.live_surface import ground_endpoints
+            live = ground_endpoints(base_url)
+            if live:
+                model.endpoints = live
+                prog.emit("orchestrate", "info",
+                          f"grounded {len(live)} endpoint(s) from the live app spec")
+        except Exception as exc:
+            logger.warning("live endpoint grounding failed: %s", exc)
+
         # 2) Suspect where the bugs are (the knowledge pass is an LLM call — deep only).
         detection = DetectorService(self.context).detect(
             model, use_knowledge_pass=deep, progress=prog)
