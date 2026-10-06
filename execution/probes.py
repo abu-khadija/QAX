@@ -321,6 +321,81 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None)
     return out
 
 
+# Field names that must NEVER appear in a response body — a credential or secret
+# in output is an exposure regardless of auth. Token-family names are deliberately
+# excluded: a login returning an access_token is the expected, correct behaviour.
+_SENSITIVE_OUT = ("password", "passwd", "pwd", "secret", "private_key", "privatekey",
+                  "ssn", "social_security", "credit_card", "creditcard", "card_number",
+                  "cardnumber", "cvv", "cvc", "salt", "password_hash", "pwd_hash")
+
+
+def _sensitive_keys(data, found: set | None = None) -> set:
+    """Recursively collect response keys that name a credential/secret with a value."""
+    found = found if found is not None else set()
+    if isinstance(data, dict):
+        for k, v in data.items():
+            kl = str(k).lower()
+            if any(s in kl for s in _SENSITIVE_OUT) and v not in (None, "", [], {}):
+                found.add(str(k))
+            _sensitive_keys(v, found)
+    elif isinstance(data, list):
+        for item in data:
+            _sensitive_keys(item, found)
+    return found
+
+
+def excessive_data_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+    """
+    Excessive Data Exposure: fetch each GET endpoint and inspect the LIVE response
+    body (not the spec — nested secrets don't show as top-level fields) for keys
+    that should never be returned. A credential in output, especially on an
+    unauthenticated endpoint, is the finding. Deterministic, no model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    gets = [e for e in getattr(model, "endpoints", [])
+            if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"]
+    token = None
+    seen: set = set()
+    for e in gets[:12]:
+        path = str(e.get("path", ""))
+        resolved = re.sub(r"\{[^}]+\}", "qaxprobe1", path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        headers = {}
+        if e.get("auth_required"):
+            if token is None:
+                token = _auth_token(sess, base, recipe, model, f"ede_{uuid.uuid4().hex[:8]}@example.com")
+            if not token:
+                continue
+            headers = {"Authorization": f"Bearer {token}"}
+        try:
+            r = sess.get(f"{base}{resolved}", headers=headers, timeout=15)
+            if r.status_code >= 400:
+                continue
+            data = r.json()
+        except Exception:
+            continue
+        hits = _sensitive_keys(data)
+        if hits:
+            public = not e.get("auth_required")
+            out.append(ProbeFinding(
+                probe="excessive-data",
+                title=f"Excessive data exposure in GET {path}",
+                exploited=True, severity="P1" if public else "P2",
+                evidence=(f"The response exposes sensitive field(s) {sorted(hits)} "
+                          + ("with NO authentication required" if public
+                             else "to any authenticated user")
+                          + f" (HTTP {r.status_code}). Credentials/secrets must never be returned."),
+                target=path))
+    return out
+
+
 def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """Send oversized inputs to auth endpoints and flag any 5xx (unhandled crash)."""
     sess = session or requests.Session()

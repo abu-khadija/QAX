@@ -63,7 +63,8 @@ class ProbeService:
         if not base_url or not str(base_url).strip():
             return ProbeResult(error="No base_url to probe against.")
 
-        from execution.probes import bola_probe, crash_fuzz_probe, forge_jwt_probe, sqli_probe
+        from execution.probes import (bola_probe, crash_fuzz_probe, excessive_data_probe,
+                                       forge_jwt_probe, sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -88,6 +89,12 @@ class ProbeService:
             findings.extend(bola_probe(model, base_url))
         except Exception as exc:
             logger.error("bola probe failed: %s", exc)
+
+        # Excessive data exposure — credentials/secrets returned in a response body.
+        try:
+            findings.extend(excessive_data_probe(model, base_url))
+        except Exception as exc:
+            logger.error("excessive_data probe failed: %s", exc)
 
         # Crash-fuzz — oversized inputs on auth endpoints.
         try:

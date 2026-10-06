@@ -12,7 +12,8 @@ from unittest.mock import MagicMock
 
 import json as _json
 
-from execution.probes import bola_probe, crash_fuzz_probe, forge_jwt_probe, sign_jwt_hs, sqli_probe
+from execution.probes import (bola_probe, crash_fuzz_probe, excessive_data_probe,
+                               forge_jwt_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -218,6 +219,37 @@ def test_bola_flags_cross_user_read():
 
 def test_bola_quiet_when_ownership_enforced():
     assert bola_probe(_model_owned_resource(), "http://x", session=_BolaSession(vulnerable=False)) == []
+
+
+# ── excessive-data probe (response-body inspection) ──────────────────────────
+
+def _model_listings() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/users/v1/_debug", "auth_required": False},
+        {"method": "GET", "path": "/users/v1", "auth_required": False},
+    ])
+
+
+class _EdeSession:
+    def __init__(self, leak=True):
+        self.leak = leak
+
+    def get(self, url, headers=None, timeout=None):
+        if url.endswith("_debug") and self.leak:
+            return MagicMock(status_code=200, json=lambda: {
+                "users": [{"username": "a", "email": "a@x.com", "password": "pass1"}]})
+        return MagicMock(status_code=200, json=lambda: {"users": ["a", "b"]})
+
+
+def test_excessive_data_flags_password_in_response():
+    out = excessive_data_probe(_model_listings(), "http://x", session=_EdeSession(leak=True))
+    assert len(out) == 1 and out[0].exploited and out[0].severity == "P1"
+    assert "password" in out[0].evidence.lower()
+    assert out[0].target == "/users/v1/_debug"
+
+
+def test_excessive_data_quiet_on_clean_responses():
+    assert excessive_data_probe(_model_listings(), "http://x", session=_EdeSession(leak=False)) == []
 
 
 # ── ProbeService ─────────────────────────────────────────────────────────────
