@@ -63,7 +63,7 @@ class ProbeService:
         if not base_url or not str(base_url).strip():
             return ProbeResult(error="No base_url to probe against.")
 
-        from execution.probes import crash_fuzz_probe, forge_jwt_probe
+        from execution.probes import bola_probe, crash_fuzz_probe, forge_jwt_probe, sqli_probe
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -76,6 +76,18 @@ class ProbeService:
                     findings.append(f)
             except Exception as exc:
                 logger.error("forge_jwt probe failed: %s", exc)
+
+        # SQLi — error-based, with a benign-vs-quote control on lookup endpoints.
+        try:
+            findings.extend(sqli_probe(model, base_url))
+        except Exception as exc:
+            logger.error("sqli probe failed: %s", exc)
+
+        # BOLA — two-user control: can user B read user A's object by its key?
+        try:
+            findings.extend(bola_probe(model, base_url))
+        except Exception as exc:
+            logger.error("bola probe failed: %s", exc)
 
         # Crash-fuzz — oversized inputs on auth endpoints.
         try:

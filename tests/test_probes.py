@@ -10,7 +10,9 @@ Run with:
 
 from unittest.mock import MagicMock
 
-from execution.probes import crash_fuzz_probe, forge_jwt_probe, sign_jwt_hs
+import json as _json
+
+from execution.probes import bola_probe, crash_fuzz_probe, forge_jwt_probe, sign_jwt_hs, sqli_probe
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -120,6 +122,102 @@ def test_crash_fuzz_quiet_when_handled():
         def post(self, url, json=None, timeout=None):
             return MagicMock(status_code=422, text="too long")
     assert crash_fuzz_probe(_model_with_secret(), "http://x", session=Sess()) == []
+
+
+# ── sqli probe (benign-vs-quote control) ─────────────────────────────────────
+
+def _model_lookup() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/users/v1/{username}", "auth_required": False},
+    ])
+
+
+class _SqliSession:
+    """A lookup where a single quote breaks the query only when vulnerable."""
+    def __init__(self, vulnerable=True):
+        self.vulnerable = vulnerable
+
+    def get(self, url, headers=None, timeout=None):
+        if url.endswith("'"):
+            if self.vulnerable:
+                return MagicMock(status_code=500, text="sqlite3.OperationalError: near syntax error")
+            return MagicMock(status_code=404, text="not found")
+        return MagicMock(status_code=404, text="not found")
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_sqli_flags_quote_that_breaks_the_query():
+    out = sqli_probe(_model_lookup(), "http://x", session=_SqliSession(vulnerable=True))
+    assert len(out) == 1 and out[0].exploited and out[0].severity == "P1"
+    assert "injection" in out[0].title.lower()
+
+
+def test_sqli_quiet_when_parameterized():
+    assert sqli_probe(_model_lookup(), "http://x", session=_SqliSession(vulnerable=False)) == []
+
+
+# ── bola probe (two-user control) ────────────────────────────────────────────
+
+def _model_owned_resource() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/users/v1/register", "auth_required": False,
+         "request_fields": ["username", "password", "email"]},
+        {"method": "POST", "path": "/users/v1/login", "auth_required": False,
+         "request_fields": ["username", "password"], "response_fields": ["auth_token"]},
+        {"method": "POST", "path": "/books/v1", "auth_required": True,
+         "request_fields": ["book_title", "secret"]},
+        {"method": "GET", "path": "/books/v1/{book_title}", "auth_required": True},
+    ])
+
+
+class _BolaSession:
+    """Auth + an owned object; reads ignore ownership only when vulnerable."""
+    def __init__(self, vulnerable=True):
+        self.vulnerable = vulnerable
+        self.books = {}  # title -> {"secret", "owner"}
+
+    def _who(self, headers):
+        tok = (headers or {}).get("Authorization", "").replace("Bearer ", "")
+        return tok[4:] if tok.startswith("tok:") else None
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        if "register" in url:
+            return MagicMock(status_code=200, text="{}")
+        if "login" in url:
+            user = (json or {}).get("username")
+            return MagicMock(status_code=200, json=lambda: {"auth_token": f"tok:{user}"}, text="{}")
+        if url.rstrip("/").endswith("/books/v1"):
+            owner = self._who(headers)
+            if owner is None:
+                return MagicMock(status_code=401, text="no")
+            self.books[(json or {}).get("book_title")] = {"secret": (json or {}).get("secret"), "owner": owner}
+            return MagicMock(status_code=200, text="{}")
+        return MagicMock(status_code=404, text="no")
+
+    def get(self, url, headers=None, timeout=None):
+        who = self._who(headers)
+        if who is None:
+            return MagicMock(status_code=401, text="no")
+        title = url.rsplit("/", 1)[-1]
+        b = self.books.get(title)
+        if not b:
+            return MagicMock(status_code=404, text="not found")
+        if self.vulnerable or b["owner"] == who:
+            return MagicMock(status_code=200,
+                             text=_json.dumps({"book_title": title, "secret": b["secret"], "owner": b["owner"]}))
+        return MagicMock(status_code=404, text="not found")
+
+
+def test_bola_flags_cross_user_read():
+    out = bola_probe(_model_owned_resource(), "http://x", session=_BolaSession(vulnerable=True))
+    assert len(out) == 1 and out[0].exploited and out[0].severity == "P1"
+    assert "authorization" in out[0].title.lower()
+
+
+def test_bola_quiet_when_ownership_enforced():
+    assert bola_probe(_model_owned_resource(), "http://x", session=_BolaSession(vulnerable=False)) == []
 
 
 # ── ProbeService ─────────────────────────────────────────────────────────────
