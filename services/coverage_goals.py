@@ -48,16 +48,17 @@ def _create_field(model, create_path: str) -> str:
     return "title"
 
 
-def _auth_steps(recipe: dict, tag: str, token_var: str, start: int) -> list[dict]:
+def _auth_steps(recipe: dict, model, tag: str, token_var: str, start: int) -> list[dict]:
     """Register + login one user, saving their token under `token_var`."""
+    from core.auth_recipe import register_body
     email = f"{tag}_{{{{random}}}}@example.com"
+    full = register_body(recipe, model, email)
+    login = {recipe["id_field"]: email, recipe["secret_field"]: "Secret123!"}
     return [
         {"step_number": start, "method": "POST", "path": recipe["register_path"],
-         "body": {recipe["id_field"]: email, recipe["secret_field"]: "Secret123!"},
-         "expected_status": 201},
+         "body": full, "expected_status": 201},
         {"step_number": start + 1, "method": "POST", "path": recipe["login_path"],
-         "body": {recipe["id_field"]: email, recipe["secret_field"]: "Secret123!"},
-         "expected_status": 200, "save": {token_var: recipe["token_field"]}},
+         "body": login, "expected_status": 200, "save": {token_var: recipe["token_field"]}},
     ]
 
 
@@ -98,7 +99,7 @@ def idor_templates(model, recipe: dict | None = None, cap: int = 6) -> list[dict
         collection = _collection_of(path)
         create_field = _create_field(model, collection)
 
-        steps = _auth_steps(recipe, "a", "token_a", 1) + _auth_steps(recipe, "b", "token_b", 3)
+        steps = _auth_steps(recipe, model, "a", "token_a", 1) + _auth_steps(recipe, model, "b", "token_b", 3)
         # userA creates a resource
         steps.append({"step_number": 5, "method": "POST", "path": collection,
                       "body": {create_field: "owned by A"}, "expected_status": [200, 201],
@@ -129,7 +130,7 @@ def validation_templates(model, recipe: dict | None = None, cap: int = 6) -> lis
     for e in creates[:cap]:
         path = str(e.get("path", ""))
         create_field = _create_field(model, path)
-        steps = _auth_steps(recipe, "v", "token", 1)
+        steps = _auth_steps(recipe, model, "v", "token", 1)
         steps.append({"step_number": 3, "method": "POST", "path": path,
                       "body": {create_field: ""}, "expected_status": [422, 400],
                       "use_auth": True})

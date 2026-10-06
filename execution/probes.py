@@ -83,7 +83,7 @@ def forge_jwt_probe(model, base_url: str, *, session: requests.Session | None = 
                             evidence=f"algorithm {algorithm} — a config secret is not the signing key",
                             target="auth")
 
-    from core.auth_recipe import derive_auth_recipe, subject_candidates
+    from core.auth_recipe import derive_auth_recipe, register_body, subject_candidates
     recipe = derive_auth_recipe(model)
     register = recipe["register_path"]
     identity = recipe["identity_path"]
@@ -93,7 +93,7 @@ def forge_jwt_probe(model, base_url: str, *, session: requests.Session | None = 
     reg_response = None
     try:
         rr = sess.post(f"{base}{register}",
-                       json={recipe["id_field"]: victim, recipe["secret_field"]: "Str0ngPass!23"},
+                       json=register_body(recipe, model, victim, password="Str0ngPass!23"),
                        timeout=15)
         try:
             reg_response = rr.json()
@@ -131,7 +131,7 @@ def forge_jwt_probe(model, base_url: str, *, session: requests.Session | None = 
 def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """Send oversized inputs to auth endpoints and flag any 5xx (unhandled crash)."""
     sess = session or requests.Session()
-    from core.auth_recipe import derive_auth_recipe
+    from core.auth_recipe import derive_auth_recipe, register_body
     recipe = derive_auth_recipe(model)
     register = recipe["register_path"]
     base = base_url.rstrip("/")
@@ -142,8 +142,8 @@ def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None =
     big_password = "A" * 100
     try:
         r = sess.post(f"{base}{register}",
-                      json={recipe["id_field"]: f"fuzz_{uuid.uuid4().hex[:8]}@example.com",
-                            recipe["secret_field"]: big_password},
+                      json=register_body(recipe, model, f"fuzz_{uuid.uuid4().hex[:8]}@example.com",
+                                         password=big_password),
                       timeout=15)
         if r.status_code >= 500:
             out.append(ProbeFinding(

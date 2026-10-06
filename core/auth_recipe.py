@@ -93,6 +93,39 @@ def derive_auth_recipe(model) -> dict:
     }
 
 
+def register_body(recipe: dict, model, identity_value: str,
+                  password: str = "Secret123!") -> dict:
+    """
+    Build a registration body that fills ALL of the register endpoint's required
+    fields, not just id + secret. Apps reject a partial body (e.g. VAmPI requires
+    `email` too), so a probe/template that sends only username+password fails to
+    even create its user. Values are type-sensible dummies.
+    """
+    reg_fields: list[str] = []
+    for e in getattr(model, "endpoints", []):
+        if (isinstance(e, dict) and str(e.get("path", "")) == recipe["register_path"]
+                and str(e.get("method", "")).upper() == "POST"):
+            reg_fields = field_names(e.get("request_fields"))
+            break
+
+    body = {recipe["id_field"]: identity_value, recipe["secret_field"]: password}
+    for f in reg_fields:
+        if f in body:
+            continue
+        lf = f.lower()
+        if "email" in lf:
+            body[f] = identity_value if "@" in str(identity_value) else f"{identity_value}@example.com"
+        elif any(k in lf for k in ("phone", "mobile", "msisdn")):
+            body[f] = "+10000000000"
+        elif any(k in lf for k in ("name", "first", "last", "title")):
+            body[f] = "Test"
+        elif any(k in lf for k in ("age", "count", "number", "qty", "id")):
+            body[f] = 1
+        else:
+            body[f] = "test"
+    return body
+
+
 def subject_candidates(victim_id_value: str, register_response: dict | None) -> list:
     """
     Candidate values for a forged JWT's subject claim, most-likely first.
