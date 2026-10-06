@@ -309,14 +309,27 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None)
             continue
         body = (rq.text or "").lower()
         sql_err = any(s in body for s in _SQL_ERRORS)
-        if rb.status_code < 500 and (rq.status_code >= 500 or sql_err):
+        if rb.status_code >= 500:
+            continue  # benign value already 5xx — endpoint is just broken, not a clean signal
+        if sql_err:
+            # SQL error text on the quote = the input reached a raw query. High confidence.
             out.append(ProbeFinding(
                 probe="sqli", title=f"SQL injection in {e.get('method')} {path} ('{param}')",
                 exploited=True, severity="P1",
-                evidence=(f"A single quote in '{param}' broke the query: benign → "
-                          f"{rb.status_code}, quote → {rq.status_code}"
-                          + (" with a SQL error in the response" if sql_err else "")
-                          + ". Input reaches a raw query (not parameterized)."),
+                evidence=(f"A single quote in '{param}' produced a SQL error (benign → "
+                          f"{rb.status_code}, quote → {rq.status_code}). The input reaches a raw, "
+                          f"unparameterized query."),
+                target=path))
+        elif rq.status_code >= 500:
+            # A 5xx with NO SQL error text is usually input-handling failure, not injection.
+            # Field rule: a 500 without SQL error text is not proof of SQLi — don't cry wolf.
+            out.append(ProbeFinding(
+                probe="input-robustness",
+                title=f"Unhandled 500 on injection-style input in {e.get('method')} {path} ('{param}')",
+                exploited=True, severity="P3",
+                evidence=(f"A single quote in '{param}' caused HTTP {rq.status_code} (benign → "
+                          f"{rb.status_code}) with NO SQL error text. Likely input-validation/robustness, "
+                          f"NOT confirmed SQL injection — reported low and separately."),
                 target=path))
     return out
 

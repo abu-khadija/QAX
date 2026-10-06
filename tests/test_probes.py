@@ -159,6 +159,24 @@ def test_sqli_quiet_when_parameterized():
     assert sqli_probe(_model_lookup(), "http://x", session=_SqliSession(vulnerable=False)) == []
 
 
+class _Quote500NoSqlSession:
+    """The quote 500s but with no SQL error text — robustness, not injection."""
+    def get(self, url, headers=None, timeout=None):
+        if url.endswith("'"):
+            return MagicMock(status_code=500, text="Internal Server Error")
+        return MagicMock(status_code=404, text="not found")
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_sqli_500_without_sql_error_is_robustness_not_injection():
+    out = sqli_probe(_model_lookup(), "http://x", session=_Quote500NoSqlSession())
+    assert len(out) == 1
+    assert out[0].probe == "input-robustness" and out[0].severity == "P3"
+    assert "not confirmed" in out[0].evidence.lower()
+
+
 # ── bola probe (two-user control) ────────────────────────────────────────────
 
 def _model_owned_resource() -> AppModel:
