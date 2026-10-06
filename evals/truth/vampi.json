@@ -1,0 +1,12 @@
+{
+  "target": "VAmPI (OWASP vulnerable API, vuln=1)",
+  "source": "https://github.com/erev0s/VAmPI — documented vulnerabilities",
+  "note": "Ground truth for scorecard recall/FP. A confirmed finding matches an entry when every keyword in 'match' is a substring of (title + evidence + target), case-insensitive.",
+  "expected": [
+    {"id": "jwt-forgery",      "match": ["jwt", "forgery"]},
+    {"id": "sqli",             "match": ["sql injection"]},
+    {"id": "bola",             "match": ["object-level authorization"]},
+    {"id": "excessive-data",   "match": ["excessive data"]},
+    {"id": "mass-assignment",  "match": ["admin", "register"]}
+  ]
+}

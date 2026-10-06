@@ -2476,10 +2476,14 @@ def run_scan_command() -> None:
     parser.add_argument("--refresh", action="store_true",
                         help="Ignore the cached app model and rebuild it.")
     parser.add_argument("--out", default=None, help="Write the full result to this JSON file.")
+    parser.add_argument("--truth", default=None,
+                        help="Ground-truth JSON for the target (recall + false-positive scoring).")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
     args = parser.parse_args(sys.argv[2:])
 
+    from services import scorecard as _scorecard
+    from services import usage as _usage
     from services.context import QAXContext
     from services.orchestrator_service import OrchestratorService
     from services.progress import PrintProgressReporter
@@ -2497,12 +2501,18 @@ def run_scan_command() -> None:
 
     mode = "quick" if args.quick else "deep"
     print(f"\n  QAX {mode} scan — repo: {args.repo}  ·  app: {args.url}\n")
+
+    # Instrument this run: count every LLM call (for $/run) and time it.
+    _usage.track()
+    _usage.reset()
+    _t0 = time.time()
     result = OrchestratorService(ctx).run(
         args.repo, args.url,
         deep=not args.quick,
         max_router_files=args.max_router_files,
         use_cache=not args.refresh,
         progress=PrintProgressReporter())
+    _elapsed = time.time() - _t0
 
     if result.error:
         print(f"\n  Scan failed: {result.error}\n")
@@ -2530,6 +2540,25 @@ def run_scan_command() -> None:
     else:
         print("\n  No confirmed bugs — the app held up to the scan.")
     print()
+
+    # Scorecard — the honest, trackable number for this run.
+    _truth = None
+    if args.truth:
+        try:
+            _truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Could not read --truth file: %s", exc)
+    try:
+        _rec = _scorecard.score_run(
+            result, repo=args.repo, url=args.url, mode=mode,
+            duration_sec=_elapsed, usage=_usage.snapshot(), truth=_truth)
+        _path = _scorecard.write_run(_rec)
+        print(_scorecard.render(_rec))
+        if _path:
+            print(f"     saved: {_path}")
+        print()
+    except Exception as exc:
+        logger.warning("scorecard failed (scan result is unaffected): %s", exc)
 
     if args.out:
         try:
