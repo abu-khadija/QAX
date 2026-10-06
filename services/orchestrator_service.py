@@ -359,6 +359,14 @@ class OrchestratorService:
                           if s.get("status") in ("FAIL", "ERROR")), None)
             if not fstep or fstep.get("step_number") != last_step_no:
                 continue  # failed at setup, not at the assertion — not a proven bug
+            # The security/validation templates expect a REJECTION; the vuln only
+            # manifests when the endpoint actually SUCCEEDED (2xx) without being
+            # rejected. A 404/405/5xx at the assertion means the path was wrong or
+            # the endpoint doesn't exist — NOT an auth bypass. (Pagination's failure
+            # is a body-assertion on a 200, so it still qualifies.)
+            code = fstep.get("response_code")
+            if not (isinstance(code, int) and 200 <= code < 300):
+                continue
             title = str(r.get("title", ""))
             if title in seen_titles:
                 continue

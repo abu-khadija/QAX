@@ -92,11 +92,38 @@ def test_failed_template_at_assertion_is_a_proven_bug():
     class Ex:
         results = [{"test_case_id": "COV-VAL-0001",
                     "title": "Coverage: POST /todos rejects empty 'title'", "status": "FAIL",
-                    "steps": [{"step_number": 3, "status": "FAIL",
+                    "steps": [{"step_number": 3, "status": "FAIL", "response_code": 201,
                                "error": "Expected status [422, 400], got 201"}]}]
     out = OrchestratorService._confirmed_from_templates(Ex(), [tc], already=[])
     assert len(out) == 1
     assert out[0]["severity"] == "P3" and out[0]["source"] == "coverage"
+
+
+def test_404_at_assertion_is_not_a_bug():
+    # auth-bypass template hit a wrong/nonexistent path → 404, NOT a real bypass.
+    tc = {"test_case_id": "COV-AUTH-0001", "title": "Coverage: GET /users/me requires auth",
+          "attack": "coverage-template", "api_steps": [{"step_number": 1}]}
+
+    class Ex:
+        results = [{"test_case_id": "COV-AUTH-0001", "title": "Coverage: GET /users/me requires auth",
+                    "status": "FAIL",
+                    "steps": [{"step_number": 1, "status": "FAIL", "response_code": 404,
+                               "error": "Expected status [401, 403], got 404"}]}]
+    assert OrchestratorService._confirmed_from_templates(Ex(), [tc], already=[]) == []
+
+
+def test_2xx_at_assertion_is_a_real_bug():
+    # auth-bypass got a 200 with no token → a genuine bypass.
+    tc = {"test_case_id": "COV-AUTH-0002", "title": "Coverage: GET /secret requires auth",
+          "attack": "coverage-template", "api_steps": [{"step_number": 1}]}
+
+    class Ex:
+        results = [{"test_case_id": "COV-AUTH-0002", "title": "Coverage: GET /secret requires auth",
+                    "status": "FAIL",
+                    "steps": [{"step_number": 1, "status": "FAIL", "response_code": 200,
+                               "error": "Expected status [401, 403], got 200"}]}]
+    out = OrchestratorService._confirmed_from_templates(Ex(), [tc], already=[])
+    assert len(out) == 1 and out[0]["severity"] == "P1"
 
 
 def test_failed_template_at_setup_is_not_a_bug():
