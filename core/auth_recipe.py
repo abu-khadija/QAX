@@ -115,9 +115,14 @@ def register_body(recipe: dict, model, identity_value: str,
         lf = f.lower()
         if "email" in lf:
             body[f] = identity_value if "@" in str(identity_value) else f"{identity_value}@example.com"
+        # Identity fields (username/login/user) must be UNIQUE and usable as the JWT
+        # subject — checked BEFORE the display-name branch, since "username" also
+        # contains "name". A constant here collides and breaks subject matching.
+        elif any(k in lf for k in ("username", "login")) or lf in ("user", "uid", "handle"):
+            body[f] = identity_value
         elif any(k in lf for k in ("phone", "mobile", "msisdn")):
             body[f] = "+10000000000"
-        elif any(k in lf for k in ("name", "first", "last", "title")):
+        elif any(k in lf for k in ("first", "last", "title")) or "name" in lf:
             body[f] = "Test"
         elif any(k in lf for k in ("age", "count", "number", "qty", "id")):
             body[f] = 1
