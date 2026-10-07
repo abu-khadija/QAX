@@ -330,37 +330,173 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
             continue
         param = m.group(1)
         headers = _auth_headers(token, auth) if e.get("auth_required") else {}
-        benign = "qaxprobe1"
-        quote = "qaxprobe1'"
-        try:
-            rb = sess.get(f"{base}{path.replace('{' + param + '}', benign)}", headers=headers, timeout=15)
-            rq = sess.get(f"{base}{path.replace('{' + param + '}', quote)}", headers=headers, timeout=15)
-        except Exception:
-            continue
-        body = (rq.text or "").lower()
-        sql_err = any(s in body for s in _SQL_ERRORS)
-        if rb.status_code >= 500:
-            continue  # benign value already 5xx — endpoint is just broken, not a clean signal
-        if sql_err:
-            # SQL error text on the quote = the input reached a raw query. High confidence.
-            out.append(ProbeFinding(
-                probe="sqli", title=f"SQL injection in {e.get('method')} {path} ('{param}')",
+
+        def send(value, _p=path, _pr=param, _h=headers):
+            try:
+                r = sess.get(f"{base}{_p.replace('{' + _pr + '}', str(value))}", headers=_h, timeout=15)
+                return r.status_code, r.text
+            except Exception:
+                return None, ""
+
+        f = _detect_injection(send, method=str(e.get("method", "GET")), path=path,
+                              where=f"path param '{param}'")
+        if f:
+            out.append(f)
+    return out
+
+
+# Payloads that break out of a string literal in either quote style, and boolean
+# tautologies for a differential (row-count) proof (QA knowledge base sec 1.6).
+_QUOTES = ('"', "'")
+
+
+def _detect_injection(send, *, method: str, path: str, where: str) -> ProbeFinding | None:
+    """
+    Confirm SQL injection from a `send(value) -> (status, body)` closure, with a
+    control. Two independent proofs, either is enough:
+      • error-based: a quote (either style) yields a SQL error in the body → P1.
+      • boolean-based: a TRUE tautology returns far more data than both the benign
+        value and a matched FALSE tautology → the WHERE clause was bypassed → P1.
+    A 5xx with no SQL error text is reported as P3 robustness only (not proof —
+    don't cry wolf). Benign already 5xx = no clean signal.
+    """
+    def ask(value):
+        # A 5xx can reset a keep-alive connection, so the FOLLOWING request on a
+        # shared session errors (status None). Retry once to re-establish it.
+        s, b = send(value)
+        if s is None:
+            s, b = send(value)
+        return s, b
+
+    sb, bb = ask("qaxprobe1")
+    if sb is None or sb >= 500:
+        return None
+    nben = len(bb or "")
+    p3: ProbeFinding | None = None
+    for q in _QUOTES:
+        # Boolean-differential FIRST (both payloads are valid SQL → 200, no 5xx to
+        # reset the connection): a TRUE tautology returning far more data than a
+        # matched FALSE one and the benign value = the WHERE clause was bypassed.
+        st_t, bt_t = ask(f"qaxprobe1{q} OR {q}1{q}={q}1")
+        st_f, bt_f = ask(f"qaxprobe1{q} OR {q}1{q}={q}2")
+        if (st_t == 200 and st_f == 200 and bt_t is not None and bt_f is not None
+                and len(bt_t) > max(len(bt_f), nben) * 2 + 20):
+            return ProbeFinding(
+                probe="sqli", title=f"SQL injection in {method} {path} ({where})",
                 exploited=True, severity="P1",
-                evidence=(f"A single quote in '{param}' produced a SQL error (benign → "
-                          f"{rb.status_code}, quote → {rq.status_code}). The input reaches a raw, "
-                          f"unparameterized query."),
-                target=path))
-        elif rq.status_code >= 500:
-            # A 5xx with NO SQL error text is usually input-handling failure, not injection.
-            # Field rule: a 500 without SQL error text is not proof of SQLi — don't cry wolf.
-            out.append(ProbeFinding(
+                evidence=(f"Boolean injection in {where}: a TRUE tautology returned far more data "
+                          f"({len(bt_t)}B) than a matched FALSE one ({len(bt_f)}B) or the benign value "
+                          f"({nben}B) — the WHERE clause was bypassed."),
+                target=path)
+        # Then error-based: a quote that yields a SQL error = confirmed (P1); a bare
+        # 5xx = robustness lead only (P3 — not proof, don't cry wolf).
+        st, bt = ask("qaxprobe1" + q)
+        if st is not None and st >= 500:
+            if any(s in (bt or "").lower() for s in _SQL_ERRORS):
+                return ProbeFinding(
+                    probe="sqli", title=f"SQL injection in {method} {path} ({where})",
+                    exploited=True, severity="P1",
+                    evidence=(f"A {q} in {where} produced a SQL error (benign → {sb}, payload → {st}). "
+                              f"The input reaches a raw, unparameterized query."),
+                    target=path)
+            p3 = p3 or ProbeFinding(
                 probe="input-robustness",
-                title=f"Unhandled 500 on injection-style input in {e.get('method')} {path} ('{param}')",
+                title=f"Unhandled 500 on injection-style input in {method} {path} ({where})",
                 exploited=True, severity="P3",
-                evidence=(f"A single quote in '{param}' caused HTTP {rq.status_code} (benign → "
-                          f"{rb.status_code}) with NO SQL error text. Likely input-validation/robustness, "
-                          f"NOT confirmed SQL injection — reported low and separately."),
-                target=path))
+                evidence=(f"A {q} in {where} caused HTTP {st} (benign → {sb}) with NO SQL error text. "
+                          f"Likely injection or input-handling; NOT confirmed — reported low and separately."),
+                target=path)
+    return p3
+
+
+def _benign_body(fields: list[str]) -> dict:
+    """A type-plausible benign body (by field-name heuristic) that should pass validation."""
+    body: dict = {}
+    for f in fields:
+        lf = f.lower()
+        if "email" in lf:
+            body[f] = "qaxprobe1@example.com"
+        elif any(k in lf for k in ("age", "count", "number", "qty", "amount", "price", "id")):
+            body[f] = 1
+        elif any(k in lf for k in ("is_", "enabled", "active", "admin", "approved")):
+            body[f] = False
+        else:
+            body[f] = "qaxprobe1"
+    return body
+
+
+def _stringy(field: str, value) -> bool:
+    """A field worth quote-fuzzing: a string value, not an obvious number/bool/email."""
+    if not isinstance(value, str):
+        return False
+    return "email" not in field.lower()
+
+
+def injection_probe(model, base_url: str, *, session: requests.Session | None = None,
+                    auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    SQL injection via QUERY parameters and request-BODY fields (the path-param case
+    is sqli_probe). Uses the same error-based + boolean-differential control. Query
+    fuzzing is GET-only (idempotent); body fuzzing is POST/PUT/PATCH only (never
+    DELETE — a body on DELETE could destroy data). Deterministic, no model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, field_names
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+    _tok = {"v": None}
+
+    def token_for(e):
+        if not e.get("auth_required"):
+            return {}
+        if _tok["v"] is None:
+            _tok["v"] = _resolve_token(sess, base, recipe, model,
+                                       f"inj_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        return _auth_headers(_tok["v"], auth)
+
+    # Query-param injection — GET only (safe to repeat).
+    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:6]:
+        path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
+        headers = token_for(e)
+        qps = list(e.get("query_params") or [])
+        for qp in qps[:3]:
+            def send(value, _qp=qp, _h=headers, _p=path):
+                params = {p: "qaxprobe1" for p in qps}
+                params[_qp] = value
+                try:
+                    r = sess.get(f"{base}{_p}", params=params, headers=_h, timeout=15)
+                    return r.status_code, r.text
+                except Exception:
+                    return None, ""
+
+            f = _detect_injection(send, method="GET", path=str(e.get("path", "")),
+                                  where=f"query param '{qp}'")
+            if f:
+                out.append(f)
+
+    # Body-field injection — POST/PUT/PATCH only (never DELETE).
+    for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
+              and field_names(x.get("request_fields"))][:6]:
+        method = str(e.get("method", "POST")).upper()
+        path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
+        headers = token_for(e)
+        fields = field_names(e.get("request_fields"))
+        benign = _benign_body(fields)
+        for fld in [f for f in fields if _stringy(f, benign.get(f))][:3]:
+            def send(value, _fld=fld, _h=headers, _p=path, _m=method):
+                body = dict(benign, **{_fld: value})
+                try:
+                    r = sess.request(_m, f"{base}{_p}", json=body, headers=_h, timeout=15)
+                    return r.status_code, r.text
+                except Exception:
+                    return None, ""
+
+            f = _detect_injection(send, method=method, path=str(e.get("path", "")),
+                                  where=f"body field '{fld}'")
+            if f:
+                out.append(f)
     return out
 
 

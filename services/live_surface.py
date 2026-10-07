@@ -89,11 +89,27 @@ def _join_base(base: str, path: str) -> str:
     return base + p
 
 
+def _query_params(op: dict, item: dict, spec: dict) -> list[str]:
+    """Names of the query parameters for an operation (path-item + op level, $ref-aware)."""
+    names: list[str] = []
+    seen: set = set()
+    for src in (item, op):
+        for p in (src.get("parameters") or []):
+            if not isinstance(p, dict):
+                continue
+            if "$ref" in p:
+                p = _resolve(p["$ref"], spec)
+            if p.get("in") == "query" and p.get("name") and p["name"] not in seen:
+                seen.add(p["name"])
+                names.append(str(p["name"]))
+    return names
+
+
 def endpoints_from_spec(spec: dict) -> list[dict]:
     """
     Convert an OpenAPI/Swagger spec into QAX AppModel endpoints — the EXACT paths
-    (including the server/base-path prefix), methods, auth requirement, and
-    request/response field names, from live truth.
+    (including the server/base-path prefix), methods, auth requirement, query
+    parameters, and request/response field names, from live truth.
     """
     out: list[dict] = []
     has_global_sec = bool(spec.get("security"))
@@ -110,6 +126,7 @@ def endpoints_from_spec(spec: dict) -> list[dict]:
                 "method": method.upper(),
                 "path": _join_base(base, str(path)),
                 "auth_required": bool(auth_required),
+                "query_params": _query_params(op, item, spec),
                 "request_fields": _request_fields(op, spec),
                 "response_fields": _response_fields(op, spec),
             })

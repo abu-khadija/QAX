@@ -14,7 +14,8 @@ import json as _json
 
 from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
                                crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
-                               excessive_data_probe, forge_jwt_probe, sign_jwt_hs, sqli_probe)
+                               excessive_data_probe, forge_jwt_probe, injection_probe,
+                               sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -323,6 +324,54 @@ def test_cookie_flags_noop_on_bearer_api():
     # No Set-Cookie anywhere (token APIs) → nothing to judge.
     sess = _CookieSession("")
     assert cookie_flags_probe(_model_cookie_auth(), "https://x", session=sess) == []
+
+
+# ── injection probe (query params + request bodies) ──────────────────────────
+
+def test_injection_probe_flags_query_param_sqli():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/select", "auth_required": False, "query_params": ["username"]}])
+
+    class Sess:
+        def get(self, url, params=None, headers=None, timeout=None):
+            if str((params or {}).get("username", "")).endswith("'"):
+                return MagicMock(status_code=500, text="sqlite3.OperationalError: unrecognized token")
+            return MagicMock(status_code=200, text="[]")
+
+    out = injection_probe(model, "http://x", session=Sess())
+    assert any(f.probe == "sqli" and "query param 'username'" in f.title and f.severity == "P1"
+               for f in out)
+
+
+def test_injection_probe_flags_body_field_sqli():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "PUT", "path": "/user", "auth_required": False,
+         "request_fields": ["name", "email", "address"]}])
+
+    class Sess:
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            # a quote in any non-email string field breaks the query
+            if any(isinstance(v, str) and v.endswith("'") for v in (json or {}).values()):
+                return MagicMock(status_code=500, text="sqlalchemy.exc / near syntax error")
+            return MagicMock(status_code=200, text="{}")
+
+    out = injection_probe(model, "http://x", session=Sess())
+    assert any(f.probe == "sqli" and "body field" in f.title and f.severity == "P1" for f in out)
+
+
+def test_injection_probe_quiet_when_parameterized():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/select", "auth_required": False, "query_params": ["username"]},
+        {"method": "POST", "path": "/user", "auth_required": False, "request_fields": ["name"]}])
+
+    class Sess:
+        def get(self, url, params=None, headers=None, timeout=None):
+            return MagicMock(status_code=200, text="[]")
+
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            return MagicMock(status_code=200, text="{}")
+
+    assert injection_probe(model, "http://x", session=Sess()) == []
 
 
 # ── debug-disclosure probe ───────────────────────────────────────────────────

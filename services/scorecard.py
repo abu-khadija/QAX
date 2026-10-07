@@ -52,6 +52,12 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
         src = str(b.get("source", "")) or "unknown"
         by_layer[src] = by_layer.get(src, 0) + 1
 
+    # Split confirmed CLAIMS (P1/P2) from low-confidence LEADS (P3/P4). Recall and
+    # false-positive % are computed over claims only — a P3 is explicitly hedged
+    # ("not confirmed"), so counting it as a false positive would distort the metric.
+    claims = [b for b in confirmed if str(b.get("severity", "")).upper() in ("P1", "P2")]
+    leads = [b for b in confirmed if str(b.get("severity", "")).upper() not in ("P1", "P2")]
+
     rec: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "repo": repo,
@@ -62,6 +68,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
         "rounds": getattr(result, "rounds", 0),
         "suspects": getattr(result, "suspects", 0),
         "confirmed_count": len(confirmed),
+        "leads_count": len(leads),
         "by_layer": by_layer,
         "coverage": dict(getattr(result, "coverage", {}) or {}),
         "completed_end_to_end": bool(getattr(result, "success", False)),
@@ -82,7 +89,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
         expected = truth["expected"]
         matched: set = set()
         tps = fps = 0
-        for f in confirmed:
+        for f in claims:  # recall + FP over confirmed claims only, not P3 leads
             text = _text_of(f)
             hit = None
             for i, ent in enumerate(expected):
@@ -95,7 +102,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
             else:
                 tps += 1
                 matched.add(hit)
-        total = len(confirmed)
+        total = len(claims)
         rec["accuracy"] = {
             "documented": len(expected),
             "caught": len(matched),
@@ -104,6 +111,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
             "false_positives": fps,
             "false_positive_pct": round(100 * fps / total, 1) if total else 0.0,
             "fp_target_pct": 15,
+            "leads": len(leads),
             "missed": [expected[i].get("id") for i in range(len(expected)) if i not in matched],
         }
 
@@ -145,9 +153,10 @@ def render(rec: dict) -> str:
             lines.append("     cost: not tracked (no LLM calls recorded this run)")
     a = rec.get("accuracy")
     if a:
+        lead_note = f"  ·  {a.get('leads')} low-confidence lead(s)" if a.get("leads") else ""
         lines.append(f"     accuracy: caught {a.get('caught')}/{a.get('documented')} documented "
                      f"(recall {a.get('recall_pct')}%)  ·  FP {a.get('false_positive_pct')}% "
-                     f"(target <{a.get('fp_target_pct')}%)")
+                     f"(target <{a.get('fp_target_pct')}%){lead_note}")
         missed = [m for m in (a.get("missed") or []) if m]
         if missed:
             lines.append(f"     missed: {', '.join(missed)}")

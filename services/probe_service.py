@@ -70,7 +70,8 @@ class ProbeService:
 
         from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
                                        debug_disclosure_probe, error_handling_probe,
-                                       excessive_data_probe, forge_jwt_probe, sqli_probe)
+                                       excessive_data_probe, forge_jwt_probe, injection_probe,
+                                       sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -84,11 +85,17 @@ class ProbeService:
             except Exception as exc:
                 logger.error("forge_jwt probe failed: %s", exc)
 
-        # SQLi — error-based, with a benign-vs-quote control on lookup endpoints.
+        # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
             findings.extend(sqli_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("sqli probe failed: %s", exc)
+
+        # Injection via query params and request bodies (same control).
+        try:
+            findings.extend(injection_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("injection probe failed: %s", exc)
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
