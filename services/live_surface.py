@@ -19,6 +19,7 @@ to the code-derived model.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 import requests
 
@@ -56,13 +57,47 @@ def fetch_openapi(base_url: str, *, session: requests.Session | None = None) -> 
     return None
 
 
+def _base_path(spec: dict) -> str:
+    """
+    The API's base path from the spec: Swagger 2 `basePath`, or the path component
+    of OpenAPI 3 `servers[0].url` (which may be a full URL or just a path). Returns
+    "" when there is none. Without this, an app that mounts its paths under a prefix
+    (e.g. servers:[{url:'/api'}] + path '/users') is probed at the wrong URL.
+    """
+    bp = spec.get("basePath")  # Swagger 2
+    if isinstance(bp, str) and bp.strip("/"):
+        return "/" + bp.strip("/")
+    servers = spec.get("servers")  # OpenAPI 3
+    if isinstance(servers, list) and servers and isinstance(servers[0], dict):
+        url = servers[0].get("url")
+        if isinstance(url, str) and url.strip():
+            path = urlparse(url).path if "//" in url else url
+            if (path or "").strip("/"):
+                return "/" + path.strip("/")
+    return ""
+
+
+def _join_base(base: str, path: str) -> str:
+    """Join a base path to a spec path, without doubling it when already present."""
+    p = path if path.startswith("/") else "/" + path
+    if not base:
+        return p
+    if p == "/":
+        return base            # the base root itself
+    if p == base or p.startswith(base + "/"):
+        return p               # spec already includes the base
+    return base + p
+
+
 def endpoints_from_spec(spec: dict) -> list[dict]:
     """
-    Convert an OpenAPI/Swagger spec into QAX AppModel endpoints — the EXACT paths,
-    methods, auth requirement, and request/response field names, from live truth.
+    Convert an OpenAPI/Swagger spec into QAX AppModel endpoints — the EXACT paths
+    (including the server/base-path prefix), methods, auth requirement, and
+    request/response field names, from live truth.
     """
     out: list[dict] = []
     has_global_sec = bool(spec.get("security"))
+    base = _base_path(spec)
     for path, item in (spec.get("paths") or {}).items():
         if not isinstance(item, dict):
             continue
@@ -73,7 +108,7 @@ def endpoints_from_spec(spec: dict) -> list[dict]:
             auth_required = ("security" in op and bool(op["security"])) or has_global_sec
             out.append({
                 "method": method.upper(),
-                "path": str(path),
+                "path": _join_base(base, str(path)),
                 "auth_required": bool(auth_required),
                 "request_fields": _request_fields(op, spec),
                 "response_fields": _response_fields(op, spec),

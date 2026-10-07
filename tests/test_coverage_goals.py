@@ -51,6 +51,24 @@ def test_auth_bypass_covers_protected_endpoints_only():
     assert "/auth/register" not in titles
 
 
+def test_auth_bypass_excludes_conventionally_public_endpoints():
+    # A spec with global security marks even root/health/docs as auth_required;
+    # asserting auth on those is a false positive, so they must be excluded.
+    model = AppModel(endpoints=[
+        {"method": "GET", "path": "/", "auth_required": True},
+        {"method": "GET", "path": "/health", "auth_required": True},
+        {"method": "GET", "path": "/api-docs", "auth_required": True},
+        {"method": "GET", "path": "/openapi.json", "auth_required": True},
+        {"method": "GET", "path": "/users/", "auth_required": True},
+    ])
+    titles = " ".join(t["title"] for t in cg.auth_bypass_templates(model))
+    assert "/users/" in titles
+    for public in (" / requires", "/health", "/api-docs", "/openapi.json"):
+        assert public not in titles
+    assert cg._is_conventionally_public("/") and cg._is_conventionally_public("/v1/health")
+    assert not cg._is_conventionally_public("/api/users")
+
+
 # ── IDOR (two named tokens, secure = 403 or 404) ─────────────────────────────
 
 def test_idor_template_uses_two_users_and_secure_status():

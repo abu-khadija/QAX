@@ -62,10 +62,31 @@ def _auth_steps(recipe: dict, model, tag: str, token_var: str, start: int) -> li
     ]
 
 
+_PUBLIC_SEGMENTS = {
+    "health", "healthz", "livez", "readyz", "ready", "live", "ping", "status",
+    "metrics", "favicon.ico", "docs", "redoc", "swagger", "api-docs",
+    "openapi", "openapi.json", "openapi.yaml", "version", "info",
+}
+
+
+def _is_conventionally_public(path: str) -> bool:
+    """
+    Root/health/docs/spec endpoints are public by convention even when a spec
+    declares global `security`. Asserting auth on them produces false positives
+    (e.g. a root landing page returning 200 HTML flagged as an 'auth bypass') —
+    don't cry wolf on them.
+    """
+    p = str(path).split("?")[0].rstrip("/").lower()
+    if p in ("", "/"):
+        return True
+    return p.rsplit("/", 1)[-1] in _PUBLIC_SEGMENTS
+
+
 def auth_bypass_templates(model, recipe: dict | None = None, cap: int = 8) -> list[dict]:
     """One test per protected endpoint: calling it with NO token must be rejected."""
     protected = [e for e in getattr(model, "endpoints", [])
-                 if isinstance(e, dict) and e.get("auth_required")]
+                 if isinstance(e, dict) and e.get("auth_required")
+                 and not _is_conventionally_public(e.get("path", ""))]
     out = []
     for e in protected[:cap]:
         method = str(e.get("method", "GET")).upper()
