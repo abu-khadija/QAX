@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 import json as _json
 
-from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
-                               debug_disclosure_probe, error_handling_probe,
+from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
+                               crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                excessive_data_probe, forge_jwt_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
@@ -351,6 +351,42 @@ def test_debug_disclosure_quiet_on_generic_error():
     out = debug_disclosure_probe(_model_lookup(), "http://x",
                                  session=_DebugSession('{"error":"Internal Server Error"}'))
     assert out == []
+
+
+# ── supplied-auth (apps QAX can't self-register into) ────────────────────────
+
+def test_auth_headers_default_and_custom():
+    assert _auth_headers("abc") == {"Authorization": "Bearer abc"}
+    assert _auth_headers("k", {"header": "X-API-Key", "scheme": ""}) == {"X-API-Key": "k"}
+    assert _auth_headers("", {}) == {}
+
+
+def test_resolve_token_prefers_supplied():
+    auth = {"token": "TA", "token_b": "TB"}
+    # no network/session needed when a supplied token exists
+    assert _resolve_token(None, "", {}, None, "a@x.com", auth=auth, slot="primary") == "TA"
+    assert _resolve_token(None, "", {}, None, "b@x.com", auth=auth, slot="secondary") == "TB"
+
+
+def test_sqli_uses_supplied_token_without_registering():
+    # An auth-required lookup; QAX has no register/login but is handed a token.
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/users/{id}", "auth_required": True}])
+    seen = {}
+
+    class Sess:
+        def get(self, url, headers=None, timeout=None):
+            seen["auth"] = (headers or {}).get("Authorization")
+            if url.endswith("'"):
+                return MagicMock(status_code=500, text="sqlite3.OperationalError: syntax")
+            return MagicMock(status_code=404, text="nf")
+
+        def post(self, *a, **k):  # must NOT be needed — no self-registration
+            raise AssertionError("should not register when a token is supplied")
+
+    out = sqli_probe(model, "http://x", session=Sess(), auth={"token": "TOK"})
+    assert seen["auth"] == "Bearer TOK"
+    assert len(out) == 1 and out[0].probe == "sqli"
 
 
 # ── ProbeService ─────────────────────────────────────────────────────────────

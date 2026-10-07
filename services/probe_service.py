@@ -43,6 +43,7 @@ class ProbeService:
         model: AppModel,
         base_url: str,
         *,
+        auth: dict | None = None,
         progress: ProgressReporter | None = None,
     ) -> ProbeResult:
         """
@@ -51,6 +52,10 @@ class ProbeService:
         Args:
             model (AppModel): The whole-system model (selects which probes to run).
             base_url (str): The running app to probe.
+            auth (dict | None): Supplied authentication for apps QAX cannot self-
+                register into (external IdP, offline-signed JWT, API key). Keys:
+                `token` (user A), `token_b` (user B, for IDOR/BOLA), `header`
+                (default "Authorization"), `scheme` (default "Bearer"; "" = raw).
             progress (ProgressReporter | None): Progress sink.
 
         Returns:
@@ -81,19 +86,19 @@ class ProbeService:
 
         # SQLi — error-based, with a benign-vs-quote control on lookup endpoints.
         try:
-            findings.extend(sqli_probe(model, base_url))
+            findings.extend(sqli_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("sqli probe failed: %s", exc)
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
-            findings.extend(bola_probe(model, base_url))
+            findings.extend(bola_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("bola probe failed: %s", exc)
 
         # Excessive data exposure — credentials/secrets returned in a response body.
         try:
-            findings.extend(excessive_data_probe(model, base_url))
+            findings.extend(excessive_data_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("excessive_data probe failed: %s", exc)
 

@@ -52,6 +52,7 @@ class OrchestratorService:
         deep: bool = True,
         max_router_files: int = 4,
         use_cache: bool = True,
+        auth: dict | None = None,
         progress: ProgressReporter | None = None,
     ) -> OrchestratorResult:
         """
@@ -113,7 +114,7 @@ class OrchestratorService:
             model, use_knowledge_pass=deep, progress=prog)
 
         # 3) Prove the exploits HTTP steps can't express (JWT forgery, crashes) — free.
-        probe_result = ProbeService(self.context).run(model, base_url, progress=prog)
+        probe_result = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog)
 
         # 4) Generate: functional (per router) + adversarial (red-team) — deep only.
         tests: list[dict] = []

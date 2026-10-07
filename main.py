@@ -2478,6 +2478,15 @@ def run_scan_command() -> None:
     parser.add_argument("--out", default=None, help="Write the full result to this JSON file.")
     parser.add_argument("--truth", default=None,
                         help="Ground-truth JSON for the target (recall + false-positive scoring).")
+    parser.add_argument("--token", default=None,
+                        help="A valid auth token for apps QAX can't self-register into "
+                             "(external IdP, offline-signed JWT, API key). Enables auth-gated probes.")
+    parser.add_argument("--token-b", default=None,
+                        help="A second user's token, for IDOR/BOLA (userB reaching userA's data).")
+    parser.add_argument("--auth-header", default="Authorization",
+                        help="Header name for the token (default: Authorization).")
+    parser.add_argument("--auth-scheme", default="Bearer",
+                        help="Scheme prefix for the token (default: Bearer; use '' for a raw value / API key).")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
     args = parser.parse_args(sys.argv[2:])
@@ -2505,12 +2514,18 @@ def run_scan_command() -> None:
     # Instrument this run: count every LLM call (for $/run) and time it.
     _usage.track()
     _usage.reset()
+    _auth = None
+    if args.token or args.token_b:
+        _auth = {"token": args.token, "token_b": args.token_b,
+                 "header": args.auth_header, "scheme": args.auth_scheme}
+        print(f"  (using a supplied auth token via '{args.auth_header}')\n")
     _t0 = time.time()
     result = OrchestratorService(ctx).run(
         args.repo, args.url,
         deep=not args.quick,
         max_router_files=args.max_router_files,
         use_cache=not args.refresh,
+        auth=_auth,
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

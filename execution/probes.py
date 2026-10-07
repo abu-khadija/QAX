@@ -180,7 +180,34 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     return None
 
 
-def bola_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+def _auth_headers(token, auth: dict | None = None) -> dict:
+    """Build the auth header for a token, honouring a supplied header name/scheme."""
+    if not token:
+        return {}
+    auth = auth or {}
+    header = auth.get("header") or "Authorization"
+    scheme = auth.get("scheme", "Bearer") if "scheme" in auth else "Bearer"
+    value = f"{scheme} {token}".strip() if scheme else str(token)
+    return {header: value}
+
+
+def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = None, slot: str = "primary"):
+    """
+    Get a bearer token for a probe. Prefer a token SUPPLIED by the caller (so apps
+    that issue tokens outside a register/login flow — external IdP, offline-signed
+    JWT, API key — can still be exercised); otherwise self-register + login.
+    `slot` picks which supplied token: 'primary' (user A) or 'secondary' (user B).
+    """
+    auth = auth or {}
+    if slot == "secondary" and auth.get("token_b"):
+        return auth["token_b"]
+    if slot == "primary" and auth.get("token"):
+        return auth["token"]
+    return _auth_token(sess, base, recipe, model, identity)
+
+
+def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
+               auth: dict | None = None) -> list[ProbeFinding]:
     """
     Broken Object-Level Authorization via a TWO-USER control experiment.
 
@@ -222,8 +249,10 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None)
     if not pairs:
         return out
 
-    ta = _auth_token(sess, base, recipe, model, f"bola_a_{uuid.uuid4().hex[:8]}@example.com")
-    tb = _auth_token(sess, base, recipe, model, f"bola_b_{uuid.uuid4().hex[:8]}@example.com")
+    ta = _resolve_token(sess, base, recipe, model, f"bola_a_{uuid.uuid4().hex[:8]}@example.com",
+                        auth=auth, slot="primary")
+    tb = _resolve_token(sess, base, recipe, model, f"bola_b_{uuid.uuid4().hex[:8]}@example.com",
+                        auth=auth, slot="secondary")
     if not ta or not tb:
         return out
 
@@ -250,8 +279,8 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None)
                 continue  # key-only resource: nothing private to leak, can't prove
             body[placed] = marker
 
-        auth_a = {"Authorization": f"Bearer {ta}"}
-        auth_b = {"Authorization": f"Bearer {tb}"}
+        auth_a = _auth_headers(ta, auth)
+        auth_b = _auth_headers(tb, auth)
         try:
             cr = sess.post(f"{base}{prefix}", json=body, headers=auth_a, timeout=15)
             if cr.status_code >= 400:
@@ -274,7 +303,8 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None)
     return out
 
 
-def sqli_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
+               auth: dict | None = None) -> list[ProbeFinding]:
     """
     Error-based SQL injection with a CONTROL: a benign value vs the same value with
     a single quote. If the quote breaks the query (5xx or a SQL error in the body)
@@ -291,7 +321,7 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None)
              and "{" in str(e.get("path", ""))]
     token = None
     if any(e.get("auth_required") for e in cands):
-        token = _auth_token(sess, base, recipe, model, f"sqli_{uuid.uuid4().hex[:8]}@example.com")
+        token = _resolve_token(sess, base, recipe, model, f"sqli_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
 
     for e in cands[:5]:
         path = str(e.get("path", ""))
@@ -299,7 +329,7 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None)
         if not m:
             continue
         param = m.group(1)
-        headers = {"Authorization": f"Bearer {token}"} if (e.get("auth_required") and token) else {}
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
         benign = "qaxprobe1"
         quote = "qaxprobe1'"
         try:
@@ -357,7 +387,8 @@ def _sensitive_keys(data, found: set | None = None) -> set:
     return found
 
 
-def excessive_data_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+def excessive_data_probe(model, base_url: str, *, session: requests.Session | None = None,
+                         auth: dict | None = None) -> list[ProbeFinding]:
     """
     Excessive Data Exposure: fetch each GET endpoint and inspect the LIVE response
     body (not the spec — nested secrets don't show as top-level fields) for keys
@@ -383,10 +414,11 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
         headers = {}
         if e.get("auth_required"):
             if token is None:
-                token = _auth_token(sess, base, recipe, model, f"ede_{uuid.uuid4().hex[:8]}@example.com")
+                token = _resolve_token(sess, base, recipe, model,
+                                       f"ede_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
             if not token:
                 continue
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = _auth_headers(token, auth)
         try:
             r = sess.get(f"{base}{resolved}", headers=headers, timeout=15)
             if r.status_code >= 400:
