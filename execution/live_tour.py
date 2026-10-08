@@ -88,6 +88,8 @@ async def tour_app(
     headless: bool = True,
     max_screens: int = 8,
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
+    capture_screenshots: bool = False,
+    screenshot_dir: str | None = None,
 ) -> dict:
     """
     Tour the running app and return its observed surface.
@@ -120,11 +122,27 @@ async def tour_app(
             context = await browser.new_context()
             page = await context.new_page()
 
-            # Collect console/page errors per screen via a mutable bucket.
+            # Collect console/page errors and failed API calls per screen (mutable buckets).
             errors: list[str] = []
+            net_errors: list[str] = []
             page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}"[:200])
                     if m.type in ("error", "warning") else None)
             page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"[:200]))
+
+            def _on_response(r):
+                try:
+                    if r.status >= 400 and r.request.resource_type in ("xhr", "fetch", "document"):
+                        net_errors.append(f"{r.status} {r.request.method} {r.url}"[:200])
+                except Exception:
+                    pass
+            page.on("response", _on_response)
+            page.on("requestfailed", lambda r: net_errors.append(
+                f"failed {getattr(r, 'method', '')} {getattr(r, 'url', '')}"[:200])
+                if getattr(getattr(r, "request", r), "resource_type", "") in ("xhr", "fetch") else None)
+
+            if capture_screenshots and screenshot_dir:
+                import os
+                os.makedirs(screenshot_dir, exist_ok=True)
 
             try:
                 if login is not None:
@@ -143,8 +161,18 @@ async def tour_app(
                     visited.add(norm)
 
                     errors.clear()
+                    net_errors.clear()
                     screen = await _capture_screen(page, url, timeout_ms)
                     screen["errors"] = list(errors)
+                    screen["net_errors"] = list(net_errors)
+                    if capture_screenshots and screenshot_dir:
+                        import os
+                        shot = os.path.join(screenshot_dir, f"screen_{len(result['screens']):02d}.png")
+                        try:
+                            await page.screenshot(path=shot, full_page=True)
+                            screen["screenshot"] = shot
+                        except Exception as exc:
+                            logger.warning("screenshot failed on %s: %s", url, exc)
                     result["screens"].append(screen)
 
                     if routes is None:  # auto-discover further links

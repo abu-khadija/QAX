@@ -50,6 +50,8 @@ class TourService:
         login: dict | None = None,
         headless: bool = True,
         max_screens: int = 8,
+        capture_screenshots: bool = False,
+        screenshot_dir: str | None = None,
         progress: ProgressReporter | None = None,
     ) -> TourResult:
         """
@@ -93,6 +95,7 @@ class TourService:
             raw = asyncio.run(tour_app(
                 base_url, routes=routes, login=login,
                 headless=headless, max_screens=max_screens,
+                capture_screenshots=capture_screenshots, screenshot_dir=screenshot_dir,
             ))
         except Exception as exc:
             logger.error("TourService failed: %s", exc)
