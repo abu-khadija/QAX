@@ -2487,6 +2487,10 @@ def run_scan_command() -> None:
                         help="Header name for the token (default: Authorization).")
     parser.add_argument("--auth-scheme", default="Bearer",
                         help="Scheme prefix for the token (default: Bearer; use '' for a raw value / API key).")
+    parser.add_argument("--tour", action="store_true",
+                        help="Also tour the live UI in a real browser and fold what it sees "
+                             "(uncaught JS errors, failed API calls) into the findings. Needs "
+                             "Playwright — run this scan under the exec venv (.venv-exec, Python 3.12).")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
     args = parser.parse_args(sys.argv[2:])
@@ -2526,6 +2530,7 @@ def run_scan_command() -> None:
         max_router_files=args.max_router_files,
         use_cache=not args.refresh,
         auth=_auth,
+        tour=args.tour,
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

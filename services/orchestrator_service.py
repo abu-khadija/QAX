@@ -24,6 +24,7 @@ Never prints, never calls sys.exit(); failures are captured in the result.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from services.context import QAXContext
@@ -53,6 +54,8 @@ class OrchestratorService:
         max_router_files: int = 4,
         use_cache: bool = True,
         auth: dict | None = None,
+        tour: bool = False,
+        tour_login: dict | None = None,
         progress: ProgressReporter | None = None,
     ) -> OrchestratorResult:
         """
@@ -116,6 +119,28 @@ class OrchestratorService:
         # 3) Prove the exploits HTTP steps can't express (JWT forgery, crashes) — free.
         probe_result = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog)
 
+        # 3b) Tour the live UI (browser-driven) and turn what the browser sees —
+        #     uncaught JS errors, failed API calls — into findings. Needs Playwright
+        #     (exec venv, Python 3.11/3.12); degrades to nothing when unavailable.
+        ui_confirmed: list[dict] = []
+        if tour:
+            try:
+                from services.tour_service import TourService
+                from services.ui_findings import findings_from_tour
+                shot_dir = f"output/tour/{time.strftime('%Y%m%dT%H%M%S')}"
+                tour_result = TourService(self.context).tour(
+                    base_url, login=tour_login, capture_screenshots=True,
+                    screenshot_dir=shot_dir, progress=prog)
+                if tour_result.error:
+                    prog.emit("orchestrate", "info", f"UI tour skipped: {tour_result.error}")
+                else:
+                    ui_confirmed = findings_from_tour(tour_result)
+                    prog.emit("orchestrate", "info",
+                              f"UI tour: {tour_result.screen_count} screen(s), "
+                              f"{len(ui_confirmed)} UI finding(s)")
+            except Exception as exc:
+                logger.warning("UI tour failed: %s", exc)
+
         # 4) Generate: functional (per router) + adversarial (red-team) — deep only.
         tests: list[dict] = []
         if deep:
@@ -161,6 +186,7 @@ class OrchestratorService:
         #    find bugs with zero model calls).
         confirmed = self._unify(investigation, probe_result)
         confirmed += self._confirmed_from_templates(execution, executable, confirmed)
+        confirmed += ui_confirmed  # browser-observed UI bugs (console/network)
 
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=1,
