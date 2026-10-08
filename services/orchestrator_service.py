@@ -56,6 +56,7 @@ class OrchestratorService:
         auth: dict | None = None,
         tour: bool = False,
         tour_login: dict | None = None,
+        visual_baseline: str | None = None,
         progress: ProgressReporter | None = None,
     ) -> OrchestratorResult:
         """
@@ -138,6 +139,17 @@ class OrchestratorService:
                     prog.emit("orchestrate", "info",
                               f"UI tour: {tour_result.screen_count} screen(s), "
                               f"{len(ui_confirmed)} UI finding(s)")
+                    # Visual regression against a saved baseline (first run seeds it).
+                    if visual_baseline:
+                        try:
+                            from services.visual_regression import visual_findings
+                            vf = visual_findings(visual_baseline, shot_dir, diff_dir=f"{shot_dir}/diff")
+                            ui_confirmed += vf
+                            prog.emit("orchestrate", "info",
+                                      f"visual regression: {len(vf)} change(s) vs baseline"
+                                      if vf else "visual baseline established / no change")
+                        except Exception as exc:
+                            logger.warning("visual regression failed: %s", exc)
             except Exception as exc:
                 logger.warning("UI tour failed: %s", exc)
 

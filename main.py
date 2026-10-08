@@ -2491,6 +2491,9 @@ def run_scan_command() -> None:
                         help="Also tour the live UI in a real browser and fold what it sees "
                              "(uncaught JS errors, failed API calls) into the findings. Needs "
                              "Playwright — run this scan under the exec venv (.venv-exec, Python 3.12).")
+    parser.add_argument("--visual-baseline", default=None,
+                        help="Directory of baseline screenshots for visual regression (with --tour). "
+                             "First run seeds it; later runs flag screens whose rendering changed.")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
     args = parser.parse_args(sys.argv[2:])
@@ -2531,6 +2534,7 @@ def run_scan_command() -> None:
         use_cache=not args.refresh,
         auth=_auth,
         tour=args.tour,
+        visual_baseline=args.visual_baseline,
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 
