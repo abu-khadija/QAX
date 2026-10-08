@@ -71,7 +71,7 @@ class ProbeService:
         from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
                                        debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
-                                       sqli_probe)
+                                       nosql_probe, sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -96,6 +96,12 @@ class ProbeService:
             findings.extend(injection_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("injection probe failed: %s", exc)
+
+        # NoSQL (operator) injection on write endpoints whose body feeds a query.
+        try:
+            findings.extend(nosql_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("nosql probe failed: %s", exc)
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:

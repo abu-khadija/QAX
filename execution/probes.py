@@ -500,6 +500,111 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
     return out
 
 
+_NOSQL_ERRORS = ("pymongo", "montydb", "bson", "mongoerror", "mongoclient",
+                 "unknown operator", "invaliddocument", "cannot encode", "$where")
+
+
+def nosql_probe(model, base_url: str, *, session: requests.Session | None = None,
+                auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    NoSQL (operator) injection on write endpoints whose body feeds a document query.
+    Control: a plain string value vs a Mongo OPERATOR OBJECT in the same field.
+      • confirmed (P1): a TRUE operator ({"$ne": <nomatch>}) returns 200 with far
+        more data than the benign value and a matched FALSE operator ({"$eq":
+        <nomatch>}) — the filter was bypassed; OR the response carries a NoSQL
+        error signature.
+      • lead (P3): the operator object only triggers a generic 5xx (reaches the
+        query engine but we can't prove a bypass — not confirmed, don't cry wolf).
+    Candidate field names come from the body schema and from query params of the
+    same path (apps like vfapi read a raw JSON body keyed like their GET filter).
+    POST/PUT/PATCH only (never DELETE). Deterministic, no model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, field_names
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+
+    # path -> query-param names seen on ANY method (a raw-body POST often keys by them)
+    path_qps: dict = {}
+    for e in eps:
+        p = str(e.get("path", ""))
+        path_qps.setdefault(p, [])
+        for qp in (e.get("query_params") or []):
+            if qp not in path_qps[p]:
+                path_qps[p].append(qp)
+
+    _tok = {"v": None}
+
+    def token_for(e):
+        if not e.get("auth_required"):
+            return {}
+        if _tok["v"] is None:
+            _tok["v"] = _resolve_token(sess, base, recipe, model,
+                                       f"nosql_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        return _auth_headers(_tok["v"], auth)
+
+    for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")][:6]:
+        method = str(e.get("method", "POST")).upper()
+        path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
+        headers = token_for(e)
+        fields = field_names(e.get("request_fields"))
+        keys = list(fields) + [k for k in path_qps.get(str(e.get("path", "")), []) if k not in fields]
+        if not keys:
+            continue
+        others = _benign_body(fields)
+        for key in keys[:3]:
+            def send(value, _k=key, _h=headers, _p=path, _m=method):
+                body = dict(others, **{_k: value})
+                try:
+                    r = sess.request(_m, f"{base}{_p}", json=body, headers=_h, timeout=15)
+                    return r.status_code, r.text
+                except Exception:
+                    return None, ""
+
+            def ask(value):
+                s, b = send(value)
+                if s is None:
+                    s, b = send(value)
+                return s, b
+
+            sb, bb = ask("qaxprobe1")
+            if sb is None or sb >= 500:
+                continue
+            nben = len(bb or "")
+            st, bt = ask({"$ne": "qax_nomatch_zzz"})
+            sf, bf = ask({"$eq": "qax_nomatch_zzz"})
+            where = f"body field '{key}'"
+            if st == 200 and sf == 200 and bt is not None and bf is not None \
+                    and len(bt) > max(len(bf), nben) * 2 + 20:
+                out.append(ProbeFinding(
+                    probe="nosql", title=f"NoSQL injection in {method} {str(e.get('path',''))} ({where})",
+                    exploited=True, severity="P1",
+                    evidence=(f"A query operator in {where} bypassed the filter: a TRUE operator "
+                              f"returned far more data ({len(bt)}B) than a matched FALSE one ({len(bf)}B) "
+                              f"or the benign value ({nben}B)."),
+                    target=str(e.get("path", ""))))
+            elif st is not None and st >= 500:
+                if any(s in (bt or "").lower() for s in _NOSQL_ERRORS):
+                    out.append(ProbeFinding(
+                        probe="nosql", title=f"NoSQL injection in {method} {str(e.get('path',''))} ({where})",
+                        exploited=True, severity="P1",
+                        evidence=(f"A query operator in {where} produced a NoSQL/driver error (benign → "
+                                  f"{sb}, operator → {st}); the raw body reaches the document query."),
+                        target=str(e.get("path", ""))))
+                else:
+                    out.append(ProbeFinding(
+                        probe="nosql-lead",
+                        title=f"Operator object rejected with 500 in {method} {str(e.get('path',''))} ({where})",
+                        exploited=True, severity="P3",
+                        evidence=(f"A Mongo operator object in {where} caused HTTP {st} while a plain "
+                                  f"string was accepted ({sb}) — the body may feed a document query "
+                                  f"(possible NoSQL injection), NOT confirmed. Reported low and separately."),
+                        target=str(e.get("path", ""))))
+    return out
+
+
 # Field names that must NEVER appear in a response body — a credential or secret
 # in output is an exposure regardless of auth. Token-family names are deliberately
 # excluded: a login returning an access_token is the expected, correct behaviour.

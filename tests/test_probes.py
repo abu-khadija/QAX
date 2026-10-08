@@ -15,7 +15,7 @@ import json as _json
 from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
                                crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                excessive_data_probe, forge_jwt_probe, injection_probe,
-                               sign_jwt_hs, sqli_probe)
+                               nosql_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -372,6 +372,59 @@ def test_injection_probe_quiet_when_parameterized():
             return MagicMock(status_code=200, text="{}")
 
     assert injection_probe(model, "http://x", session=Sess()) == []
+
+
+# ── nosql probe (operator injection) ─────────────────────────────────────────
+
+def _model_find() -> AppModel:
+    # Raw-body POST keyed like the GET filter's query param (the vfapi shape).
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/find", "auth_required": False, "query_params": ["username"]},
+        {"method": "POST", "path": "/find", "auth_required": False},
+    ])
+
+
+def _is_op(v):
+    return isinstance(v, dict) and any(k.startswith("$") for k in v)
+
+
+def test_nosql_flags_bypass_p1():
+    class Sess:
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            v = (json or {}).get("username")
+            if isinstance(v, dict) and v.get("$ne"):          # TRUE operator → all rows
+                return MagicMock(status_code=200, text="X" * 5000)
+            return MagicMock(status_code=200, text="[]")       # benign / FALSE → empty
+    out = nosql_probe(_model_find(), "http://x", session=Sess())
+    assert any(f.probe == "nosql" and f.severity == "P1" and "/find" in f.title for f in out)
+
+
+def test_nosql_flags_error_signature_p1():
+    class Sess:
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            if _is_op((json or {}).get("username")):
+                return MagicMock(status_code=500, text="pymongo.errors.OperationFailure")
+            return MagicMock(status_code=200, text="[]")
+    out = nosql_probe(_model_find(), "http://x", session=Sess())
+    assert any(f.probe == "nosql" and f.severity == "P1" for f in out)
+
+
+def test_nosql_generic_500_is_p3_lead():
+    class Sess:
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            if _is_op((json or {}).get("username")):
+                return MagicMock(status_code=500, text="Internal Server Error")
+            return MagicMock(status_code=200, text="[]")
+    out = nosql_probe(_model_find(), "http://x", session=Sess())
+    assert any(f.probe == "nosql-lead" and f.severity == "P3" for f in out)
+    assert not any(f.severity == "P1" for f in out)
+
+
+def test_nosql_quiet_when_operator_handled():
+    class Sess:
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            return MagicMock(status_code=200, text="[]")  # operator safely returns nothing
+    assert nosql_probe(_model_find(), "http://x", session=Sess()) == []
 
 
 # ── debug-disclosure probe ───────────────────────────────────────────────────
