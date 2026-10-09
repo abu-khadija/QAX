@@ -74,6 +74,29 @@ _MAP = {
                "or leaked over plain HTTP.",
         "fix": "Set HttpOnly, Secure, and SameSite on session cookies.",
     },
+    "path-traversal": {
+        "why": "A path parameter is used to build a filesystem path without sanitisation, "
+               "so an attacker can read files outside the web root (e.g. /etc/passwd, "
+               "secrets, source) — and sometimes write them.",
+        "fix": "Never pass user input to file paths directly: map it to an allow-list of "
+               "known names/ids, reject '..' and absolute paths, and resolve+confirm the "
+               "final path stays under the intended base directory.",
+    },
+    "cors": {
+        "why": "The app reflects any caller's Origin in Access-Control-Allow-Origin, so a "
+               "malicious website can make cross-origin requests to this API — and with "
+               "credentials enabled, read the victim's authenticated responses.",
+        "fix": "Allow only an explicit allow-list of trusted origins; never reflect the "
+               "request Origin, and never combine a wildcard/reflected origin with "
+               "Access-Control-Allow-Credentials: true.",
+    },
+    "security-headers": {
+        "why": "Standard response security headers are missing, removing defence-in-depth "
+               "against clickjacking, MIME-sniffing, protocol downgrade and XSS.",
+        "fix": "Set Strict-Transport-Security (HTTPS), X-Content-Type-Options: nosniff, "
+               "X-Frame-Options/CSP frame-ancestors, and a Content-Security-Policy — e.g. "
+               "via a security-headers middleware.",
+    },
 }
 
 _SOURCE = {

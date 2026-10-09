@@ -14,10 +14,10 @@ import json as _json
 
 from execution.probes import _auth_token as _auth_token_fn  # noqa: F401
 from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
-                               crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
-                               excessive_data_probe, forge_jwt_probe, injection_probe,
-                               jwt_flaws_probe, malformed_input_probe, nosql_probe, sign_jwt_hs,
-                               sqli_probe)
+                               cors_probe, crash_fuzz_probe, debug_disclosure_probe,
+                               error_handling_probe, excessive_data_probe, forge_jwt_probe,
+                               injection_probe, jwt_flaws_probe, malformed_input_probe, nosql_probe,
+                               path_traversal_probe, security_headers_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -616,3 +616,92 @@ def test_jwt_flaws_quiet_on_secure_server():
 def test_service_requires_model_and_url():
     assert not ProbeService(_ctx()).run(AppModel(error="bad"), "http://x").success
     assert not ProbeService(_ctx()).run(_model_with_secret(), "").success
+
+
+# ── path traversal ───────────────────────────────────────────────────────────
+
+class _TraversalSession:
+    """A lookup that serves /etc/passwd when fed a traversal payload (vulnerable)."""
+    def __init__(self, vulnerable=True):
+        self.vulnerable = vulnerable
+
+    def get(self, url, headers=None, timeout=None):
+        if self.vulnerable and ("etc/passwd" in url or "etc%2fpasswd" in url.lower()):
+            return MagicMock(status_code=200, text="root:x:0:0:root:/root:/bin/bash\n")
+        return MagicMock(status_code=404, text="not found")
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_path_traversal_confirms_on_passwd_signature():
+    out = path_traversal_probe(_model_lookup(), "http://x", session=_TraversalSession(vulnerable=True))
+    assert len(out) == 1 and out[0].exploited and out[0].severity == "P1"
+    assert out[0].probe == "path-traversal"
+
+
+def test_path_traversal_quiet_when_not_vulnerable():
+    assert path_traversal_probe(_model_lookup(), "http://x", session=_TraversalSession(vulnerable=False)) == []
+
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+
+class _CorsSession:
+    def __init__(self, reflect=True, creds=False):
+        self.reflect = reflect
+        self.creds = creds
+
+    def get(self, url, headers=None, timeout=None):
+        origin = (headers or {}).get("Origin", "")
+        h = {}
+        if self.reflect and origin:
+            h["Access-Control-Allow-Origin"] = origin
+            if self.creds:
+                h["Access-Control-Allow-Credentials"] = "true"
+        return MagicMock(status_code=200, text="{}", headers=h)
+
+
+def test_cors_reflection_with_credentials_is_p2():
+    out = cors_probe(AppModel(root="/x"), "http://x", session=_CorsSession(reflect=True, creds=True))
+    assert len(out) == 1 and out[0].severity == "P2" and out[0].probe == "cors"
+
+
+def test_cors_reflection_without_credentials_is_p3():
+    out = cors_probe(AppModel(root="/x"), "http://x", session=_CorsSession(reflect=True, creds=False))
+    assert len(out) == 1 and out[0].severity == "P3"
+
+
+def test_cors_quiet_when_not_reflected():
+    assert cors_probe(AppModel(root="/x"), "http://x", session=_CorsSession(reflect=False)) == []
+
+
+# ── security headers ─────────────────────────────────────────────────────────
+
+class _HeadersSession:
+    def __init__(self, headers):
+        self._h = headers
+
+    def get(self, url, headers=None, timeout=None):
+        return MagicMock(status_code=200, text="ok", headers=dict(self._h))
+
+
+def test_security_headers_flags_missing_set():
+    out = security_headers_probe(AppModel(root="/x"), "http://x", session=_HeadersSession({}))
+    assert out and any(f.probe == "security-headers" for f in out)
+    titles = " ".join(f.title for f in out)
+    assert "X-Content-Type-Options" in titles
+
+
+def test_security_headers_flags_hsts_on_https():
+    out = security_headers_probe(AppModel(root="/x"), "https://x", session=_HeadersSession({}))
+    assert any(f.severity == "P2" and "HSTS" in f.title for f in out)
+
+
+def test_security_headers_quiet_when_all_present():
+    full = {
+        "Content-Security-Policy": "default-src 'self'",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Strict-Transport-Security": "max-age=63072000",
+    }
+    assert security_headers_probe(AppModel(root="/x"), "https://x", session=_HeadersSession(full)) == []

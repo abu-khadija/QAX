@@ -68,10 +68,11 @@ class ProbeService:
         if not base_url or not str(base_url).strip():
             return ProbeResult(error="No base_url to probe against.")
 
-        from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
+        from execution.probes import (bola_probe, cookie_flags_probe, cors_probe, crash_fuzz_probe,
                                        debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
-                                       jwt_flaws_probe, malformed_input_probe, nosql_probe, sqli_probe)
+                                       jwt_flaws_probe, malformed_input_probe, nosql_probe,
+                                       path_traversal_probe, security_headers_probe, sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -115,6 +116,12 @@ class ProbeService:
         except Exception as exc:
             logger.error("malformed_input probe failed: %s", exc)
 
+        # Path traversal / local file read via a path param (proven by an OS-file signature).
+        try:
+            findings.extend(path_traversal_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("path_traversal probe failed: %s", exc)
+
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
             findings.extend(bola_probe(model, base_url, auth=auth))
@@ -153,6 +160,18 @@ class ProbeService:
             findings.extend(debug_disclosure_probe(model, base_url))
         except Exception as exc:
             logger.error("debug_disclosure probe failed: %s", exc)
+
+        # CORS — does the app reflect an arbitrary Origin (trusts any site)?
+        try:
+            findings.extend(cors_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("cors probe failed: %s", exc)
+
+        # Response security headers (HSTS / clickjacking / MIME-sniff / CSP).
+        try:
+            findings.extend(security_headers_probe(model, base_url))
+        except Exception as exc:
+            logger.error("security_headers probe failed: %s", exc)
 
         result = ProbeResult(findings=findings)
         prog.emit("probe", "ok", result.summary())

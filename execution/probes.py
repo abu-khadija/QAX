@@ -1099,3 +1099,150 @@ def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None =
     except Exception as exc:  # pragma: no cover - network
         logger.warning("crash_fuzz failed: %s", exc)
     return out
+
+
+def security_headers_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+    """
+    Response-hardening headers (OWASP Secure Headers). One GET of the app root tells
+    us whether the standard protections are set. Reports at most two consolidated
+    findings — HSTS over HTTPS (P2) and the clickjacking/sniffing set (P3) — so this
+    is a clear new angle without crying wolf. Deterministic, no auth, no model calls.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    try:
+        r = sess.get(base + "/", timeout=15)
+    except Exception:
+        return out
+    h = {k.lower(): v for k, v in r.headers.items()}
+    is_https = base.lower().startswith("https")
+    csp = h.get("content-security-policy", "")
+
+    # HSTS only means anything over HTTPS; flagging it on plain HTTP would be noise.
+    if is_https and "strict-transport-security" not in h:
+        out.append(ProbeFinding(
+            probe="security-headers",
+            title="Strict-Transport-Security (HSTS) header is not set",
+            exploited=True, severity="P2",
+            evidence=("The HTTPS app root returned no Strict-Transport-Security header, so a "
+                      "browser can be downgraded to plain HTTP on the first/next visit "
+                      "(SSL-strip → session theft)."),
+            target="/"))
+
+    missing = []
+    if "x-content-type-options" not in h:
+        missing.append("X-Content-Type-Options")              # MIME-sniffing
+    if "x-frame-options" not in h and "frame-ancestors" not in csp.lower():
+        missing.append("X-Frame-Options / CSP frame-ancestors")  # clickjacking
+    if not csp:
+        missing.append("Content-Security-Policy")             # XSS defence-in-depth
+    if missing:
+        out.append(ProbeFinding(
+            probe="security-headers",
+            title="Response security headers missing: " + ", ".join(missing),
+            exploited=True, severity="P3",
+            evidence=("The app root (HTTP %d) did not set: %s. These are defence-in-depth "
+                      "against clickjacking, MIME-sniffing and XSS." % (r.status_code, ", ".join(missing))),
+            target="/"))
+    return out
+
+
+# An origin an attacker would control — never one the app should trust. If it comes
+# back reflected in Access-Control-Allow-Origin, CORS is echoing the caller's Origin.
+_EVIL_ORIGIN = "https://qax-cors-probe.example"
+
+
+def cors_probe(model, base_url: str, *, session: requests.Session | None = None,
+               auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    CORS misconfiguration (OWASP). We send an attacker-controlled Origin; if the app
+    reflects that exact origin back in Access-Control-Allow-Origin it trusts ANY site.
+    Reflection + Allow-Credentials:true is P2 (a malicious page can read the victim's
+    authenticated responses); reflection alone is P3. The proof is that the response
+    echoes the origin we sent — self-controlling, near-zero false positives.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    try:
+        r = sess.get(base + "/", headers={"Origin": _EVIL_ORIGIN}, timeout=15)
+    except Exception:
+        return out
+    acao = (r.headers.get("Access-Control-Allow-Origin") or "").strip()
+    acac = (r.headers.get("Access-Control-Allow-Credentials") or "").strip().lower()
+    if acao == _EVIL_ORIGIN:
+        creds = acac == "true"
+        out.append(ProbeFinding(
+            probe="cors",
+            title="CORS reflects an arbitrary Origin" + (" with credentials" if creds else ""),
+            exploited=True, severity="P2" if creds else "P3",
+            evidence=("Request with Origin: %s was answered with Access-Control-Allow-Origin: %s%s. "
+                      "The app trusts any site's origin, so a malicious page can make cross-origin "
+                      "requests%s." % (_EVIL_ORIGIN, acao,
+                                       " and Access-Control-Allow-Credentials: true" if creds else "",
+                                       " and read the victim's authenticated responses" if creds
+                                       else " to this API")),
+            target="/"))
+    return out
+
+
+# Signatures that only appear if a file outside the web root was actually read back.
+_TRAVERSAL_SIGS = (re.compile(r"root:.*:0:0:"),            # /etc/passwd
+                   re.compile(r"\[extensions\]", re.I),    # Windows win.ini
+                   re.compile(r"for 16-bit app support", re.I))
+_TRAVERSAL_PAYLOADS = ("../../../../../../etc/passwd",
+                       "..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd",
+                       "....//....//....//....//etc/passwd",
+                       "../../../../../../windows/win.ini")
+
+
+def path_traversal_probe(model, base_url: str, *, session: requests.Session | None = None,
+                         auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Path traversal / local file inclusion (OWASP). For GET endpoints with a path
+    parameter, substitute classic traversal payloads and confirm ONLY when the
+    response body contains an unmistakable OS-file signature (e.g. /etc/passwd's
+    `root:...:0:0:`). A benign value never contains it, so this is a proven P1 read
+    of a file outside the web root — not a guess. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    cands = [e for e in getattr(model, "endpoints", [])
+             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+             and "{" in str(e.get("path", ""))]
+    token = None
+    if any(e.get("auth_required") for e in cands):
+        token = _resolve_token(sess, base, recipe, model, f"trav_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    for e in cands[:5]:
+        path = str(e.get("path", ""))
+        m = re.search(r"\{([^}]+)\}", path)
+        if not m:
+            continue
+        param = m.group(1)
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
+        hit = None
+        for payload in _TRAVERSAL_PAYLOADS:
+            url = f"{base}{path.replace('{' + param + '}', payload)}"
+            try:
+                r = sess.get(url, headers=headers, timeout=15)
+            except Exception:
+                continue
+            if any(sig.search(r.text or "") for sig in _TRAVERSAL_SIGS):
+                hit = (payload, r.status_code)
+                break
+        if hit:
+            out.append(ProbeFinding(
+                probe="path-traversal",
+                title=f"Path traversal / local file read via path param '{param}' on {path}",
+                exploited=True, severity="P1",
+                evidence=(f"GET {path} with '{param}'='{hit[0]}' returned an OS file's contents "
+                          f"(HTTP {hit[1]}; matched a /etc/passwd or win.ini signature). The "
+                          f"parameter is used to build a filesystem path without sanitisation."),
+                target=path))
+    return out
