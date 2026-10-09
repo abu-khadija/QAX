@@ -98,7 +98,13 @@ class OrchestratorService:
         prog.emit("orchestrate", "step", "modelling the system")
         model = AppModelService(self.context).build(repo_path, use_cache=use_cache, progress=prog)
         if not model.success:
-            return OrchestratorResult(error=model.error or "AppModel failed")
+            # No code model (e.g. a UI-only target, or a repo with no readable
+            # source). The running app is still the source of truth — proceed with
+            # an empty model so live grounding, the probes and the UI tour can work
+            # off the live app. Only a deep code-generation pass truly needs source.
+            prog.emit("orchestrate", "info",
+                      f"no code model ({model.error or 'no source'}) — scanning the live app only")
+            model = AppModel(root=repo_path)
 
         # 1b) Ground the endpoints in the RUNNING app (rule #1: the running app is
         #     the source of truth; the code only says WHAT is risky). The code model

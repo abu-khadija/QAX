@@ -115,11 +115,14 @@ class ProbeService:
         except Exception as exc:
             logger.error("excessive_data probe failed: %s", exc)
 
-        # Crash-fuzz — oversized inputs on auth endpoints.
-        try:
-            findings.extend(crash_fuzz_probe(model, base_url))
-        except Exception as exc:
-            logger.error("crash_fuzz probe failed: %s", exc)
+        # Crash-fuzz — oversized inputs on auth endpoints. Only when there is a real
+        # API surface (an empty/UI-only model would fuzz a guessed path and misread
+        # a static server's 501 as a crash).
+        if getattr(model, "endpoints", None):
+            try:
+                findings.extend(crash_fuzz_probe(model, base_url))
+            except Exception as exc:
+                logger.error("crash_fuzz probe failed: %s", exc)
 
         # Error-handling — unknown routes should 404, not 5xx (control: a nonsense path).
         try:

@@ -2463,7 +2463,10 @@ def run_scan_command() -> None:
     parser = argparse.ArgumentParser(
         prog="qax scan",
         description="Deep autonomous scan: model the whole app, hunt and PROVE bugs.")
-    parser.add_argument("--repo", required=True, help="Path to the repository to scan.")
+    parser.add_argument("--repo", default=None,
+                        help="Path to the repository to scan. Optional — omit for a UI-only / "
+                             "no-source target; QAX then scans the live app only (grounding + "
+                             "probes + --tour).")
     parser.add_argument("--url", required=True,
                         help="Base URL of the running app (e.g. http://localhost:8000).")
     parser.add_argument("--project", default=None, help="QAX project name (optional).")
@@ -2504,9 +2507,16 @@ def run_scan_command() -> None:
     from services.orchestrator_service import OrchestratorService
     from services.progress import PrintProgressReporter
 
-    if not Path(args.repo).exists():
-        print(f"\n  Repo path not found: {args.repo}\n")
-        sys.exit(1)
+    if args.repo:
+        if not Path(args.repo).exists():
+            print(f"\n  Repo path not found: {args.repo}\n")
+            sys.exit(1)
+        repo_path = args.repo
+    else:
+        # No repo — UI-only / live-app-only scan. Use an empty dir so the model
+        # degrades cleanly to live-app grounding + probes + tour.
+        import tempfile
+        repo_path = tempfile.mkdtemp(prefix="qax_nosrc_")
 
     try:
         ctx = QAXContext.from_env(project=args.project or "", dry_run=args.dry_run)
@@ -2516,7 +2526,7 @@ def run_scan_command() -> None:
         sys.exit(1)
 
     mode = "quick" if args.quick else "deep"
-    print(f"\n  QAX {mode} scan — repo: {args.repo}  ·  app: {args.url}\n")
+    print(f"\n  QAX {mode} scan — repo: {args.repo or '(none — live app only)'}  ·  app: {args.url}\n")
 
     # Instrument this run: count every LLM call (for $/run) and time it.
     _usage.track()
@@ -2528,7 +2538,7 @@ def run_scan_command() -> None:
         print(f"  (using a supplied auth token via '{args.auth_header}')\n")
     _t0 = time.time()
     result = OrchestratorService(ctx).run(
-        args.repo, args.url,
+        repo_path, args.url,
         deep=not args.quick,
         max_router_files=args.max_router_files,
         use_cache=not args.refresh,
@@ -2574,7 +2584,7 @@ def run_scan_command() -> None:
             logger.warning("Could not read --truth file: %s", exc)
     try:
         _rec = _scorecard.score_run(
-            result, repo=args.repo, url=args.url, mode=mode,
+            result, repo=(args.repo or args.url), url=args.url, mode=mode,
             duration_sec=_elapsed, usage=_usage.snapshot(), truth=_truth)
         _path = _scorecard.write_run(_rec)
         print(_scorecard.render(_rec))
