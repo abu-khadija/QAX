@@ -6,7 +6,8 @@ from services.remediation import remediation_for
 def test_probe_findings_get_guidance():
     for probe in ("forge-jwt", "jwt-flaws", "sqli", "nosql", "bola", "excessive-data",
                   "malformed-input", "debug-disclosure", "cookie-flags", "error-handling",
-                  "path-traversal", "cors", "security-headers"):
+                  "path-traversal", "cors", "security-headers",
+                  "mass-assignment", "open-redirect", "rate-limit"):
         r = remediation_for({"probe": probe, "title": "x"})
         assert r.get("why") and r.get("fix"), probe
 

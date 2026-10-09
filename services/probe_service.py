@@ -68,11 +68,13 @@ class ProbeService:
         if not base_url or not str(base_url).strip():
             return ProbeResult(error="No base_url to probe against.")
 
-        from execution.probes import (bola_probe, cookie_flags_probe, cors_probe, crash_fuzz_probe,
-                                       debug_disclosure_probe, error_handling_probe,
+        from execution.probes import (auth_error_probe, bola_probe, cookie_flags_probe, cors_probe,
+                                       crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
-                                       jwt_flaws_probe, malformed_input_probe, nosql_probe,
-                                       path_traversal_probe, security_headers_probe, sqli_probe)
+                                       jwt_flaws_probe, malformed_input_probe, mass_assignment_probe,
+                                       nosql_probe, open_redirect_probe, path_traversal_probe,
+                                       persistence_probe, rate_limit_probe, search_robustness_probe,
+                                       security_headers_probe, sqli_probe, unpaginated_list_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -121,6 +123,24 @@ class ProbeService:
             findings.extend(path_traversal_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("path_traversal probe failed: %s", exc)
+
+        # Mass assignment — registration binds a client-supplied privileged field.
+        try:
+            findings.extend(mass_assignment_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("mass_assignment probe failed: %s", exc)
+
+        # Open redirect — a redirect param bounces to an attacker-controlled host.
+        try:
+            findings.extend(open_redirect_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("open_redirect probe failed: %s", exc)
+
+        # Rate limiting — no brute-force throttling/lockout on login (P3 lead).
+        try:
+            findings.extend(rate_limit_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("rate_limit probe failed: %s", exc)
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
@@ -172,6 +192,31 @@ class ProbeService:
             findings.extend(security_headers_probe(model, base_url))
         except Exception as exc:
             logger.error("security_headers probe failed: %s", exc)
+
+        # Persistence — a field saved with a 2xx "success" that is blank on read-back
+        # (silent data loss, the QA field manual's highest-value class).
+        try:
+            findings.extend(persistence_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("persistence probe failed: %s", exc)
+
+        # Auth error handling — a forbidden request that 5xx's instead of a clean 401/403.
+        try:
+            findings.extend(auth_error_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("auth_error probe failed: %s", exc)
+
+        # Search robustness — a search/filter param that 405/5xx's on an ordinary character.
+        try:
+            findings.extend(search_robustness_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("search_robustness probe failed: %s", exc)
+
+        # Unpaginated list — a collection that returns an unbounded array (no pagination).
+        try:
+            findings.extend(unpaginated_list_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("unpaginated_list probe failed: %s", exc)
 
         result = ProbeResult(findings=findings)
         prog.emit("probe", "ok", result.summary())

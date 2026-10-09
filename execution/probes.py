@@ -1246,3 +1246,498 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
                           f"parameter is used to build a filesystem path without sanitisation."),
                 target=path))
     return out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# QA-craft probes mined from the field manual (KB file 03 §3). These encode the
+# bug classes a human QA lead caught by hand that pure HTTP/injection probes miss.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Create-body field names that the SERVER owns — never expect these to round-trip
+# as we sent them, so a mismatch on one is not a data-loss bug.
+_SERVER_OWNED = ("id", "uuid", "guid", "created", "updated", "modified", "_at",
+                 "timestamp", "slug", "owner", "author", "user_id", "created_by",
+                 "href", "url", "self", "etag", "version", "rev")
+
+
+def _persistable_fields(fields: list[str]) -> list[str]:
+    """String content fields whose value a create should store verbatim (round-trip)."""
+    out = []
+    for f in fields:
+        lf = f.lower()
+        if any(k in lf for k in _SECRET_KW):      # never echoed back — not data loss
+            continue
+        if any(k in lf for k in _SERVER_OWNED):    # server-assigned — mismatch expected
+            continue
+        out.append(f)
+    return out
+
+
+def persistence_probe(model, base_url: str, *, session: requests.Session | None = None,
+                      auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Silent data loss on save — the highest-value class in the QA field manual (§3.A1,
+    §3.B). The app returns 2xx "saved successfully", but a field set on create is blank
+    when the record is read back (nested/dotted binding dropped it, an optional field
+    failed to bind). The false success is what makes it dangerous.
+
+    Method (the QA lead's "persistence hunt": set → save → RELOAD → read back), with a
+    built-in control so we never cry wolf:
+      1. POST a create body where each persistable string field carries its OWN unique
+         marker token, and the key field a unique key.
+      2. The create must return 2xx (control: the write was accepted).
+      3. GET the object back by its key; it must return 2xx (control: it round-trips).
+      4. A field is PRESENT if its marker appears anywhere in the read-back body.
+         Report ONLY when at least one marker survived (proves read works and the
+         object persisted) AND at least one did not (that specific field was dropped).
+         All-present = safe; all-absent = inconclusive (GET may not echo fields) → silent.
+
+    Writes disposable records only (unique keys, marker values). Never DELETEs.
+    Deterministic, no model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, field_names
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+
+    # Pair a "read by key" GET with the POST that creates into the same collection.
+    pairs = []
+    for ge in eps:
+        if str(ge.get("method", "")).upper() != "GET":
+            continue
+        gp = str(ge.get("path", ""))
+        m = re.search(r"\{([^}]+)\}", gp)
+        if not m:
+            continue
+        param = m.group(1)
+        prefix = gp[:m.start()].rstrip("/")
+        post = next((e for e in eps if str(e.get("method", "")).upper() == "POST"
+                     and str(e.get("path", "")).rstrip("/") == prefix
+                     and field_names(e.get("request_fields"))), None)
+        if not post:
+            continue
+        pf = field_names(post.get("request_fields"))
+        key_field = next((f for f in pf if f.lower() == param.lower()), None) \
+            or next((f for f in pf if any(k in f.lower() for k in ("title", "name", "slug", "key", "id"))), None)
+        if key_field and _persistable_fields([f for f in pf if f != key_field]):
+            pairs.append((post, ge, prefix, param, key_field, pf))
+    if not pairs:
+        return out
+
+    token = None
+    if any(p[0].get("auth_required") or p[1].get("auth_required") for p in pairs):
+        token = _resolve_token(sess, base, recipe, model,
+                               f"persist_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    for post, ge, prefix, param, key_field, pf in pairs[:4]:
+        key = f"qaxkey{uuid.uuid4().hex[:10]}"
+        markers: dict[str, str] = {}          # field -> its unique marker token
+        body: dict = {}
+        for f in pf:
+            lf = f.lower()
+            if f == key_field:
+                body[f] = key
+            elif any(k in lf for k in _SECRET_KW):
+                body[f] = "Secret123!"
+            elif any(k in lf for k in ("age", "count", "number", "qty", "amount", "price")):
+                body[f] = 1
+            elif any(k in lf for k in ("is_", "enabled", "active", "admin", "approved")):
+                body[f] = False
+            elif any(k in lf for k in _DATE_KW):
+                body[f] = "2020-01-01T00:00:00"
+            elif any(k in lf for k in _SERVER_OWNED):
+                body[f] = f"qax{uuid.uuid4().hex[:8]}"   # satisfy it, but don't track
+            else:
+                tok = f"qaxkeep{uuid.uuid4().hex[:10]}"
+                markers[f] = tok
+                body[f] = tok
+        if not markers:
+            continue
+        headers = _auth_headers(token, auth) if (post.get("auth_required") or ge.get("auth_required")) else {}
+        try:
+            cr = sess.post(f"{base}{prefix}", json=body, headers=headers, timeout=15)
+        except Exception:
+            continue
+        if not (200 <= cr.status_code < 300):      # control: the create must be accepted
+            continue
+        read_url = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
+        try:
+            rr = sess.get(read_url, headers=headers, timeout=15)
+        except Exception:
+            continue
+        if not (200 <= rr.status_code < 300):      # control: the object must read back
+            continue
+        read_text = rr.text or ""
+        present = [f for f, tok in markers.items() if tok in read_text]
+        dropped = [f for f, tok in markers.items() if tok not in read_text]
+        # Need a positive control (something survived) AND a real drop. All-absent is
+        # inconclusive — the GET may just not echo these fields — so stay silent.
+        if present and dropped:
+            saved_msg = ""
+            try:
+                j = cr.json()
+                if isinstance(j, dict) and (j.get("success") or "saved" in str(j).lower()):
+                    saved_msg = " and reported success"
+            except Exception:
+                pass
+            out.append(ProbeFinding(
+                probe="persistence",
+                title=f"Silent data loss on save in POST {prefix} (field(s) {dropped} not persisted)",
+                exploited=True, severity="P2",
+                evidence=(f"Created an object under {prefix} (HTTP {cr.status_code}{saved_msg}); on "
+                          f"reading it back via {ge['path']} the field(s) {dropped} were blank while "
+                          f"{present} persisted. A field accepted with a success response but silently "
+                          f"dropped on reload is data loss the user never sees."),
+                target=str(post.get("path", prefix))))
+    return out
+
+
+def auth_error_probe(model, base_url: str, *, session: requests.Session | None = None,
+                     auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    A forbidden request must return a clean 401/403, never a 5xx (QA field manual
+    §3.F44: "500 where 403 belongs"). A crash in the auth layer leaks internals and
+    pollutes monitoring. We call auth-required endpoints with a syntactically-invalid
+    bearer token: a correct app answers 401/403 (and nothing is written, so write
+    methods are safe); a 5xx is the finding. GET/POST/PUT/PATCH only (never DELETE).
+    Control is self-evident — the token cannot authenticate anyone. No model calls.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    bad = {"Authorization": "Bearer qax.invalid.token"}
+    seen: set = set()
+    for e in [x for x in getattr(model, "endpoints", []) if isinstance(x, dict)
+              and x.get("auth_required")
+              and str(x.get("method", "")).upper() in ("GET", "POST", "PUT", "PATCH")][:8]:
+        method = str(e.get("method", "GET")).upper()
+        path = str(e.get("path", ""))
+        resolved = re.sub(r"\{[^}]+\}", "1", path)
+        sig = (method, resolved)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        try:
+            if method == "GET":
+                r = sess.get(f"{base}{resolved}", headers=bad, timeout=15)
+            else:
+                r = sess.request(method, f"{base}{resolved}", json={}, headers=bad, timeout=15)
+        except Exception:
+            continue
+        if r.status_code >= 500:
+            out.append(ProbeFinding(
+                probe="auth-error",
+                title=f"Forbidden request returns a server error (5xx) on {method} {path}",
+                exploited=True, severity="P2",
+                evidence=(f"{method} {path} with an invalid bearer token returned HTTP "
+                          f"{r.status_code} instead of a clean 401/403. An unauthorized request "
+                          f"must be denied, not crash the server — a 5xx here leaks internals and "
+                          f"hides real faults."),
+                target=path))
+    return out
+
+
+# Characters the QA field manual (§3.F41) saw trigger a raw 405 from an unsanitised
+# search-engine query syntax — a distinctive signature that plain injection fuzzing
+# (which hunts 5xx + SQL errors) does not report.
+_SEARCH_SPECIALS = ("@", '"', "(", ")", "/", "|", "~", "^", "-")
+_SEARCH_KW = ("q", "query", "search", "term", "keyword", "filter", "name", "title", "text")
+
+
+def search_robustness_probe(model, base_url: str, *, session: requests.Session | None = None,
+                            auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Search/filter inputs should never return a raw 405/5xx on an ordinary character
+    (QA field manual §3.F41: unsanitised query-operator syntax rejected a search for
+    `@ " ( ) / | ~`, i.e. emails and slash terms). Control: a benign term must be
+    accepted (<400); a special character that then yields 405 (or 5xx) is the lead.
+    Reported P3 — a robustness defect, not an exploit — and GET-only (safe to repeat).
+    Complements injection_probe, which hunts the 5xx+SQL-error case. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+    token = None
+
+    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:8]:
+        qps = list(e.get("query_params") or [])
+        searchy = [q for q in qps if any(k == q.lower() or k in q.lower() for k in _SEARCH_KW)]
+        if not searchy:
+            continue
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        headers = {}
+        if e.get("auth_required"):
+            if token is None:
+                token = _resolve_token(sess, base, recipe, model,
+                                       f"search_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+            headers = _auth_headers(token, auth)
+
+        def hit(value, _qp, _p=path, _h=headers, _all=qps):
+            params = {p: "qaxprobe1" for p in _all}
+            params[_qp] = value
+            try:
+                r = sess.get(f"{base}{_p}", params=params, headers=_h, timeout=15)
+                return r.status_code
+            except Exception:
+                return None
+
+        for qp in searchy[:2]:
+            base_status = hit("qaxprobe1", qp)
+            if base_status is None or base_status >= 400:
+                continue                              # control must be accepted
+            trigger = next((c for c in _SEARCH_SPECIALS
+                            if (lambda s: s is not None and (s == 405 or s >= 500))(hit(c, qp))), None)
+            if trigger is not None:
+                status = hit(trigger, qp)
+                out.append(ProbeFinding(
+                    probe="search-robustness",
+                    title=f"Search rejects an ordinary character with HTTP {status} on GET {e.get('path')}",
+                    exploited=True, severity="P3",
+                    evidence=(f"On GET {e.get('path')} a benign term in '{qp}' returned {base_status}, "
+                              f"but the character '{trigger}' returned HTTP {status}. Real searches "
+                              f"(emails, slash-separated terms) contain these characters; an unsanitised "
+                              f"query syntax rejects them instead of escaping them."),
+                    target=str(e.get("path", ""))))
+    return out
+
+
+_LIST_KEYS = ("items", "data", "results", "records", "rows", "list", "content", "entries")
+
+
+def _extract_list(payload):
+    """Pull the main array out of a list response (bare array or wrapped under a key)."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for k in _LIST_KEYS:
+            if isinstance(payload.get(k), list):
+                return payload[k]
+    return None
+
+
+def unpaginated_list_probe(model, base_url: str, *, session: requests.Session | None = None,
+                           auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Large collections must paginate (QA field manual §3.D26: list pages returned
+    1,700+ rows with no pager, bloating the DOM and the payload). Fetch each
+    collection GET; if it returns a large array AND re-fetching with a limit param
+    set to 1 returns the SAME large array (the limit is ignored), pagination is
+    absent. The limit=1 re-fetch is the control: if it returns 1 row, pagination
+    works and we stay silent — so this fires only on a proven unbounded list. P3,
+    GET-only, no model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    THRESHOLD = 100
+    token = None
+
+    # Collection GETs: no path parameter (a listing, not a single record).
+    cols = [e for e in getattr(model, "endpoints", [])
+            if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+            and "{" not in str(e.get("path", ""))]
+    seen: set = set()
+    for e in cols[:8]:
+        path = str(e.get("path", ""))
+        if path in seen:
+            continue
+        seen.add(path)
+        headers = {}
+        if e.get("auth_required"):
+            if token is None:
+                token = _resolve_token(sess, base, recipe, model,
+                                       f"page_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+            headers = _auth_headers(token, auth)
+        try:
+            r = sess.get(f"{base}{path}", headers=headers, timeout=15)
+            if r.status_code >= 400:
+                continue
+            rows = _extract_list(r.json())
+        except Exception:
+            continue
+        if rows is None or len(rows) < THRESHOLD:
+            continue
+        full = len(rows)
+        # Control: ask for a single row via the common limit params. If honoured,
+        # pagination works — stay silent.
+        honoured = False
+        for lp in ("limit", "per_page", "page_size", "pageSize", "size", "count", "top"):
+            try:
+                r2 = sess.get(f"{base}{path}", params={lp: 1}, headers=headers, timeout=15)
+                rows2 = _extract_list(r2.json()) if r2.status_code < 400 else None
+            except Exception:
+                rows2 = None
+            if rows2 is not None and len(rows2) <= max(1, full // 2):
+                honoured = True
+                break
+        if honoured:
+            continue
+        out.append(ProbeFinding(
+            probe="unpaginated-list",
+            title=f"Collection GET {path} returns an unbounded, unpaginated list",
+            exploited=True, severity="P3",
+            evidence=(f"GET {path} returned {full} rows in one response and ignored a limit=1 "
+                      f"request (still {full} rows). An unbounded list grows without limit as data "
+                      f"accumulates — slow payloads, heavy DOM, and a denial-of-service lever."),
+            target=path))
+    return out
+
+
+# Privileged fields a client should never be able to set at registration. If the
+# created record echoes one back as granted, the server mass-assigned it.
+_PRIV_FIELDS = {"admin": True, "is_admin": True, "isAdmin": True, "is_staff": True,
+                "is_superuser": True, "role": "admin", "roles": ["admin"], "account_balance": 999999}
+
+
+def mass_assignment_probe(model, base_url: str, *, session: requests.Session | None = None,
+                          auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Mass assignment / BOPLA (OWASP API6): registration binds the whole request body
+    to the model, so a client can smuggle a privileged field (admin=true, role=admin).
+    We register with those extra fields and confirm ONLY when the created record the
+    server returns echoes one back as set — proof the field was accepted, not stripped.
+    A normal body never contains them, so this is a controlled, low-FP signal. P2.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, register_body
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    ident = f"massassign_{uuid.uuid4().hex[:8]}@example.com"
+    body = register_body(recipe, model, ident)
+    body.update(_PRIV_FIELDS)
+    try:
+        r = sess.post(f"{base}{recipe['register_path']}", json=body, timeout=15)
+    except Exception:
+        return out
+    if r.status_code >= 300:
+        return out
+    try:
+        data = r.json()
+    except Exception:
+        return out
+    # Flatten one level so a {"user": {...}} wrapper is still inspected.
+    scopes = [data] + ([v for v in data.values() if isinstance(v, dict)] if isinstance(data, dict) else [])
+    granted = []
+    for scope in scopes:
+        if not isinstance(scope, dict):
+            continue
+        for k, v in _PRIV_FIELDS.items():
+            if k in scope and scope[k] == v:
+                granted.append(f"{k}={v}")
+    if granted:
+        out.append(ProbeFinding(
+            probe="mass-assignment",
+            title=f"Mass assignment: registration accepted privileged field(s) {', '.join(sorted(set(granted)))}",
+            exploited=True, severity="P2",
+            evidence=(f"POST {recipe['register_path']} with extra field(s) in the body returned a "
+                      f"created record echoing {', '.join(sorted(set(granted)))}. The server bound "
+                      f"client-supplied fields it should never let a user set (privilege escalation)."),
+            target=recipe["register_path"]))
+    return out
+
+
+# Parameter names commonly used for post-action redirects.
+_REDIRECT_PARAMS = ("next", "url", "redirect", "redirect_uri", "redirect_url", "return",
+                    "returnTo", "return_to", "dest", "destination", "continue", "to", "goto")
+_REDIRECT_EVIL = "https://qax-redirect.example/evil"
+
+
+def open_redirect_probe(model, base_url: str, *, session: requests.Session | None = None,
+                        auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Open redirect (OWASP): a redirect target taken from a request parameter without an
+    allow-list lets an attacker bounce victims to a site they control (phishing, OAuth
+    token theft). We pass an external URL in common redirect params and confirm ONLY
+    when the response's Location header actually points at our external host — the
+    redirect itself is the proof. P2. Near-zero FP.
+    """
+    sess = session or requests.Session()
+    from urllib.parse import urlparse
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    evil_host = urlparse(_REDIRECT_EVIL).netloc
+
+    targets = ["/"]
+    for e in getattr(model, "endpoints", []):
+        if (isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+                and "{" not in str(e.get("path", ""))):
+            targets.append(str(e.get("path", "")))
+    seen_target: set = set()
+    for path in targets:
+        if path in seen_target:
+            continue
+        seen_target.add(path)
+        for param in _REDIRECT_PARAMS:
+            url = f"{base}{path}?{param}={_REDIRECT_EVIL}"
+            try:
+                r = sess.get(url, headers={}, allow_redirects=False, timeout=15)
+            except Exception:
+                continue
+            if 300 <= getattr(r, "status_code", 0) < 400:
+                loc = (r.headers.get("Location") or "").strip()
+                if urlparse(loc).netloc == evil_host:
+                    out.append(ProbeFinding(
+                        probe="open-redirect",
+                        title=f"Open redirect via '{param}' on {path}",
+                        exploited=True, severity="P2",
+                        evidence=(f"GET {path}?{param}={_REDIRECT_EVIL} responded {r.status_code} with "
+                                  f"Location: {loc[:120]} — the app redirects to an attacker-controlled "
+                                  f"external host taken straight from the request parameter."),
+                        target=path))
+                    return out  # one proof is enough
+    return out
+
+
+def rate_limit_probe(model, base_url: str, *, session: requests.Session | None = None,
+                     auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Missing brute-force protection (OWASP API4): the login endpoint should throttle or
+    lock after repeated failures. We register a user, then send 12 wrong-password logins;
+    if NONE are rate-limited (429) or locked (423) the endpoint has no brute-force guard.
+    Reported as a P3 lead — absence of a control, not a proven exploit — so it never
+    inflates the confirmed count.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, register_body
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    ident = f"ratelimit_{uuid.uuid4().hex[:8]}@example.com"
+    try:
+        reg = sess.post(f"{base}{recipe['register_path']}", json=register_body(recipe, model, ident), timeout=15)
+    except Exception:
+        return out
+    if getattr(reg, "status_code", 500) >= 300:
+        return out  # couldn't create the account → can't judge login throttling
+
+    bad_login = {recipe["id_field"]: ident, recipe["secret_field"]: "wrong-" + uuid.uuid4().hex[:6]}
+    statuses: list[int] = []
+    for _ in range(12):
+        try:
+            r = sess.post(f"{base}{recipe['login_path']}", json=bad_login, timeout=15)
+        except Exception:
+            return out
+        statuses.append(getattr(r, "status_code", 0))
+    throttled = any(s in (429, 423) for s in statuses)
+    # Only speak when every attempt was a normal auth failure (4xx) and none throttled —
+    # avoids firing on an endpoint that errored or behaved oddly.
+    if not throttled and statuses and all(400 <= s < 500 for s in statuses):
+        out.append(ProbeFinding(
+            probe="rate-limit",
+            title="No rate limiting / lockout on the login endpoint",
+            exploited=True, severity="P3",
+            evidence=(f"12 consecutive failed logins at {recipe['login_path']} all returned "
+                      f"HTTP {statuses[-1]} with no 429/423 — the endpoint has no visible "
+                      f"brute-force throttling or account lockout."),
+            target=recipe["login_path"]))
+    return out

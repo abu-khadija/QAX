@@ -109,6 +109,54 @@ _MAP = {
         "fix": "Review the license against your distribution model; replace the package with a "
                "permissively-licensed alternative, or obtain a commercial license, before shipping.",
     },
+    "mass-assignment": {
+        "why": "The endpoint binds the whole request body to the model, so a client can set "
+               "privileged fields it should never control (admin, role, balance) — "
+               "privilege escalation.",
+        "fix": "Bind only an explicit allow-list of fields (a DTO/input schema); never auto-map "
+               "the raw request body, and set privileged fields server-side only.",
+    },
+    "open-redirect": {
+        "why": "A redirect target is taken from a request parameter without validation, so an "
+               "attacker can send victims to a site they control (phishing, OAuth token theft).",
+        "fix": "Redirect only to an allow-list of known internal paths/hosts; reject absolute "
+               "external URLs, or map a redirect key to a server-side URL table.",
+    },
+    "rate-limit": {
+        "why": "The login endpoint has no throttling or lockout, so credentials can be "
+               "brute-forced or sprayed at speed.",
+        "fix": "Add rate limiting and progressive lockout per account/IP (e.g. 429 after N "
+               "failures), plus CAPTCHA/MFA on repeated failures; alert on spikes.",
+    },
+    "persistence": {
+        "why": "A field is accepted with a 2xx success response but is blank when the record is "
+               "read back — silent data loss the user never sees (commonly a nested/dotted or "
+               "optional field that fails to bind on the server).",
+        "fix": "Bind and validate every field server-side; return an error when a value cannot be "
+               "saved instead of a success. Add a persistence test that writes, reloads and "
+               "re-reads each field rather than trusting the save response.",
+    },
+    "auth-error": {
+        "why": "A forbidden request crashes with a 5xx instead of a clean 401/403, leaking "
+               "internals and making real faults indistinguishable from unauthorized traffic.",
+        "fix": "Handle authentication/authorization failures explicitly: return 401 (not "
+               "authenticated) or 403 (not permitted) before any work that can throw, and never "
+               "let the auth layer fall through to an unhandled 500.",
+    },
+    "search-robustness": {
+        "why": "A search/filter input returns a raw 405/5xx on an ordinary character, so real "
+               "queries (emails, slash-separated terms) fail — an unsanitised query-operator "
+               "syntax is rejecting input it should escape.",
+        "fix": "Escape or parameterise user input before it reaches the search/query engine, and "
+               "return 0 results (not an error) for a term that matches nothing.",
+    },
+    "unpaginated-list": {
+        "why": "A collection endpoint returns its whole table in one response and ignores a limit "
+               "parameter — the payload and client DOM grow without bound as data accumulates, a "
+               "performance and denial-of-service risk.",
+        "fix": "Paginate every collection endpoint (limit/offset or cursor) with a sane default "
+               "and a hard maximum page size; never return an unbounded array.",
+    },
 }
 
 _SOURCE = {

@@ -13,11 +13,14 @@ from unittest.mock import MagicMock
 import json as _json
 
 from execution.probes import _auth_token as _auth_token_fn  # noqa: F401
-from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
-                               cors_probe, crash_fuzz_probe, debug_disclosure_probe,
-                               error_handling_probe, excessive_data_probe, forge_jwt_probe,
-                               injection_probe, jwt_flaws_probe, malformed_input_probe, nosql_probe,
-                               path_traversal_probe, security_headers_probe, sign_jwt_hs, sqli_probe)
+from execution.probes import (_auth_headers, _resolve_token, auth_error_probe, bola_probe,
+                               cookie_flags_probe, cors_probe, crash_fuzz_probe,
+                               debug_disclosure_probe, error_handling_probe, excessive_data_probe,
+                               forge_jwt_probe, injection_probe, jwt_flaws_probe,
+                               malformed_input_probe, mass_assignment_probe, nosql_probe,
+                               open_redirect_probe, path_traversal_probe, persistence_probe,
+                               rate_limit_probe, search_robustness_probe, security_headers_probe,
+                               sign_jwt_hs, sqli_probe, unpaginated_list_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -705,3 +708,228 @@ def test_security_headers_quiet_when_all_present():
         "Strict-Transport-Security": "max-age=63072000",
     }
     assert security_headers_probe(AppModel(root="/x"), "https://x", session=_HeadersSession(full)) == []
+
+
+# ── mass assignment ──────────────────────────────────────────────────────────
+
+class _MassAssignSession:
+    def __init__(self, reflect=True):
+        self.reflect = reflect
+
+    def post(self, url, json=None, timeout=None):
+        if "register" in url:
+            body = {"username": (json or {}).get("username", "u")}
+            if self.reflect:
+                body["admin"] = True            # echoes the smuggled privileged field
+            return MagicMock(status_code=201, json=lambda b=body: b, text="{}")
+        return MagicMock(status_code=200, json=lambda: {}, text="{}")
+
+
+def test_mass_assignment_confirms_on_echoed_privilege():
+    out = mass_assignment_probe(_model_with_secret(), "http://x", session=_MassAssignSession(reflect=True))
+    assert len(out) == 1 and out[0].severity == "P2" and out[0].probe == "mass-assignment"
+    assert "admin" in out[0].title.lower()
+
+
+def test_mass_assignment_quiet_when_field_stripped():
+    assert mass_assignment_probe(_model_with_secret(), "http://x", session=_MassAssignSession(reflect=False)) == []
+
+
+# ── open redirect ────────────────────────────────────────────────────────────
+
+class _RedirectSession:
+    def __init__(self, vulnerable=True):
+        self.vulnerable = vulnerable
+
+    def get(self, url, headers=None, allow_redirects=None, timeout=None):
+        if self.vulnerable and "qax-redirect.example" in url:
+            return MagicMock(status_code=302, text="",
+                             headers={"Location": "https://qax-redirect.example/evil"})
+        return MagicMock(status_code=200, text="ok", headers={})
+
+
+def test_open_redirect_confirms_on_external_location():
+    out = open_redirect_probe(AppModel(root="/x"), "http://x", session=_RedirectSession(vulnerable=True))
+    assert len(out) == 1 and out[0].severity == "P2" and out[0].probe == "open-redirect"
+
+
+def test_open_redirect_quiet_when_not_redirecting():
+    assert open_redirect_probe(AppModel(root="/x"), "http://x", session=_RedirectSession(vulnerable=False)) == []
+
+
+# ── rate limiting ────────────────────────────────────────────────────────────
+
+class _RateLimitSession:
+    def __init__(self, throttle_after=None):
+        self.throttle_after = throttle_after
+        self.n = 0
+
+    def post(self, url, json=None, timeout=None):
+        if "register" in url:
+            return MagicMock(status_code=201, json=lambda: {}, text="{}")
+        self.n += 1
+        if self.throttle_after and self.n > self.throttle_after:
+            return MagicMock(status_code=429, text="too many requests")
+        return MagicMock(status_code=401, text="bad credentials")
+
+
+def test_rate_limit_flags_when_never_throttled():
+    out = rate_limit_probe(_model_with_secret(), "http://x", session=_RateLimitSession(throttle_after=None))
+    assert len(out) == 1 and out[0].severity == "P3" and out[0].probe == "rate-limit"
+
+
+def test_rate_limit_quiet_when_throttled():
+    assert rate_limit_probe(_model_with_secret(), "http://x", session=_RateLimitSession(throttle_after=3)) == []
+
+
+# ── persistence probe (silent data loss on save) ─────────────────────────────
+
+def _model_persist() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/notes", "auth_required": False,
+         "request_fields": ["title", "body", "category"]},
+        {"method": "GET", "path": "/notes/{title}", "auth_required": False},
+    ])
+
+
+class _PersistSession:
+    """
+    Create + read-back. `drop` names a field the server silently discards on save
+    (returning success anyway); `echo_none` makes GET echo no fields at all.
+    """
+    def __init__(self, drop=None, echo_none=False):
+        self.drop = drop
+        self.echo_none = echo_none
+        self.store = {}
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        rec = dict(json or {})
+        if self.drop:
+            rec.pop(self.drop, None)
+        self.store[rec.get("title")] = rec
+        return MagicMock(status_code=201, json=lambda: {"success": True}, text='{"success": true}')
+
+    def get(self, url, headers=None, timeout=None):
+        title = url.rsplit("/", 1)[-1]
+        rec = self.store.get(title)
+        if rec is None:
+            return MagicMock(status_code=404, text="not found")
+        body = {} if self.echo_none else rec
+        return MagicMock(status_code=200, text=_json.dumps(body))
+
+
+def test_persistence_flags_silent_drop():
+    out = persistence_probe(_model_persist(), "http://x", session=_PersistSession(drop="body"))
+    assert len(out) == 1 and out[0].probe == "persistence" and out[0].severity == "P2"
+    assert "body" in out[0].evidence
+
+
+def test_persistence_quiet_when_all_fields_persist():
+    assert persistence_probe(_model_persist(), "http://x", session=_PersistSession(drop=None)) == []
+
+
+def test_persistence_quiet_when_read_echoes_nothing():
+    # All markers absent = inconclusive (GET may not echo fields) — never cry wolf.
+    assert persistence_probe(_model_persist(), "http://x",
+                             session=_PersistSession(drop=None, echo_none=True)) == []
+
+
+# ── auth-error probe (500 where 403 belongs) ─────────────────────────────────
+
+def _model_authed() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/me", "auth_required": True},
+        {"method": "POST", "path": "/items", "auth_required": True, "request_fields": ["name"]},
+    ])
+
+
+class _AuthErrSession:
+    def __init__(self, crash=True):
+        self.crash = crash
+
+    def _deny(self):
+        return MagicMock(status_code=500 if self.crash else 403, text="x")
+
+    def get(self, url, headers=None, timeout=None):
+        return self._deny()
+
+    def request(self, method, url, json=None, headers=None, timeout=None):
+        return self._deny()
+
+
+def test_auth_error_flags_5xx_on_forbidden():
+    out = auth_error_probe(_model_authed(), "http://x", session=_AuthErrSession(crash=True))
+    assert out and all(f.severity == "P2" and f.probe == "auth-error" for f in out)
+
+
+def test_auth_error_quiet_on_clean_403():
+    assert auth_error_probe(_model_authed(), "http://x", session=_AuthErrSession(crash=False)) == []
+
+
+# ── search-robustness probe (405/5xx on an ordinary character) ───────────────
+
+def _model_search() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/search", "auth_required": False, "query_params": ["q"]},
+    ])
+
+
+class _SearchSession:
+    def __init__(self, reject_specials=True):
+        self.reject_specials = reject_specials
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        q = (params or {}).get("q", "")
+        if self.reject_specials and any(c in q for c in '@"()/|~^-'):
+            return MagicMock(status_code=405, text="method not allowed")
+        return MagicMock(status_code=200, text="[]")
+
+
+def test_search_robustness_flags_405_on_special_char():
+    out = search_robustness_probe(_model_search(), "http://x", session=_SearchSession(reject_specials=True))
+    assert len(out) == 1 and out[0].probe == "search-robustness" and out[0].severity == "P3"
+
+
+def test_search_robustness_quiet_when_tolerant():
+    assert search_robustness_probe(_model_search(), "http://x",
+                                   session=_SearchSession(reject_specials=False)) == []
+
+
+# ── unpaginated-list probe ───────────────────────────────────────────────────
+
+def _model_collection() -> AppModel:
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/items", "auth_required": False},
+    ])
+
+
+class _ListSession:
+    def __init__(self, total=150, honour_limit=False):
+        self.total = total
+        self.honour_limit = honour_limit
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        params = params or {}
+        limit = next((int(v) for k, v in params.items() if "limit" in k.lower()
+                      or "size" in k.lower() or k.lower() in ("count", "top", "per_page")), None)
+        n = self.total
+        if limit is not None and self.honour_limit:
+            n = min(limit, self.total)
+        return MagicMock(status_code=200, json=lambda n=n: [{"i": i} for i in range(n)],
+                         text="[]")
+
+
+def test_unpaginated_list_flags_unbounded():
+    out = unpaginated_list_probe(_model_collection(), "http://x",
+                                 session=_ListSession(total=150, honour_limit=False))
+    assert len(out) == 1 and out[0].probe == "unpaginated-list" and out[0].severity == "P3"
+
+
+def test_unpaginated_list_quiet_when_paginated():
+    assert unpaginated_list_probe(_model_collection(), "http://x",
+                                  session=_ListSession(total=150, honour_limit=True)) == []
+
+
+def test_unpaginated_list_quiet_when_small():
+    assert unpaginated_list_probe(_model_collection(), "http://x",
+                                  session=_ListSession(total=10, honour_limit=False)) == []
