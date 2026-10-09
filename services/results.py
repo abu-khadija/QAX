@@ -430,8 +430,11 @@ class OrchestratorResult:
         return [g for g, s in self.coverage.items() if s == "template"]
 
     def summary(self) -> str:
-        """One-line human summary."""
-        return (f"{len(self.confirmed)} confirmed bug(s) · {self.tests_run} test(s) · "
+        """One-line human summary: confirmed (P1/P2) vs low-confidence leads (P3)."""
+        claims = sum(1 for b in self.confirmed
+                     if str(b.get("severity", "")).upper() in ("P1", "P2"))
+        leads = len(self.confirmed) - claims
+        return (f"{claims} confirmed (P1/P2) · {leads} lead(s) · {self.tests_run} test(s) · "
                 f"{self.rounds} round(s) · {len(self.gaps_filled)} coverage gap(s) filled")
 
     def to_dict(self) -> dict:

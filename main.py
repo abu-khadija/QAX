@@ -2564,15 +2564,18 @@ def run_scan_command() -> None:
             print(f"    · {goal} — {mark}")
 
     if result.confirmed:
-        print(f"\n  🐞 Confirmed bugs ({len(result.confirmed)}):")
-        for b in result.confirmed:
-            sev = f"[{b.get('severity')}] " if b.get("severity") else ""
+        _claims = [b for b in result.confirmed
+                   if str(b.get("severity", "")).upper() in ("P1", "P2")]
+        _leads = [b for b in result.confirmed if b not in _claims]
+        print(f"\n  🐞 Confirmed (P1/P2): {len(_claims)}   ·   leads (P3): {len(_leads)}")
+        for b in _claims + _leads:
+            sev = f"[{b.get('severity') or 'P?'}] "
             src = b.get("source", "")
             print(f"    {sev}{b.get('title', '')}  ({src})")
             if b.get("evidence"):
                 print(f"        {str(b['evidence'])[:150]}")
     else:
-        print("\n  No confirmed bugs — the app held up to the scan.")
+        print("\n  No findings — the app held up to the scan.")
     print()
 
     # Scorecard — the honest, trackable number for this run.

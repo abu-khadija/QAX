@@ -95,6 +95,27 @@ def test_validation_template_sends_empty_required_field():
     assert last["expected_status"] == [422, 400]
 
 
+def test_validation_template_no_auth_skips_login_setup():
+    # A no-auth create endpoint: the template must post directly, with NO
+    # register/login setup (which would 404 and skip the assertion).
+    model = AppModel(endpoints=[
+        {"method": "POST", "path": "/api/items", "request_fields": ["title"]},  # no auth_required
+    ])
+    tpls = cg.validation_templates(model)
+    assert tpls
+    steps = tpls[0]["api_steps"]
+    assert len(steps) == 1  # no register+login prepended
+    assert steps[0]["method"] == "POST" and steps[0]["path"] == "/api/items"
+    assert steps[0]["body"] == {"title": ""} and "use_auth" not in steps[0]
+
+
+def test_validation_template_with_auth_uses_named_token():
+    tpls = cg.validation_templates(_model())  # /todos is auth_required
+    steps = tpls[0]["api_steps"]
+    assert len(steps) == 3  # register + login + assertion
+    assert steps[-1]["use_auth"] == "token"
+
+
 def test_all_templates_groups_applicable_goals():
     groups = cg.all_templates(_model())
     assert set(groups) == {"auth-bypass", "broken-authz", "validation"}

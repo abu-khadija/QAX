@@ -151,10 +151,17 @@ def validation_templates(model, recipe: dict | None = None, cap: int = 6) -> lis
     for e in creates[:cap]:
         path = str(e.get("path", ""))
         create_field = _create_field(model, path)
-        steps = _auth_steps(recipe, model, "v", "token", 1)
-        steps.append({"step_number": 3, "method": "POST", "path": path,
-                      "body": {create_field: ""}, "expected_status": [422, 400],
-                      "use_auth": True})
+        # Only register+login when the create endpoint actually requires auth.
+        # A no-auth app (or a public create) has no login flow — prepending one
+        # 404s at setup and the validation assertion never runs. Post directly then.
+        if e.get("auth_required"):
+            steps = _auth_steps(recipe, model, "v", "token", 1)
+            steps.append({"step_number": 3, "method": "POST", "path": path,
+                          "body": {create_field: ""}, "expected_status": [422, 400],
+                          "use_auth": "token"})
+        else:
+            steps = [{"step_number": 1, "method": "POST", "path": path,
+                      "body": {create_field: ""}, "expected_status": [422, 400]}]
         out.append({
             "test_case_id": f"COV-VAL-{len(out)+1:04d}",
             "title": f"Coverage: POST {path} rejects empty '{create_field}'",
