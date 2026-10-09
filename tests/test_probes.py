@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import json as _json
 
+from execution.probes import _auth_token as _auth_token_fn  # noqa: F401
 from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
                                crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                excessive_data_probe, forge_jwt_probe, injection_probe,
@@ -461,6 +462,27 @@ def test_auth_headers_default_and_custom():
     assert _auth_headers("abc") == {"Authorization": "Bearer abc"}
     assert _auth_headers("k", {"header": "X-API-Key", "scheme": ""}) == {"X-API-Key": "k"}
     assert _auth_headers("", {}) == {}
+
+
+def test_auth_token_falls_back_to_oauth2_form_login():
+    recipe = {"register_path": "/auth/register", "login_path": "/users/login",
+              "identity_path": "/me", "id_field": "email", "secret_field": "password",
+              "token_field": "access_token"}
+    model = AppModel(endpoints=[
+        {"method": "POST", "path": "/users/login", "request_fields": ["username", "password"]}])
+
+    class Sess:
+        def post(self, url, json=None, data=None, timeout=None):
+            if "register" in url:
+                return MagicMock(status_code=200, json=lambda: {"status": "ok"})
+            if "login" in url:
+                if data and data.get("username"):          # OAuth2 form login works
+                    return MagicMock(status_code=200,
+                                     json=lambda: {"access_token": "TOK", "token_type": "bearer"})
+                return MagicMock(status_code=400, json=lambda: {"detail": "unsupported"})  # JSON rejected
+            return MagicMock(status_code=404, json=lambda: {})
+
+    assert _auth_token_fn(Sess(), "http://x", recipe, model, "a@b.com") == "TOK"
 
 
 def test_resolve_token_prefers_supplied():

@@ -252,20 +252,42 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     id_field = next((f for f in login_fields if any(k in f.lower() for k in _ID_KW)), recipe["id_field"])
     sec_field = next((f for f in login_fields if any(k in f.lower() for k in _SECRET_KW)), recipe["secret_field"])
     id_value = reg_body.get(id_field, identity)
+    login_url = f"{base}{recipe['login_path']}"
 
+    # 1) JSON login (FastAPI/Flask-RESTX/connexion style).
     try:
-        lr = sess.post(f"{base}{recipe['login_path']}",
-                       json={id_field: id_value, sec_field: password}, timeout=15)
-        data = lr.json() if lr.status_code < 400 else {}
-    except Exception:
-        return None
-    if isinstance(data, dict):
-        tok = data.get(recipe["token_field"])
+        lr = sess.post(login_url, json={id_field: id_value, sec_field: password}, timeout=15)
+        tok = _extract_token(lr, recipe)
         if tok:
             return tok
-        for k, v in data.items():
-            if isinstance(v, str) and any(t in k.lower() for t in ("token", "jwt", "access", "auth")):
-                return v
+    except Exception:
+        pass
+    # 2) OAuth2 form login (OAuth2PasswordRequestForm): x-www-form-urlencoded with the
+    #    literal fields `username`/`password`. Common on FastAPI apps — without this
+    #    QAX can't get a token there and every auth'd probe silently skips.
+    try:
+        lr = sess.post(login_url, data={"username": id_value, "password": password}, timeout=15)
+        return _extract_token(lr, recipe)
+    except Exception:
+        return None
+
+
+def _extract_token(response, recipe):
+    """Pull a bearer token out of a login response (recipe field, then any token-ish key)."""
+    try:
+        if response.status_code >= 400:
+            return None
+        data = response.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    tok = data.get(recipe["token_field"])
+    if tok:
+        return tok
+    for k, v in data.items():
+        if isinstance(v, str) and any(t in k.lower() for t in ("token", "jwt", "access", "auth")):
+            return v
     return None
 
 
