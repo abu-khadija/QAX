@@ -56,10 +56,19 @@
   .adv .row{margin-top:12px}
   .hint{color:var(--faint);font-size:12.5px;margin-top:12px}
 
-  /* states */
-  #scanning{display:none;align-items:center;gap:14px;margin-top:22px;color:var(--muted);font-size:15px}
-  .radar{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent2);animation:spin .8s linear infinite}
+  /* live feed */
+  #scanning{display:none;margin-top:22px}
+  .live-head{display:flex;align-items:center;gap:12px;color:var(--txt);font-size:15px;font-weight:600;margin-bottom:12px}
+  .radar{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent2);animation:spin .8s linear infinite;flex:0 0 auto}
   @keyframes spin{to{transform:rotate(360deg)}}
+  .live{background:#070a11;border:1px solid var(--line);border-radius:12px;padding:14px 16px;max-height:280px;overflow:auto;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+  .logline{display:flex;gap:10px;padding:3px 0;color:#aeb9cc;animation:fadein .25s ease}
+  @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  .logline .ic{width:14px;text-align:center;flex:0 0 auto}
+  .logline .st{color:var(--faint);text-transform:uppercase;font-size:10px;letter-spacing:.4px;flex:0 0 58px;padding-top:1px}
+  .logline.ok .ic{color:var(--ok)} .logline.start .ic{color:var(--accent2)} .logline.error .ic,.logline.warn .ic{color:var(--p1)}
+  .logline.ok{color:#d7e6dd}
   #err{display:none;margin-top:18px;border:1px solid #5a2330;background:#2a1118;color:#ffb4c0;border-radius:12px;padding:14px 16px;font-size:14px}
 
   #results{display:none;margin-top:26px}
@@ -139,7 +148,10 @@
     <div class="hint">Quick scan — deterministic probes + coverage, ~seconds and near-free. The app must be running and reachable.</div>
   </div>
 
-  <div id="scanning"><span class="radar"></span><span id="scanmsg">Probing the live app…</span></div>
+  <div id="scanning">
+    <div class="live-head"><span class="radar"></span><span id="scanmsg">Scanning…</span></div>
+    <div class="live" id="live"></div>
+  </div>
   <div id="err"></div>
 
   <section id="results">
@@ -157,29 +169,36 @@ and <b>leads (P3)</b> it could not — separately, on purpose.</footer>
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?"":s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-async function runScan(){
-  const url = $('url').value.trim();
-  if(!url){ $('url').focus(); return; }
-  $('go').disabled = true;
-  $('err').style.display='none';
-  $('results').style.display='none';
-  $('scanning').style.display='flex';
-  const msgs=['Modelling the system…','Grounding in the live app…','Running exploit probes…','Proving what it can…'];
-  let i=0; $('scanmsg').textContent=msgs[0];
-  const tick=setInterval(()=>{ i=(i+1)%msgs.length; $('scanmsg').textContent=msgs[i]; },1600);
-  try{
-    const r = await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({url, repo:$('repo').value.trim(), token:$('token').value.trim()})});
-    const d = await r.json();
-    clearInterval(tick); $('scanning').style.display='none'; $('go').disabled=false;
-    if(!r.ok || d.error){ showError(d.error||('HTTP '+r.status)); return; }
-    render(d);
-  }catch(e){
-    clearInterval(tick); $('scanning').style.display='none'; $('go').disabled=false;
-    showError('Could not reach the scanner backend. '+e);
-  }
+let _es=null;
+const ICON={start:'▸',ok:'✓',info:'›',warn:'!',error:'✕'};
+function logLine(step,status,detail){
+  const el=document.createElement('div');
+  el.className='logline '+(status||'info');
+  el.innerHTML='<span class="ic">'+(ICON[status]||'›')+'</span>'
+    +'<span class="st">'+esc(status||'')+'</span>'
+    +'<span>'+esc(detail||step)+'</span>';
+  const box=$('live'); box.appendChild(el); box.scrollTop=box.scrollHeight;
 }
-
+function runScan(){
+  const url=$('url').value.trim();
+  if(!url){ $('url').focus(); return; }
+  $('go').disabled=true;
+  $('err').style.display='none'; $('results').style.display='none';
+  $('live').innerHTML=''; $('scanmsg').textContent='Scanning '+url+' …';
+  $('scanning').style.display='block';
+  if(_es) _es.close();
+  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim()});
+  _es=new EventSource('/api/scan/stream?'+qs.toString());
+  _es.onmessage=(e)=>{
+    let m; try{ m=JSON.parse(e.data); }catch{ return; }
+    if(m.type==='progress'){ logLine(m.step,m.status,m.detail); }
+    else if(m.type==='result'){ finish(); render(m.payload); }
+    else if(m.type==='error'){ finish(); showError(m.error||'Scan error'); }
+    else if(m.type==='done'){ finish(); }
+  };
+  _es.onerror=()=>{ finish(); if($('results').style.display!=='block' && $('err').style.display!=='block') showError('Lost connection to the scanner backend.'); };
+}
+function finish(){ if(_es){ _es.close(); _es=null; } $('scanning').style.display='none'; $('go').disabled=false; }
 function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }
 
 function render(d){
