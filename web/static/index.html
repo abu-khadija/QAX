@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAX — Prove the bugs others miss</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0d14; --bg2:#0e1220; --card:#141a2a; --card2:#1a2235; --line:#233047;
+    --txt:#e7ecf5; --muted:#8a97ad; --faint:#5b6678;
+    --accent:#6366f1; --accent2:#22d3ee;
+    --p1:#f0485f; --p2:#f6a338; --p3:#8aa0bf; --ok:#2ee6a6;
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:radial-gradient(1200px 600px at 80% -10%, #16203a 0%, var(--bg) 55%) no-repeat, var(--bg);
+    color:var(--txt); font-family:Inter,system-ui,-apple-system,sans-serif; line-height:1.5; min-height:100vh;}
+  a{color:var(--accent2);text-decoration:none}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px}
+
+  header{display:flex;align-items:center;gap:12px;padding:26px 0 8px}
+  .logo{font-weight:800;font-size:22px;letter-spacing:-.5px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .logo .dot{color:var(--accent2)}
+  .tag{color:var(--muted);font-size:13.5px;font-weight:500}
+  .spacer{flex:1}
+  .pill-ghost{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 11px}
+
+  .hero{padding:34px 0 10px}
+  .hero h1{font-size:40px;line-height:1.08;letter-spacing:-1.2px;margin:0 0 10px;font-weight:800}
+  .hero h1 .grad{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{color:var(--muted);font-size:16px;max-width:620px;margin:0}
+
+  .panel{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);
+    border-radius:var(--radius);padding:20px;margin-top:22px;box-shadow:0 20px 50px -30px #000}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .field{flex:1;min-width:240px;display:flex;flex-direction:column;gap:6px}
+  label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  input{background:#0c111c;border:1px solid var(--line);color:var(--txt);border-radius:11px;
+    padding:13px 14px;font-size:15px;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s;width:100%}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #6366f133}
+  input::placeholder{color:var(--faint)}
+  .btn{background:linear-gradient(90deg,var(--accent),#8b5cf6);color:#fff;border:0;border-radius:11px;
+    padding:13px 22px;font-size:15px;font-weight:700;cursor:pointer;transition:transform .08s,filter .15s;white-space:nowrap}
+  .btn:hover{filter:brightness(1.08)}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .adv{margin-top:12px}
+  .adv summary{cursor:pointer;color:var(--muted);font-size:13px;list-style:none;user-select:none}
+  .adv summary::-webkit-details-marker{display:none}
+  .adv summary::before{content:"▸ ";color:var(--faint)}
+  .adv[open] summary::before{content:"▾ "}
+  .adv .row{margin-top:12px}
+  .hint{color:var(--faint);font-size:12.5px;margin-top:12px}
+
+  /* states */
+  #scanning{display:none;align-items:center;gap:14px;margin-top:22px;color:var(--muted);font-size:15px}
+  .radar{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent2);animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #err{display:none;margin-top:18px;border:1px solid #5a2330;background:#2a1118;color:#ffb4c0;border-radius:12px;padding:14px 16px;font-size:14px}
+
+  #results{display:none;margin-top:26px}
+  .verdict{border-radius:var(--radius);padding:20px 22px;border:1px solid var(--line);display:flex;align-items:center;gap:16px}
+  .verdict .big{font-size:30px;font-weight:800;letter-spacing:-.5px}
+  .verdict .sub{color:var(--muted);font-size:14px;margin-top:2px}
+  .verdict.bad{background:linear-gradient(180deg,#241019,#140b11);border-color:#4a2130}
+  .verdict.good{background:linear-gradient(180deg,#0f2020,#0a1514);border-color:#1f4a3e}
+  .vicon{font-size:30px}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:16px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .stat .n{font-size:24px;font-weight:800;letter-spacing:-.5px}
+  .stat .l{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:3px}
+  .stat .n.p1{color:var(--p1)} .stat .n.p3{color:var(--p3)} .stat .n.ok{color:var(--ok)}
+
+  .layers{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px}
+  .chip{font-size:12px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:5px 11px}
+  .chip b{color:var(--txt)}
+
+  .sec-title{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin:26px 0 10px}
+  .finding{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--p3);border-radius:12px;padding:15px 16px;margin-bottom:10px}
+  .finding.sev-P1{border-left-color:var(--p1)} .finding.sev-P2{border-left-color:var(--p2)} .finding.sev-P3{border-left-color:var(--p3)}
+  .finding .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .sev{font-size:11px;font-weight:800;padding:3px 9px;border-radius:7px;letter-spacing:.3px}
+  .sev-P1 .sev,.sev.P1{background:#f0485f22;color:var(--p1);border:1px solid #f0485f55}
+  .sev-P2 .sev,.sev.P2{background:#f6a33822;color:var(--p2);border:1px solid #f6a33855}
+  .sev-P3 .sev,.sev.P3{background:#8aa0bf22;color:var(--p3);border:1px solid #8aa0bf55}
+  .finding .title{font-weight:600;font-size:15px}
+  .finding .meta{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .tag{font-size:11px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+  .finding .target{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--accent2);margin-top:7px}
+  .finding .ev{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:#cdd7e6;
+    background:#0b101b;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-top:10px;white-space:pre-wrap;word-break:break-word}
+
+  footer{color:var(--faint);font-size:12.5px;text-align:center;padding:40px 0 30px}
+  footer b{color:var(--muted)}
+  @media(max-width:560px){.hero h1{font-size:30px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="logo">QA<span class="dot">X</span></span>
+    <span class="tag">deterministic exploit scanner</span>
+    <span class="spacer"></span>
+    <span class="pill-ghost">local · nothing leaves your machine</span>
+  </header>
+
+  <section class="hero">
+    <h1>Point it at your app.<br><span class="grad">Prove the bugs others miss.</span></h1>
+    <p>QAX models your running app, runs deterministic exploit probes + a browser tour,
+       and reports only what it can <b>prove</b> — confirmed issues separated from
+       low-confidence leads. No crying wolf.</p>
+  </section>
+
+  <div class="panel">
+    <div class="row">
+      <div class="field">
+        <label for="url">Running app URL</label>
+        <input id="url" placeholder="http://127.0.0.1:8000" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field" style="flex:0 0 auto;justify-content:flex-end">
+        <label style="opacity:0">.</label>
+        <button class="btn" id="go" onclick="runScan()">Run scan</button>
+      </div>
+    </div>
+    <details class="adv">
+      <summary>Advanced — source repo &amp; auth token (optional)</summary>
+      <div class="row">
+        <div class="field"><label for="repo">Repo path (optional)</label>
+          <input id="repo" placeholder="/path/to/source (improves coverage)" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="token">Bearer token (optional)</label>
+          <input id="token" placeholder="for apps behind auth" autocomplete="off" spellcheck="false"></div>
+      </div>
+    </details>
+    <div class="hint">Quick scan — deterministic probes + coverage, ~seconds and near-free. The app must be running and reachable.</div>
+  </div>
+
+  <div id="scanning"><span class="radar"></span><span id="scanmsg">Probing the live app…</span></div>
+  <div id="err"></div>
+
+  <section id="results">
+    <div class="verdict" id="verdict"></div>
+    <div class="stats" id="stats"></div>
+    <div class="layers" id="layers"></div>
+    <div id="findings"></div>
+  </section>
+</div>
+
+<footer>QAX runs locally against an app you control. It reports <b>confirmed (P1/P2)</b> issues it proved,
+and <b>leads (P3)</b> it could not — separately, on purpose.</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?"":s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function runScan(){
+  const url = $('url').value.trim();
+  if(!url){ $('url').focus(); return; }
+  $('go').disabled = true;
+  $('err').style.display='none';
+  $('results').style.display='none';
+  $('scanning').style.display='flex';
+  const msgs=['Modelling the system…','Grounding in the live app…','Running exploit probes…','Proving what it can…'];
+  let i=0; $('scanmsg').textContent=msgs[0];
+  const tick=setInterval(()=>{ i=(i+1)%msgs.length; $('scanmsg').textContent=msgs[i]; },1600);
+  try{
+    const r = await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url, repo:$('repo').value.trim(), token:$('token').value.trim()})});
+    const d = await r.json();
+    clearInterval(tick); $('scanning').style.display='none'; $('go').disabled=false;
+    if(!r.ok || d.error){ showError(d.error||('HTTP '+r.status)); return; }
+    render(d);
+  }catch(e){
+    clearInterval(tick); $('scanning').style.display='none'; $('go').disabled=false;
+    showError('Could not reach the scanner backend. '+e);
+  }
+}
+
+function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }
+
+function render(d){
+  const sc = d.scorecard||{}, cost = sc.cost||{};
+  const nClaims = (d.claims||[]).length, nLeads=(d.leads||[]).length;
+  // verdict
+  const v=$('verdict');
+  if(nClaims>0){
+    v.className='verdict bad';
+    v.innerHTML='<span class="vicon">🛑</span><div><div class="big">'+nClaims+' confirmed issue'+(nClaims>1?'s':'')+'</div>'
+      +'<div class="sub">Proven exploitable on '+esc(d.url)+' — plus '+nLeads+' lead'+(nLeads!==1?'s':'')+' to review.</div></div>';
+  }else{
+    v.className='verdict good';
+    v.innerHTML='<span class="vicon">✓</span><div><div class="big">No confirmed issues</div>'
+      +'<div class="sub">The app held up to the scan. QAX reports only what it can prove — '+nLeads+' low-confidence lead'+(nLeads!==1?'s':'')+'.</div></div>';
+  }
+  // stats
+  const cstr = cost && cost.tracked ? ('$'+cost.estimated_usd) : '—';
+  $('stats').innerHTML = [
+    ['n p1',nClaims,'Confirmed (P1/P2)'],
+    ['n p3',nLeads,'Leads (P3)'],
+    ['n',sc.tests_run??'—','Tests run'],
+    ['n',(sc.duration_sec??'—')+'s','Duration'],
+    ['n',cstr,'LLM cost'],
+    ['n '+(sc.end_to_end?'ok':''),sc.end_to_end?'yes':'no','End-to-end'],
+  ].map(([c,n,l])=>'<div class="stat"><div class="'+c+'">'+esc(n)+'</div><div class="l">'+l+'</div></div>').join('');
+  // layers
+  const bl=d.by_layer||{};
+  $('layers').innerHTML = Object.keys(bl).length
+    ? Object.entries(bl).map(([k,v])=>'<span class="chip"><b>'+esc(v)+'</b> '+esc(k)+'</span>').join('') : '';
+  // findings
+  const order={P1:0,P2:1,P3:2};
+  const card = b => {
+    const sev=(b.severity||'P?').toUpperCase();
+    return '<div class="finding sev-'+esc(sev)+'"><div class="top">'
+      +'<span class="sev '+esc(sev)+'">'+esc(sev)+'</span>'
+      +'<span class="title">'+esc(b.title)+'</span>'
+      +'<span class="meta">'+(b.source?'<span class="tag">'+esc(b.source)+'</span>':'')+'</span></div>'
+      +(b.target?'<div class="target">'+esc(b.target)+'</div>':'')
+      +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')+'</div>';
+  };
+  let html='';
+  const claims=(d.claims||[]).slice().sort((a,b)=>order[(a.severity||'P3').toUpperCase()]-order[(b.severity||'P3').toUpperCase()]);
+  if(claims.length){ html+='<div class="sec-title">Confirmed — proven exploitable</div>'+claims.map(card).join(''); }
+  if((d.leads||[]).length){ html+='<div class="sec-title">Leads — flagged, not confirmed</div>'+(d.leads).map(card).join(''); }
+  $('findings').innerHTML=html;
+  $('results').style.display='block';
+  $('results').scrollIntoView({behavior:'smooth',block:'start'});
+}
+$('url').addEventListener('keydown',e=>{ if(e.key==='Enter') runScan(); });
+</script>
+</body>
+</html>
