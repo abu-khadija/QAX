@@ -2,15 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "qax-ui",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m", "streamlit", "run", "ui/app.py",
-        "--server.port", "8501",
-        "--server.headless", "true",
-        "--browser.gatherUsageStats", "false"
-      ],
-      "port": 8501
+      "name": "qax-web",
+      "runtimeExecutable": "./.venv-exec/bin/python",
+      "runtimeArgs": ["-m", "web.server"],
+      "port": 8900
     }
   ]
 }
