@@ -108,6 +108,10 @@
   .finding .target{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--accent2);margin-top:7px}
   .finding .ev{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:#cdd7e6;
     background:#0b101b;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-top:10px;white-space:pre-wrap;word-break:break-word}
+  .finding .fix{margin-top:10px;background:#0c1a1b;border:1px solid #16403a;border-radius:9px;padding:11px 13px}
+  .finding .fix .k{color:var(--ok);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+  .finding .fix .why{color:#aeb9cc;font-size:13px;margin:3px 0 9px}
+  .finding .fix .how{color:#e7f3ec;font-size:13px}
 
   footer{color:var(--faint);font-size:12.5px;text-align:center;padding:40px 0 30px}
   footer b{color:var(--muted)}
@@ -247,7 +251,11 @@ function render(d){
       +'<span class="title">'+esc(b.title)+'</span>'
       +'<span class="meta">'+(b.source?'<span class="tag">'+esc(b.source)+'</span>':'')+'</span></div>'
       +(b.target?'<div class="target">'+esc(b.target)+'</div>':'')
-      +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')+'</div>';
+      +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')
+      +((b.remediation&&b.remediation.fix)?'<div class="fix"><div class="k">Why it matters</div>'
+        +'<div class="why">'+esc(b.remediation.why)+'</div>'
+        +'<div class="k">How to fix</div><div class="how">'+esc(b.remediation.fix)+'</div></div>':'')
+      +'</div>';
   };
   let html='';
   const claims=(d.claims||[]).slice().sort((a,b)=>order[(a.severity||'P3').toUpperCase()]-order[(b.severity||'P3').toUpperCase()]);
@@ -271,7 +279,10 @@ function buildReportHTML(d){
     +'<div class="fh"><span class="sev" style="background:'+(sevColor[s]||'#5b6b84')+'1a;color:'+(sevColor[s]||'#5b6b84')+';border:1px solid '+(sevColor[s]||'#5b6b84')+'55">'+esc(s)+'</span>'
     +'<span class="ft">'+esc(b.title)+'</span>'+(b.source?'<span class="src">'+esc(b.source)+'</span>':'')+'</div>'
     +(b.target?'<div class="tg">'+esc(b.target)+'</div>':'')
-    +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')+'</div>');};
+    +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')
+    +((b.remediation&&b.remediation.fix)?'<div class="rfix"><div class="rk">Why it matters</div>'
+      +'<div class="rwhy">'+esc(b.remediation.why)+'</div><div class="rk">How to fix</div><div>'+esc(b.remediation.fix)+'</div></div>':'')
+    +'</div>');};
   const order={P1:0,P2:1,P3:2};
   const claims=(d.claims||[]).slice().sort((a,b)=>order[(a.severity||'P3').toUpperCase()]-order[(b.severity||'P3').toUpperCase()]);
   const stat=(n,l)=>'<td><div class="n">'+esc(n)+'</div><div class="l">'+l+'</div></td>';
@@ -294,6 +305,8 @@ function buildReportHTML(d){
   +'.ft{font-weight:600;font-size:14.5px}.src{margin-left:auto;font-size:11px;color:#6b7689;background:#eef1f7;border:1px solid #e0e6f0;border-radius:6px;padding:2px 8px}'
   +'.tg{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#0a74b8;margin-top:6px}'
   +'.ev{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#2a3344;background:#f1f4f9;border:1px solid #e4e9f2;border-radius:8px;padding:10px 11px;margin-top:9px;white-space:pre-wrap;word-break:break-word}'
+  +'.rfix{background:#eef4ff;border:1px solid #d6e2f7;border-radius:8px;padding:10px 12px;margin-top:9px;font-size:12.5px}'
+  +'.rk{color:#3b5bdb;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}.rwhy{color:#3a4557;margin:3px 0 8px}'
   +'.foot{color:#8a95a7;font-size:11.5px;margin-top:26px;border-top:1px solid #eef1f7;padding-top:14px}'
   +'@media print{body{background:#fff;padding:0}.doc{border:0;box-shadow:none;max-width:none}}'
   +'</style></head><body><div class="doc">'

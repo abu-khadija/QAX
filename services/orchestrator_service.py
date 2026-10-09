@@ -450,5 +450,6 @@ class OrchestratorService:
         for f in getattr(probe_result, "exploited", []):
             confirmed.append({
                 "title": getattr(f, "title", ""), "severity": getattr(f, "severity", ""),
-                "evidence": getattr(f, "evidence", ""), "source": "probe"})
+                "evidence": getattr(f, "evidence", ""), "source": "probe",
+                "probe": getattr(f, "probe", "")})
         return confirmed

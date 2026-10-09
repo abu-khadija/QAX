@@ -84,7 +84,10 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
         return {"error": result.error}
     rec = scorecard.score_run(result, repo=repo, url=url, mode="quick",
                               duration_sec=time.time() - t0, usage=usage.snapshot())
+    from services.remediation import remediation_for
     confirmed = list(result.confirmed or [])
+    for b in confirmed:
+        b["remediation"] = remediation_for(b)
     claims = [b for b in confirmed if str(b.get("severity", "")).upper() in ("P1", "P2")]
     leads = [b for b in confirmed if b not in claims]
     return {
