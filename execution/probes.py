@@ -550,6 +550,16 @@ def _stringy(field: str, value) -> bool:
     return "email" not in lf and not any(k in lf for k in _DATE_KW)
 
 
+# Query params that servers commonly parse as ints without a guard (int(request.args...)).
+_COMMON_NUMERIC_PARAMS = ("page", "per_page", "page_size", "limit", "offset", "skip", "size")
+
+
+def _numeric_param(name: str) -> bool:
+    n = name.lower()
+    return any(k in n for k in ("page", "limit", "offset", "count", "qty", "amount",
+                                "num", "size", "skip", "top"))
+
+
 def malformed_input_probe(model, base_url: str, *, session: requests.Session | None = None,
                           auth: dict | None = None) -> list[ProbeFinding]:
     """
@@ -618,6 +628,49 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
                           + ". Malformed input must be rejected with a 4xx."),
                 target=str(e.get("path", ""))))
             break  # one finding per endpoint is enough
+
+    # Query-param pass: a type-violating value on a GET param the server parses
+    # unguarded (int(request.args.get('page'))...). Tries grounded query params plus
+    # common numeric ones, so it works even when no spec lists them.
+    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET"][:8]:
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        headers = headers_for(e)
+        qps = list(e.get("query_params") or [])
+        cands = qps + [p for p in _COMMON_NUMERIC_PARAMS if p not in qps]
+        base_params = {p: ("1" if _numeric_param(p) else "qaxprobe1") for p in cands}
+        try:
+            rb = sess.get(f"{base}{path}", params=base_params, headers=headers, timeout=15)
+        except Exception:
+            continue
+        if rb.status_code >= 500:
+            continue
+        for p in cands[:7]:
+            try:
+                r = sess.get(f"{base}{path}", params=dict(base_params, **{p: "qax-not-a-number-!@#"}),
+                             headers=headers, timeout=15)
+            except Exception:
+                continue
+            if r.status_code < 500:
+                continue
+            body = (r.text or "").lower()
+            if any(s in body for s in _DEBUG_INTERACTIVE):
+                sev, kind = "P1", "Debug mode / interactive debugger exposed"
+            elif any(s in body for s in _DEBUG_TRACE):
+                sev, kind = "P2", "Stack trace disclosed"
+            else:
+                sev, kind = "P2", "Unhandled server error (input not validated)"
+            out.append(ProbeFinding(
+                probe="malformed-input",
+                title=f"{kind} on GET {e.get('path')} (query param '{p}')",
+                exploited=True, severity=sev,
+                evidence=(f"A valid request returned {rb.status_code}, but '{p}' set to a "
+                          f"type-violating value returned HTTP {r.status_code}"
+                          + (" exposing an interactive debugger" if sev == "P1" else
+                             " with a stack trace/internals" if kind.startswith("Stack") else
+                             " — the value is parsed without validation")
+                          + ". Malformed query input must be rejected with a 4xx."),
+                target=str(e.get("path", ""))))
+            break
     return out
 
 
