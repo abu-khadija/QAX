@@ -7,6 +7,7 @@
     {"id": "sqli",             "match": ["sql injection"]},
     {"id": "bola",             "match": ["object-level authorization"]},
     {"id": "excessive-data",   "match": ["excessive data"]},
-    {"id": "mass-assignment",  "match": ["admin", "register"]}
+    {"id": "mass-assignment",  "match": ["admin", "register"]},
+    {"id": "debug-exposed",    "match": ["interactive debugger"]}
   ]
 }
