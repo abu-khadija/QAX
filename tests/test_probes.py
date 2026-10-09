@@ -15,7 +15,7 @@ import json as _json
 from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
                                crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                excessive_data_probe, forge_jwt_probe, injection_probe,
-                               nosql_probe, sign_jwt_hs, sqli_probe)
+                               jwt_flaws_probe, nosql_probe, sign_jwt_hs, sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -489,6 +489,62 @@ def test_sqli_uses_supplied_token_without_registering():
     out = sqli_probe(model, "http://x", session=Sess(), auth={"token": "TOK"})
     assert seen["auth"] == "Bearer TOK"
     assert len(out) == 1 and out[0].probe == "sqli"
+
+
+# ── jwt-flaws probe (alg=none / signature not verified) ──────────────────────
+
+def _jwt_model():
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/me", "auth_required": True}])
+
+
+_VALID_JWT = sign_jwt_hs("the-secret", "HS256", {"sub": "a@b.com", "exp": 9999999999})
+
+
+class _JwtSession:
+    """A protected endpoint. `mode` decides which forged tokens it (wrongly) accepts."""
+    def __init__(self, mode):
+        self.mode = mode  # 'secure' | 'algnone' | 'nosig'
+
+    def get(self, url, headers=None, timeout=None):
+        tok = (headers or {}).get("Authorization", "").replace("Bearer ", "")
+        if not tok:
+            return MagicMock(status_code=401, text="no")
+        if tok == _VALID_JWT:
+            return MagicMock(status_code=200, text="ok")
+        parts = tok.split(".")
+        alg = ""
+        try:
+            import base64 as _b, json as _j
+            alg = _j.loads(_b.urlsafe_b64decode(parts[0] + "===")).get("alg", "")
+        except Exception:
+            pass
+        if self.mode == "algnone" and alg == "none":
+            return MagicMock(status_code=200, text="ok")      # wrongly accepts alg=none
+        if self.mode == "nosig":
+            return MagicMock(status_code=200, text="ok")       # never checks the signature
+        return MagicMock(status_code=401, text="bad")          # secure: rejects forged tokens
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_jwt_flaws_detects_alg_none():
+    out = jwt_flaws_probe(_jwt_model(), "http://x", session=_JwtSession("algnone"),
+                          auth={"token": _VALID_JWT})
+    assert any(f.probe == "jwt-flaws" and "alg=none" in f.title and f.severity == "P1" for f in out)
+
+
+def test_jwt_flaws_detects_unverified_signature():
+    out = jwt_flaws_probe(_jwt_model(), "http://x", session=_JwtSession("nosig"),
+                          auth={"token": _VALID_JWT})
+    assert any(f.probe == "jwt-flaws" and "signature not verified" in f.title for f in out)
+
+
+def test_jwt_flaws_quiet_on_secure_server():
+    out = jwt_flaws_probe(_jwt_model(), "http://x", session=_JwtSession("secure"),
+                          auth={"token": _VALID_JWT})
+    assert out == []
 
 
 # ── ProbeService ─────────────────────────────────────────────────────────────

@@ -71,7 +71,7 @@ class ProbeService:
         from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
                                        debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
-                                       nosql_probe, sqli_probe)
+                                       jwt_flaws_probe, nosql_probe, sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -84,6 +84,12 @@ class ProbeService:
                     findings.append(f)
             except Exception as exc:
                 logger.error("forge_jwt probe failed: %s", exc)
+
+        # JWT validation flaws (alg=none, signature not verified) — needs a token.
+        try:
+            findings.extend(jwt_flaws_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("jwt_flaws probe failed: %s", exc)
 
         # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
