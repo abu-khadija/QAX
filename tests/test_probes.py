@@ -16,7 +16,8 @@ from execution.probes import _auth_token as _auth_token_fn  # noqa: F401
 from execution.probes import (_auth_headers, _resolve_token, bola_probe, cookie_flags_probe,
                                crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                excessive_data_probe, forge_jwt_probe, injection_probe,
-                               jwt_flaws_probe, nosql_probe, sign_jwt_hs, sqli_probe)
+                               jwt_flaws_probe, malformed_input_probe, nosql_probe, sign_jwt_hs,
+                               sqli_probe)
 from services.context import QAXContext
 from services.probe_service import ProbeService
 from services.results import AppModel, ProbeResult
@@ -426,6 +427,47 @@ def test_nosql_quiet_when_operator_handled():
         def request(self, method, url, json=None, headers=None, timeout=None):
             return MagicMock(status_code=200, text="[]")  # operator safely returns nothing
     assert nosql_probe(_model_find(), "http://x", session=Sess()) == []
+
+
+# ── malformed-input probe (unhandled 500 / debug on type-violating input) ────
+
+def _model_create():
+    return AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/assets", "auth_required": False,
+         "request_fields": ["name", "service_time"]}])
+
+
+_GARBAGE = "qax-not-a-valid-value-!@#"
+
+
+class _MalformedSession:
+    def __init__(self, mode):
+        self.mode = mode  # 'debugger' | 'plain500' | 'secure'
+
+    def request(self, method, url, json=None, headers=None, timeout=None):
+        bad = any(v == _GARBAGE for v in (json or {}).values())
+        if not bad:
+            return MagicMock(status_code=201, text="{}")        # valid baseline accepted
+        if self.mode == "debugger":
+            return MagicMock(status_code=500, text="<title>x // Werkzeug Debugger</title>")
+        if self.mode == "plain500":
+            return MagicMock(status_code=500, text="Internal Server Error")
+        return MagicMock(status_code=422, text="validation error")  # secure: rejects malformed
+
+
+def test_malformed_input_debugger_is_p1():
+    out = malformed_input_probe(_model_create(), "http://x", session=_MalformedSession("debugger"))
+    assert len(out) == 1 and out[0].probe == "malformed-input" and out[0].severity == "P1"
+    assert "debugger" in out[0].title.lower()
+
+
+def test_malformed_input_plain_500_is_p2():
+    out = malformed_input_probe(_model_create(), "http://x", session=_MalformedSession("plain500"))
+    assert len(out) == 1 and out[0].severity == "P2"
+
+
+def test_malformed_input_quiet_when_validated():
+    assert malformed_input_probe(_model_create(), "http://x", session=_MalformedSession("secure")) == []
 
 
 # ── debug-disclosure probe ───────────────────────────────────────────────────

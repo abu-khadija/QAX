@@ -520,6 +520,10 @@ def _detect_injection(send, *, method: str, path: str, where: str) -> ProbeFindi
     return p3
 
 
+_DATE_KW = ("time", "date", "_at", "timestamp", "expir", "start", "end", "dob",
+            "created", "updated", "scheduled", "deadline", "dateofbirth")
+
+
 def _benign_body(fields: list[str]) -> dict:
     """A type-plausible benign body (by field-name heuristic) that should pass validation."""
     body: dict = {}
@@ -527,6 +531,8 @@ def _benign_body(fields: list[str]) -> dict:
         lf = f.lower()
         if "email" in lf:
             body[f] = "qaxprobe1@example.com"
+        elif any(k in lf for k in _DATE_KW):
+            body[f] = "2020-01-01T00:00:00"          # a valid ISO datetime baseline
         elif any(k in lf for k in ("age", "count", "number", "qty", "amount", "price", "id")):
             body[f] = 1
         elif any(k in lf for k in ("is_", "enabled", "active", "admin", "approved")):
@@ -537,10 +543,82 @@ def _benign_body(fields: list[str]) -> dict:
 
 
 def _stringy(field: str, value) -> bool:
-    """A field worth quote-fuzzing: a string value, not an obvious number/bool/email."""
+    """A field worth quote-fuzzing for SQLi: a plain text string (not email/date)."""
     if not isinstance(value, str):
         return False
-    return "email" not in field.lower()
+    lf = field.lower()
+    return "email" not in lf and not any(k in lf for k in _DATE_KW)
+
+
+def malformed_input_probe(model, base_url: str, *, session: requests.Session | None = None,
+                          auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Unhandled-500 / debug disclosure from MALFORMED (type-violating) input — the bug
+    class a messy app ships: a value the server parses without a try/except
+    (datetime.fromisoformat, int(), json.loads, UUID…). Posts a VALID baseline body,
+    then sets one field at a time to garbage and watches for a 5xx:
+      • a 5xx whose body shows an interactive debugger → P1 (debug mode on / RCE risk).
+      • a 5xx whose body shows a stack trace → P2 (source/stack disclosure).
+      • a plain 5xx → P2 (input not validated — unhandled server error).
+    Control: the baseline must be < 500. POST/PUT/PATCH only (never DELETE).
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, field_names
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+    _tok = {"v": None}
+
+    def headers_for(e):
+        if not e.get("auth_required"):
+            return {}
+        if _tok["v"] is None:
+            _tok["v"] = _resolve_token(sess, base, recipe, model,
+                                       f"mal_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        return _auth_headers(_tok["v"], auth)
+
+    for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
+              and field_names(x.get("request_fields"))][:6]:
+        method = str(e.get("method", "POST")).upper()
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        headers = headers_for(e)
+        fields = field_names(e.get("request_fields"))
+        benign = _benign_body(fields)
+        try:
+            rb = sess.request(method, f"{base}{path}", json=benign, headers=headers, timeout=15)
+        except Exception:
+            continue
+        if rb.status_code >= 500 or rb.status_code >= 400:
+            continue  # baseline must be accepted, else we can't attribute a later 5xx
+        for fld in fields[:6]:
+            bad = dict(benign, **{fld: "qax-not-a-valid-value-!@#"})
+            try:
+                r = sess.request(method, f"{base}{path}", json=bad, headers=headers, timeout=15)
+            except Exception:
+                continue
+            if r.status_code < 500:
+                continue
+            body = (r.text or "").lower()
+            if any(s in body for s in _DEBUG_INTERACTIVE):
+                sev, kind = "P1", "Debug mode / interactive debugger exposed"
+            elif any(s in body for s in _DEBUG_TRACE):
+                sev, kind = "P2", "Stack trace disclosed"
+            else:
+                sev, kind = "P2", "Unhandled server error (input not validated)"
+            out.append(ProbeFinding(
+                probe="malformed-input",
+                title=f"{kind} on {method} {e.get('path')} (field '{fld}')",
+                exploited=True, severity=sev,
+                evidence=(f"A valid body returned {rb.status_code}, but setting '{fld}' to a "
+                          f"type-violating value returned HTTP {r.status_code}"
+                          + (" exposing an interactive debugger" if sev == "P1" else
+                             " with a stack trace/internals" if kind.startswith("Stack") else
+                             " — the value is parsed without validation")
+                          + ". Malformed input must be rejected with a 4xx."),
+                target=str(e.get("path", ""))))
+            break  # one finding per endpoint is enough
+    return out
 
 
 def injection_probe(model, base_url: str, *, session: requests.Session | None = None,

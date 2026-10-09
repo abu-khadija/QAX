@@ -71,7 +71,7 @@ class ProbeService:
         from execution.probes import (bola_probe, cookie_flags_probe, crash_fuzz_probe,
                                        debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
-                                       jwt_flaws_probe, nosql_probe, sqli_probe)
+                                       jwt_flaws_probe, malformed_input_probe, nosql_probe, sqli_probe)
 
         prog.emit("probe", "start", "running active probes")
         findings = []
@@ -108,6 +108,12 @@ class ProbeService:
             findings.extend(nosql_probe(model, base_url, auth=auth))
         except Exception as exc:
             logger.error("nosql probe failed: %s", exc)
+
+        # Malformed input → unhandled 500 / debug disclosure on write endpoints.
+        try:
+            findings.extend(malformed_input_probe(model, base_url, auth=auth))
+        except Exception as exc:
+            logger.error("malformed_input probe failed: %s", exc)
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
