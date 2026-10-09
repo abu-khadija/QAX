@@ -36,6 +36,12 @@ def index():
     return send_from_directory(_STATIC, "index.html")
 
 
+@app.get("/files/<path:p>")
+def files(p):
+    """Serve tour screenshots saved under ./output (relative to the server cwd)."""
+    return send_from_directory(os.path.join(os.getcwd(), "output"), p)
+
+
 class _QueueProgress(ProgressReporter):
     """Tees every engine progress event into a queue for live streaming."""
 
@@ -73,11 +79,15 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
         ctx = QAXContext.from_env()
     except Exception as exc:
         return {"error": f"Config error: {exc}"}
+    from urllib.parse import urlparse
+    host = (urlparse(url).netloc or "app").replace(":", "_").replace(".", "-")
+    visual_baseline = os.path.join("output", "tour_baseline", host)  # seeded on 1st scan, diffed after
     usage.track()
     usage.reset()
     t0 = time.time()
     try:
-        result = OrchestratorService(ctx).run(repo, url, deep=False, auth=auth, progress=progress)
+        result = OrchestratorService(ctx).run(repo, url, deep=False, auth=auth, tour=True,
+                                              visual_baseline=visual_baseline, progress=progress)
     except Exception as exc:
         return {"error": f"Scan failed: {exc}"}
     if result.error:
@@ -90,10 +100,23 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
         b["remediation"] = remediation_for(b)
     claims = [b for b in confirmed if str(b.get("severity", "")).upper() in ("P1", "P2")]
     leads = [b for b in confirmed if b not in claims]
+    screens = []
+    for s in (getattr(result, "ui_screens", []) or []):
+        shot = str(s.get("screenshot", ""))
+        if not shot:
+            continue
+        rel = shot.split("output/", 1)[-1] if "output/" in shot else os.path.basename(shot)
+        screens.append({
+            "url": s.get("url"), "title": s.get("title"),
+            "screenshot_url": "/files/" + rel,
+            "errors": [e for e in (s.get("errors") or []) if "warning" not in str(e).lower()],
+            "net_errors": s.get("net_errors") or [],
+        })
     return {
         "url": url,
         "claims": claims,
         "leads": leads,
+        "screens": screens,
         "by_layer": rec.get("by_layer", {}),
         "coverage": result.coverage or {},
         "scorecard": {

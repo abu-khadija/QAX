@@ -130,6 +130,7 @@ class OrchestratorService:
         #     uncaught JS errors, failed API calls — into findings. Needs Playwright
         #     (exec venv, Python 3.11/3.12); degrades to nothing when unavailable.
         ui_confirmed: list[dict] = []
+        ui_screens: list[dict] = []
         if tour:
             try:
                 from services.tour_service import TourService
@@ -142,6 +143,8 @@ class OrchestratorService:
                     prog.emit("orchestrate", "info", f"UI tour skipped: {tour_result.error}")
                 else:
                     ui_confirmed = findings_from_tour(tour_result)
+                    ui_screens = [s for s in (getattr(tour_result, "screens", []) or [])
+                                  if isinstance(s, dict) and s.get("screenshot")]
                     prog.emit("orchestrate", "info",
                               f"UI tour: {tour_result.screen_count} screen(s), "
                               f"{len(ui_confirmed)} UI finding(s)")
@@ -213,7 +216,8 @@ class OrchestratorService:
 
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=1,
-            tests_run=len(executable), suspects=len(detection.findings))
+            tests_run=len(executable), suspects=len(detection.findings),
+            ui_screens=ui_screens)
         prog.emit("orchestrate", "ok", result.summary())
         return result
 

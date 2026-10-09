@@ -418,6 +418,7 @@ class OrchestratorResult:
     rounds: int = 0
     tests_run: int = 0
     suspects: int = 0
+    ui_screens: list = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -444,6 +445,7 @@ class OrchestratorResult:
             "rounds": self.rounds,
             "tests_run": self.tests_run,
             "suspects": self.suspects,
+            "ui_screens": self.ui_screens,
             "error": self.error,
             "success": self.success,
         }
