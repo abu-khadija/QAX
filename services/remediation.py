@@ -97,6 +97,18 @@ _MAP = {
                "X-Frame-Options/CSP frame-ancestors, and a Content-Security-Policy — e.g. "
                "via a security-headers middleware.",
     },
+    "dep-cve": {
+        "why": "A dependency is pinned to a version with a known, published vulnerability "
+               "(CVE/GHSA), so the app inherits that flaw regardless of its own code.",
+        "fix": "Bump the package to the patched release named in the advisory, re-run the "
+               "dependency scan to confirm it clears, and keep deps updated (Dependabot/renovate).",
+    },
+    "dep-license": {
+        "why": "A dependency carries a copyleft or non-commercial license, which can force "
+               "source disclosure or forbid commercial use of the product that ships it.",
+        "fix": "Review the license against your distribution model; replace the package with a "
+               "permissively-licensed alternative, or obtain a commercial license, before shipping.",
+    },
 }
 
 _SOURCE = {

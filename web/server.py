@@ -69,6 +69,39 @@ def _inputs():
     return url, repo, auth
 
 
+def _supply_chain_leads(repo: str) -> list:
+    """
+    Run the dependency scanner over the repo and return its findings as P3 lead
+    dicts (with remediation). Best-effort: a missing repo or no network yields []
+    and never blocks the scan.
+    """
+    try:
+        from core.dep_scanner import scan_dependencies
+        from services.remediation import remediation_for
+    except Exception:
+        return []
+    out = []
+    try:
+        rep = scan_dependencies(repo, online=True)
+    except Exception:
+        return []
+    for v in rep.get("vulns", []):
+        b = {"severity": "P3", "source": "supply-chain", "probe": "dep-cve",
+             "title": f"Vulnerable dependency: {v['name']} {v['version']}",
+             "target": f"{v['ecosystem']}:{v['name']}",
+             "evidence": f"{v['name']} {v['version']} has known advisories: {', '.join(v['ids'][:6])}."}
+        b["remediation"] = remediation_for(b)
+        out.append(b)
+    for lic in rep.get("license_flags", []):
+        b = {"severity": "P3", "source": "supply-chain", "probe": "dep-license",
+             "title": f"{lic['kind'].title()} license: {lic['name']} ({lic['license']})",
+             "target": f"PyPI:{lic['name']}",
+             "evidence": f"{lic['name']} {lic['version']} is licensed '{lic['license']}' ({lic['kind']})."}
+        b["remediation"] = remediation_for(b)
+        out.append(b)
+    return out
+
+
 def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
     """Run a quick scan and return the UI payload, or {'error': ...}."""
     from services import scorecard, usage
@@ -100,6 +133,10 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
         b["remediation"] = remediation_for(b)
     claims = [b for b in confirmed if str(b.get("severity", "")).upper() in ("P1", "P2")]
     leads = [b for b in confirmed if b not in claims]
+    # Supply-chain angle: known-CVE and copyleft/non-commercial dependencies. These
+    # are real but not proven-exploitable on the live app, so they are reported as
+    # leads (hygiene), never confirmed claims — in keeping with "don't cry wolf".
+    leads.extend(_supply_chain_leads(repo))
     screens = []
     for s in (getattr(result, "ui_screens", []) or []):
         shot = str(s.get("screenshot", ""))
