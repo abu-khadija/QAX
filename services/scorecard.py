@@ -68,6 +68,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
         "rounds": getattr(result, "rounds", 0),
         "suspects": getattr(result, "suspects", 0),
         "confirmed_count": len(confirmed),
+        "claims_count": len(claims),
         "leads_count": len(leads),
         "by_layer": by_layer,
         "coverage": dict(getattr(result, "coverage", {}) or {}),
@@ -138,8 +139,10 @@ def write_run(rec: dict, out_dir: str = "output/scorecard") -> str | None:
 def render(rec: dict) -> str:
     """A compact human summary of a scorecard record for the scan output."""
     name = Path(rec.get("repo", "repo")).name
+    claims = rec.get("claims_count", rec.get("confirmed_count", 0))
+    leads = rec.get("leads_count", 0)
     lines = [f"  📊 Scorecard — {rec.get('mode')} scan · {name}",
-             f"     bugs confirmed: {rec.get('confirmed_count', 0)}  ·  "
+             f"     confirmed (P1/P2): {claims}  ·  leads (P3): {leads}  ·  "
              f"tests: {rec.get('tests_run', 0)}  ·  {rec.get('duration_sec', 0)}s  ·  "
              f"end-to-end: {'yes' if rec.get('completed_end_to_end') else 'no'}"]
     if rec.get("by_layer"):

@@ -190,10 +190,15 @@ class OrchestratorService:
         execution = ExecutionService(self.context).execute(
             executable, mode="api", base_url=base_url)
         investigation = None
+        # The deterministic coverage templates carry their own verdict
+        # (_confirmed_from_templates, with calibrated severities). Don't let the LLM
+        # Critic/Investigator RE-judge them — that over-confirmed debatable findings
+        # (e.g. "accepts an empty title") as bugs. Only generated tests are investigated.
+        generated = [t for t in executable if t.get("attack") != "coverage-template"]
         try:
-            critic = CriticService(self.context).review(execution, executable)
+            critic = CriticService(self.context).review(execution, generated)
             investigation = InvestigatorService(self.context).investigate(
-                critic, executable, base_url=base_url)
+                critic, generated, base_url=base_url)
         except Exception as exc:
             logger.warning("orchestrator verify legs skipped: %s", exc)
             prog.emit("orchestrate", "info", f"verify skipped ({exc})")
