@@ -283,18 +283,26 @@ class XrayClient:
         Returns:
             dict: Payload formatted for the Xray Cloud REST API.
 
-        TODO: Adjust 'customfield_xxxxx' IDs to match your actual Jira field IDs.
-              You can find these by making a GET request to:
-              {JIRA_BASE_URL}/rest/api/3/field
+        Note: This payload uses only standard Jira fields (project, summary,
+              description, issuetype, priority, labels) plus Xray's own testtype
+              and steps — none of these require a custom field ID, so a basic
+              push is not blocked by field mapping. The only optional custom
+              field (Module) is left commented out below; to enable it, supply
+              its field ID from {JIRA_BASE_URL}/rest/api/3/field.
         """
-        # Convert our steps to Xray step format
+        # Convert our manual_steps to Xray manual-test step format.
+        # Generated cases expose manual_steps (action / expected_result / notes);
+        # fall back to the legacy "steps" key for older files. This is the
+        # human-readable step list pushed to Xray — the automation_steps path is
+        # executed separately by the Playwright runner and is not pushed here.
+        source_steps = test_case.get("manual_steps") or test_case.get("steps") or []
         xray_steps = [
             {
                 "action": step.get("action", ""),
                 "result": step.get("expected_result", ""),
-                "data": "",   # Optional: test data for this specific step
+                "data": step.get("data", ""),   # per-step test data (empty if none)
             }
-            for step in test_case.get("steps", [])
+            for step in source_steps
         ]
 
         # Map priority to Jira priority names

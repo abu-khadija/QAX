@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "EXAMPLE QA Test Case",
-  "description": "Schema for AI-generated test cases targeting the ExampleApp ExampleOrg platform. Enforced before every Xray push.",
+  "description": "Schema for AI-generated test cases targeting the the target web application. Enforced before every Xray push.",
   "type": "array",
   "items": {
     "type": "object",

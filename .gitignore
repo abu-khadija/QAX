@@ -62,3 +62,5 @@ Thumbs.db
 # ── Unrelated nested project (has its own git repo) ───────────────────
 career-ops/
 output/scorecard/
+.venv-exec/
+.venv/
