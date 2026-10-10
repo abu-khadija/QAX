@@ -135,6 +135,41 @@ APIs:
 
 **Honest limitations.** (1) LLM model-building is non-deterministic — a weak model can
 break auth; always confirm `created_records > 0`. (2) Targets were well-written
-RealWorld apps (good FP tests); recall vs. known CVEs on a new stack was NOT measured
-here (go-gin-vul needed MySQL+Redis, skipped for boot-cost) — prior sessions' two real
-P1 finds remain the recall evidence.
+RealWorld apps (good FP tests) — see the recall run below for the complementary test.
+
+---
+
+## Recall run — go-gin-vul (Go/Gin deliberately-vulnerable range)
+
+Booted go-gin-vul (MySQL + Redis installed via brew). It exposes `/api/vul/*`
+(vulnerable) and `/api/safe/*` (fixed twins). Truth: `evals/truth/go-gin-vul.json`.
+
+**Important context:** the Anthropic API credit balance ran out mid-run, so QAX's
+LLM model-building failed and its Swagger spec 500s — the normal auto-modeling path
+was dead. The probes are zero-LLM, so recall was measured by feeding QAX the vuln
+endpoints directly and running `ProbeService`.
+
+### Result: 1/13 caught, **0 false positives** (no `/safe/` twin flagged)
+
+| Vuln class | Caught? | Why |
+|---|---|---|
+| open-redirect | ✅ | open_redirect_probe matched `/redirect` + the `redirect` param |
+| sql-injection | ❌ | blind/boolean SQLi: `/sql/login` returns 403 for benign AND quote (no status/error signal); `/sqli/byid` 500s on benign input (no valid control). QAX needs a clean control + a status/SQL-error signal — content-differential blind SQLi is a gap |
+| path-traversal | ❌ | the endpoints take the payload in a **query** param (`?filename=`); QAX's probe only tests **path** params ({id}) — fixable |
+| cors | ❌ | cors_probe only tests `/`, not per-endpoint — fixable |
+| command-injection | ❌ | no probe |
+| ssrf | ❌ | no probe |
+| xss / stored-xss | ❌ | no probe |
+| zip-slip | ❌ | no probe |
+
+### Prioritized probe backlog (from this real recall test)
+1. **Extend path-traversal to query params** (quick, catches `/read`,`/dir`).
+2. **Extend CORS to per-endpoint, not just `/`** (quick, catches `/cors1`,`/cors2`).
+3. **Blind/boolean SQLi via response-content differential** (medium; catches same-status SQLi).
+4. **New probes**: command-injection, SSRF, reflected+stored XSS, zip-slip (the classes QAX has no probe for).
+
+**Honest verdict on recall:** QAX's deterministic probes are precise (0 FP, no safe
+twin flagged) but **narrow** — they caught 1 of 9 vuln classes on this target. The
+strength remains "proves what it finds without crying wolf"; the gap is **breadth of
+vuln classes**, now backed by a concrete, prioritized list. (Prior sessions' two real
+P1 finds on real OSS apps remain valid recall evidence for the classes QAX does cover.)
