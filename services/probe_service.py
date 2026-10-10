@@ -155,6 +155,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("command_injection probe failed: %s", exc)
 
+        # SSRF — a URL param the server fetches (proven by an out-of-band callback).
+        try:
+            from execution.probes import ssrf_probe
+            findings.extend(ssrf_probe(model, base_url, session=shared, auth=read_auth))
+        except Exception as exc:
+            logger.error("ssrf probe failed: %s", exc)
+
         # Mass assignment — registration binds a client-supplied privileged field.
         try:
             findings.extend(mass_assignment_probe(model, base_url, session=shared, auth=auth))

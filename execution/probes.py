@@ -2035,3 +2035,113 @@ def command_injection_probe(model, base_url: str, *, session: requests.Session |
                           f"sanitisation — full remote code execution."),
                 target=str(e.get("path", ""))))
     return out
+
+
+# ── SSRF (server-side request forgery) ────────────────────────────────────────
+# Param/endpoint names that commonly take a URL the server will fetch.
+_URL_KW = ("url", "uri", "link", "src", "target", "callback", "webhook", "fetch",
+           "proxy", "dest", "destination", "feed", "endpoint", "site", "host", "image",
+           "img", "load", "remote", "upstream", "q")
+
+
+def _url_candidates(model):
+    """(endpoint, method, param, where) tuples whose name/path hints at a fetched URL."""
+    out = []
+    for e in getattr(model, "endpoints", []):
+        if not isinstance(e, dict):
+            continue
+        method = str(e.get("method", "GET")).upper()
+        path = str(e.get("path", ""))
+        path_hit = any(k in path.lower() for k in ("ssrf", "fetch", "proxy", "image", "url", "webhook", "preview"))
+        if method == "GET":
+            for qp in (e.get("query_params") or []):
+                if path_hit or any(k == str(qp).lower() or k in str(qp).lower() for k in _URL_KW):
+                    out.append((e, method, qp, "query"))
+        elif method in ("POST", "PUT", "PATCH"):
+            from core.auth_recipe import field_names
+            for f in field_names(e.get("request_fields")):
+                if path_hit or any(k == str(f).lower() or k in str(f).lower() for k in _URL_KW):
+                    out.append((e, method, f, "body"))
+    return out
+
+
+def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
+               auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Server-Side Request Forgery (OWASP). For params that take a URL the server fetches,
+    QAX starts a local HTTP listener and injects a URL pointing at it with a UNIQUE
+    token. If the listener is hit for that token, the target made an outbound request to
+    an attacker-chosen URL — a proven SSRF (out-of-band interaction is the control, so
+    zero false positives). Local-scan oriented: the target must be able to reach the
+    scanner's 127.0.0.1, which holds when QAX runs against an app on the same host.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import nest_body
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    cands = _url_candidates(model)
+    if not cands:
+        return out
+
+    import http.server
+    import threading
+    hits: set = set()
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.add(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"qax")
+
+        def log_message(self, *a):
+            pass
+
+    try:
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    except Exception:
+        return out
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def send(e, method, param, where, value):
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        try:
+            if where == "query":
+                return sess.get(f"{base}{path}", params={param: value}, timeout=10)
+            return sess.request(method, f"{base}{path}", json=nest_body({param: value}), timeout=10)
+        except Exception:
+            return None
+
+    try:
+        seen: set = set()
+        for e, method, param, where in cands[:6]:
+            sig = (str(e.get("path", "")), method, param)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            token = f"qaxssrf{uuid.uuid4().hex[:10]}"
+            send(e, method, param, where, f"http://127.0.0.1:{port}/{token}")
+            deadline = time.time() + 3
+            got = False
+            while time.time() < deadline:
+                if any(token in h for h in hits):
+                    got = True
+                    break
+                time.sleep(0.1)
+            if got:
+                out.append(ProbeFinding(
+                    probe="ssrf",
+                    title=f"SSRF via {where} param '{param}' on {e.get('path')}",
+                    exploited=True, severity="P2",
+                    evidence=(f"{method} {e.get('path')} with '{param}' set to a URL under our control "
+                              f"caused the server to make an outbound request to it (confirmed by an "
+                              f"out-of-band callback). An attacker can make the server reach internal "
+                              f"services, cloud metadata, or arbitrary hosts."),
+                    target=str(e.get("path", ""))))
+    finally:
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+    return out

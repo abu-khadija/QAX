@@ -122,6 +122,14 @@ _MAP = {
         "fix": "Redirect only to an allow-list of known internal paths/hosts; reject absolute "
                "external URLs, or map a redirect key to a server-side URL table.",
     },
+    "ssrf": {
+        "why": "The server fetches a URL supplied by the client, so an attacker can make "
+               "it reach internal-only services, cloud metadata endpoints (credentials), "
+               "or arbitrary hosts — a pivot into the internal network.",
+        "fix": "Validate the URL against an allow-list of hosts/schemes, resolve and block "
+               "private/link-local IP ranges (incl. redirects), disable unused URL schemes "
+               "(file/gopher), and send outbound fetches through an egress proxy.",
+    },
     "command-injection": {
         "why": "User input reaches an OS shell, so an attacker can run arbitrary commands "
                "on the server — full remote code execution and host compromise.",

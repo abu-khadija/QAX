@@ -689,6 +689,37 @@ def test_command_injection_quiet_without_cmd_params():
     assert command_injection_probe(model, "http://x", session=_CmdInjectionSession()) == []
 
 
+class _SsrfSession:
+    """A server that FETCHES the URL in the 'q' param (vulnerable) — hits QAX's listener."""
+    def __init__(self, vulnerable=True):
+        self.vulnerable = vulnerable
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        target = str((params or {}).get("q", ""))
+        if self.vulnerable and target.startswith("http"):
+            try:
+                import urllib.request
+                urllib.request.urlopen(target, timeout=2).read()
+            except Exception:
+                pass
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_ssrf_confirmed_by_oob_callback():
+    from execution.probes import ssrf_probe
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/ssrf", "query_params": ["q"], "auth_required": False}])
+    out = ssrf_probe(model, "http://x", session=_SsrfSession(vulnerable=True))
+    assert len(out) == 1 and out[0].probe == "ssrf" and out[0].severity == "P2"
+
+
+def test_ssrf_quiet_when_not_fetching():
+    from execution.probes import ssrf_probe
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/ssrf", "query_params": ["q"], "auth_required": False}])
+    assert ssrf_probe(model, "http://x", session=_SsrfSession(vulnerable=False)) == []
+
+
 class _EndpointCorsSession:
     """Reflects an arbitrary Origin ONLY on a specific non-root endpoint."""
     def __init__(self, reflecting_path):

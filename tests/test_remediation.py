@@ -7,7 +7,8 @@ def test_probe_findings_get_guidance():
     for probe in ("forge-jwt", "jwt-flaws", "sqli", "nosql", "bola", "excessive-data",
                   "malformed-input", "debug-disclosure", "cookie-flags", "error-handling",
                   "path-traversal", "cors", "security-headers",
-                  "mass-assignment", "open-redirect", "rate-limit", "command-injection"):
+                  "mass-assignment", "open-redirect", "rate-limit", "command-injection",
+                  "ssrf"):
         r = remediation_for({"probe": probe, "title": "x"})
         assert r.get("why") and r.get("fix"), probe
 
