@@ -9,8 +9,20 @@ Run with:
 
 from unittest.mock import MagicMock
 
-from services.live_surface import _base_path, _join_base, endpoints_from_spec, recover_base_path
+from services.live_surface import (_base_path, _join_base, endpoints_from_spec,
+                                    normalize_path_params, recover_base_path)
 from services.results import AppModel
+
+
+# ── path-parameter normalization (framework spellings → {name}) ──────────────
+
+def test_normalize_flask_and_colon_params():
+    assert normalize_path_params("/items/<item_id>") == "/items/{item_id}"
+    assert normalize_path_params("/users/<int:id>/posts/<slug>") == "/users/{id}/posts/{slug}"
+    assert normalize_path_params("/items/:id") == "/items/{id}"           # Express/Gin/Rails
+    assert normalize_path_params("/a/<path:p>") == "/a/{p}"
+    assert normalize_path_params("/users/{username}") == "/users/{username}"  # OpenAPI passthrough
+    assert normalize_path_params("/health") == "/health"                  # no params
 
 
 # ── base-path recovery (no OpenAPI) ──────────────────────────────────────────

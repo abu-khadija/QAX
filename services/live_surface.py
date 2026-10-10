@@ -29,6 +29,22 @@ logger = logging.getLogger(__name__)
 # Prefixes a REST API is commonly mounted under when the code-derived paths omit it.
 _BASE_PREFIX_CANDIDATES = ("/api", "/api/v1", "/v1", "/api/v2", "/v2", "/rest")
 
+# Path-parameter spellings across frameworks → the canonical {name} the probes expect.
+_FLASK_PARAM = re.compile(r"<(?:[A-Za-z_][\w]*:)?([A-Za-z_][\w]*)>")      # Flask/Werkzeug <int:id>, <id>
+_COLON_PARAM = re.compile(r"(?<=/):([A-Za-z_][\w]*)")                      # Express/Gin/Rails /:id
+
+
+def normalize_path_params(path: str) -> str:
+    """
+    Rewrite a route's path parameters to the canonical `{name}` form the probes use,
+    whatever framework spelled them: Flask/Django `<id>` / `<int:id>` / `<path:p>`,
+    Express/Gin/Rails `/:id`. OpenAPI paths are already `{id}` and pass through. This
+    lets the probes find path params on source-modelled apps that serve no spec.
+    """
+    p = _FLASK_PARAM.sub(r"{\1}", str(path))
+    p = _COLON_PARAM.sub(r"{\1}", p)
+    return p
+
 # Common locations an API serves its OpenAPI/Swagger spec.
 _SPEC_PATHS = [
     "/openapi.json", "/openapi.yaml", "/swagger.json", "/v2/swagger.json",

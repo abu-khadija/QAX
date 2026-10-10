@@ -122,6 +122,12 @@ class OrchestratorService:
                 pref = recover_base_path(model, base_url)
                 if pref:
                     prog.emit("orchestrate", "info", f"recovered base path '{pref}' from the live app")
+            # Canonicalise path params to {name} so the probes recognise them whatever
+            # framework spelled them (Flask <id>, Express/Gin/Rails :id, …).
+            from services.live_surface import normalize_path_params
+            for e in getattr(model, "endpoints", []):
+                if isinstance(e, dict) and e.get("path"):
+                    e["path"] = normalize_path_params(str(e["path"]))
         except Exception as exc:
             logger.warning("live endpoint grounding failed: %s", exc)
 
@@ -458,10 +464,11 @@ class OrchestratorService:
         for v in getattr(investigation, "confirmed", []):
             confirmed.append({
                 "title": getattr(v, "title", ""), "severity": "",
-                "evidence": getattr(v, "reason", ""), "source": "test"})
+                "evidence": getattr(v, "reason", ""), "source": "test",
+                "target": getattr(v, "target", "")})
         for f in getattr(probe_result, "exploited", []):
             confirmed.append({
                 "title": getattr(f, "title", ""), "severity": getattr(f, "severity", ""),
                 "evidence": getattr(f, "evidence", ""), "source": "probe",
-                "probe": getattr(f, "probe", "")})
+                "probe": getattr(f, "probe", ""), "target": getattr(f, "target", "")})
         return confirmed
