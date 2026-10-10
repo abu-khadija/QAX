@@ -92,44 +92,49 @@ and only legitimate low-severity leads — strong "doesn't cry wolf" evidence.
   Flyway, GraphQL + REST). Built with the already-installed JDK 17 (Gradle 7.4);
   booted on :8080 in ~2s. Every endpoint is auth-gated (even `/api/tags` → 401).
 
-### Result
-- **The `.java` source reader works**: QAX modeled **19 endpoints** from Java source
-  (proving the extension fix generalises beyond Go). Scan: 0 confirmed, 1 lead (CSP).
-- **But auth was blocked (created 0)** — so this was NOT a full scan.
+### Result (after the gap-4 fix below)
+- **The `.java` source reader works**: QAX modeled **19 endpoints** from Java source.
+- **Auth now works (created 2)** and the full probe set runs: **0 confirmed P1/P2**,
+  1 legit lead (missing CSP). Stable across runs.
 
-### Gap surfaced (NOT yet fixed — the deeper one)
-- **Base-path detection without OpenAPI.** The model extracted the register path as
-  `/users`, but the live route is `/api/users` — the `/api` context path was dropped,
-  and the wrapped `user.*` fields weren't captured either. With no OpenAPI to ground
-  the base path (this app has no springdoc), QAX posted to the wrong path with a flat
-  body → 400 → no token → authenticated probes skipped.
-- Unlike the first three gaps (small, fixed in-session), this one is a real design
-  task: recover the base path when there is no spec — e.g. probe a few candidate
-  prefixes (`/api`, `/v1`, `/api/v1`) against a known route and prepend the one that
-  resolves, or parse the framework's class-level route prefix / context-path from
-  source. **Flagged as the #1 follow-up.**
+### Gap #4 surfaced — and fixed (commit 7333685)
+- **Base-path + body-wrapper recovery when there is no OpenAPI.** This app has no
+  springdoc, is served with controllers at root, wraps bodies (`UNWRAP_ROOT_VALUE`),
+  and — crucially — uses Spring Security, which answers **401 for unmatched paths**.
+  - First, QAX misread the model path and a naive live check (401 ≠ 404 was treated as
+    "route exists") into adding a wrong `/api` prefix. Fixed: existence now requires a
+    *definitive* handler response — 401/403 are ambiguous and don't count.
+  - Second, the Java model captured the register fields FLAT (not `user.*`), so even at
+    the right path the body was wrong. Fixed: `_auth_token` retries registration
+    WRAPPED under the resource name (`{"user":{...}}`) when the flat body is rejected,
+    and applies the same wrapper to login.
+- Net: QAX recovers the real mount point and body shape from the live app, with no
+  spec — so it now authenticates and scans wrapped/prefixed APIs (RealWorld, JSON:API,
+  Spring) that it previously couldn't reach.
 
 ---
 
-## Reality-Check conclusion (3 stacks)
+## Reality-Check conclusion (3 stacks, all fully scanned)
 
 | Target | Stack | Source modeled | Auth worked | False P1/P2 | Leads |
 |---|---|---|---|---|---|
 | T1 | Node/Express/Prisma | ✓ 12 | ✓ (3) | **0** | 1 (legit) |
 | T3 | Go/Gin/gorm | ✓ 19 | ✓ (3) | **0** | 2 (legit) |
-| T2 | Java/Spring Boot | ✓ 19 | ✗ (base-path gap) | 0* | 1 |
+| T2 | Java/Spring Boot | ✓ 19 | ✓ (2) | **0** | 1 (legit) |
 
-\* T2 not a full scan — auth blocked.
+**Verdict.** Across **three unfamiliar, well-written stacks** (Node, Go, Java) QAX
+modeled the API from source, authenticated, ran its full probe set, and produced
+**zero false P1/P2** — only legitimate low-severity leads. Strong "doesn't cry wolf,
+generalises across stacks" evidence. The exercise's biggest payoff was finding and
+fixing **four concrete gaps**, each of which was silently limiting QAX on real-world
+APIs:
+1. wrapped request bodies (`{"user":{...}}`),
+2. the `register_body` type heuristic (`image`→number),
+3. the Python/JS-only source reader (couldn't read Go/Java/etc.),
+4. base-path + body-wrapper recovery when there is no OpenAPI.
 
-**Verdict.** On the two stacks QAX could fully reach (Node, Go — both unfamiliar,
-well-written), it produced **zero false P1/P2** and only legitimate low-severity
-leads: strong "doesn't cry wolf, generalises across stacks" evidence. The exercise's
-biggest payoff was finding **four concrete gaps** — three fixed in-session (wrapped
-bodies, the type heuristic, the Python/JS-only reader) and one flagged
-(base-path-without-OpenAPI). Each was silently limiting QAX on real-world APIs.
-
-**Honest limitations.** (1) LLM model-building is non-deterministic — a weak model
-can break auth; always confirm `created_records > 0`. (2) Reality-check targets were
-well-written RealWorld apps (good FP tests); recall vs. known CVEs on a new stack was
-not measured here (go-gin-vul needed MySQL+Redis, skipped for boot-cost) — prior
-sessions' two real P1 finds remain the recall evidence.
+**Honest limitations.** (1) LLM model-building is non-deterministic — a weak model can
+break auth; always confirm `created_records > 0`. (2) Targets were well-written
+RealWorld apps (good FP tests); recall vs. known CVEs on a new stack was NOT measured
+here (go-gin-vul needed MySQL+Redis, skipped for boot-cost) — prior sessions' two real
+P1 finds remain the recall evidence.
