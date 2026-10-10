@@ -38,9 +38,14 @@ logger = logging.getLogger(__name__)
 
 # Directories that never contain first-party source worth modelling.
 _SKIP_DIRS = {".git", "node_modules", "venv", ".venv", ".venv-exec", "__pycache__",
-              "dist", "build", ".next", ".pytest_cache", "site-packages", "migrations"}
-# Extensions we read (backend logic + frontend contract/UI).
-_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx"}
+              "dist", "build", ".next", ".pytest_cache", "site-packages", "migrations",
+              "vendor", "target", "bin", "obj", ".gradle", ".idea"}
+# Extensions we read (backend logic + frontend contract/UI). QAX is language-generic:
+# the model is built by an LLM that understands any of these, so the only limit is
+# which files we hand it. Backend languages beyond Python/JS let QAX model Go, Java,
+# Ruby, PHP, C#, Rust, Kotlin, Scala and Elixir apps too.
+_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx",
+         ".go", ".rb", ".java", ".kt", ".php", ".cs", ".rs", ".scala", ".ex", ".exs"}
 
 _MAX_FILE_CHARS = 6000      # per-file cap in the digest
 _MAX_TOTAL_CHARS = 90_000   # whole-digest cap
