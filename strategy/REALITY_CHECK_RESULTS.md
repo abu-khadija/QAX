@@ -203,6 +203,27 @@ Commits: `bae15f7` (command-injection), `c137320` (SSRF), `71fb23d` (XSS), plus
 new probe keeps a control (unique token, OOB callback, HTML-context check) so it only
 fires on proof.
 
+### Backlog continued: blind SQLi + stored XSS
+
+- **blind SQLi** — added a status-differential proof to injection detection (a TRUE
+  tautology flips the status to success while benign + a matched FALSE stay failing).
+  Unit-validated. go-gin-vul's own SQLi endpoints couldn't validate it live — the login
+  uses a `count==1` check and the by-id endpoint 500s on all input (target quirks).
+- **stored XSS** — new P1 probe: write a markup token into each free-text field, read
+  the collection back, confirm only on verbatim/unencoded reflection in HTML. Validated
+  live: caught `/api/vul/addcomments` → `/api/vul/getcomments` (the `content` field).
+
+**Vuln classes QAX can now detect on go-gin-vul (each validated in a focused run):**
+open-redirect, path-traversal, CORS, command-injection, SSRF, reflected XSS, stored
+XSS — **7 of 9**. Still open: blind SQLi (uncatchable on this target's broken
+endpoints) and zip-slip (not built; niche, hard to confirm without filesystem access).
+A single full ProbeService scan can't demonstrate all 7 at once here because go-gin-vul's
+SQLi login handler does `defer db.Close()` on the shared connection, breaking later
+probes — a target bug, not a QAX one.
+
+Probe commits: `bae15f7` cmd-injection, `c137320` SSRF, `71fb23d` reflected-XSS,
+`73075ff` blind-SQLi, `fd29ca4` stored-XSS, `8ff6b12` path-traversal+CORS.
+
 **Honest verdict on recall:** QAX's deterministic probes are precise (0 FP, no safe
 twin flagged) but **narrow** — they caught 1 of 9 vuln classes on this target. The
 strength remains "proves what it finds without crying wolf"; the gap is **breadth of
