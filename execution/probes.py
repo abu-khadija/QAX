@@ -236,7 +236,7 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     log in with another (username). The value reused is whatever the register body
     put in that same field, so the two always match.
     """
-    from core.auth_recipe import field_names, register_body
+    from core.auth_recipe import field_names, nest_body, register_body
     reg_body = register_body(recipe, model, identity, password=password)
     try:
         sess.post(f"{base}{recipe['register_path']}", json=reg_body, timeout=15)
@@ -255,9 +255,10 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     login_url = f"{base}{recipe['login_path']}"
 
     tok = None
-    # 1) JSON login (FastAPI/Flask-RESTX/connexion style).
+    # 1) JSON login (FastAPI/Flask-RESTX/connexion style). nest_body wraps dotted
+    #    fields so this also works on APIs that wrap the body (e.g. {"user":{...}}).
     try:
-        lr = sess.post(login_url, json={id_field: id_value, sec_field: password}, timeout=15)
+        lr = sess.post(login_url, json=nest_body({id_field: id_value, sec_field: password}), timeout=15)
         tok = _extract_token(lr, recipe)
     except Exception:
         tok = None
@@ -278,21 +279,32 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
 
 
 def _extract_token(response, recipe):
-    """Pull a bearer token out of a login response (recipe field, then any token-ish key)."""
+    """Pull a bearer token out of a login response (recipe field, then any token-ish
+    key), searching nested objects too so wrapped responses like {"user":{"token"}} work."""
     try:
         if response.status_code >= 400:
             return None
         data = response.json()
     except Exception:
         return None
-    if not isinstance(data, dict):
+    return _search_token(data, recipe.get("token_field", "access_token"))
+
+
+def _search_token(data, token_field, _depth: int = 0):
+    """Recursively find a bearer token: the exact field first, then any token-ish key."""
+    if _depth > 4 or not isinstance(data, dict):
         return None
-    tok = data.get(recipe["token_field"])
-    if tok:
-        return tok
-    for k, v in data.items():
-        if isinstance(v, str) and any(t in k.lower() for t in ("token", "jwt", "access", "auth")):
-            return v
+    v = data.get(token_field)
+    if isinstance(v, str) and v:
+        return v
+    for k, val in data.items():
+        if isinstance(val, str) and val and any(t in k.lower() for t in ("token", "jwt", "access", "auth")):
+            return val
+    for val in data.values():
+        if isinstance(val, dict):
+            r = _search_token(val, token_field, _depth + 1)
+            if r:
+                return r
     return None
 
 
@@ -409,7 +421,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
     When the app is safe, B gets a 404 and nothing is flagged.
     """
     sess = session or requests.Session()
-    from core.auth_recipe import derive_auth_recipe, field_names
+    from core.auth_recipe import derive_auth_recipe, field_names, nest_body
     recipe = derive_auth_recipe(model)
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
@@ -473,7 +485,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         auth_a = _auth_headers(ta, auth)
         auth_b = _auth_headers(tb, auth)
         try:
-            cr = sess.post(f"{base}{prefix}", json=body, headers=auth_a, timeout=15)
+            cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=auth_a, timeout=15)
             if cr.status_code >= 400:
                 continue
             _record_created(sess, prefix, body, auth_a)
@@ -1377,7 +1389,7 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
     Deterministic, no model calls.
     """
     sess = session or requests.Session()
-    from core.auth_recipe import derive_auth_recipe, field_names
+    from core.auth_recipe import derive_auth_recipe, field_names, nest_body
     recipe = derive_auth_recipe(model)
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
@@ -1438,7 +1450,7 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
             continue
         headers = _auth_headers(token, auth) if (post.get("auth_required") or ge.get("auth_required")) else {}
         try:
-            cr = sess.post(f"{base}{prefix}", json=body, headers=headers, timeout=15)
+            cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=headers, timeout=15)
         except Exception:
             continue
         if not (200 <= cr.status_code < 300):      # control: the create must be accepted

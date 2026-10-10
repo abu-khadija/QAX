@@ -8,8 +8,39 @@ Run with:
     pytest tests/test_auth_recipe.py -v
 """
 
-from core.auth_recipe import derive_auth_recipe, field_names, subject_candidates
+from core.auth_recipe import (derive_auth_recipe, field_names, nest_body, register_body,
+                              subject_candidates)
 from services.results import AppModel
+
+
+def test_nest_body_wraps_dotted_keys():
+    assert nest_body({"user.email": "a", "user.password": "b"}) == {"user": {"email": "a", "password": "b"}}
+    assert nest_body({"email": "a"}) == {"email": "a"}            # flat untouched
+    assert nest_body({"a.b.c": 1}) == {"a": {"b": {"c": 1}}}       # multi-level
+
+
+def test_register_body_nested_and_typed_for_realworld():
+    """RealWorld-style wrapped register: dotted fields -> nested, image -> a URL string."""
+    model = AppModel(root="/x", endpoints=[{
+        "method": "POST", "path": "/api/users",
+        "request_fields": ["user.email", "user.username", "user.password", "user.image", "user.bio"],
+    }])
+    recipe = derive_auth_recipe(model)
+    body = register_body(recipe, model, "qax@example.com")
+    assert "user" in body and isinstance(body["user"], dict)       # wrapped
+    u = body["user"]
+    assert u["email"] == "qax@example.com"
+    assert isinstance(u["image"], str) and u["image"].startswith("http")   # not the int 1
+    assert u["password"]
+
+
+def test_register_body_flat_app_unchanged():
+    model = AppModel(root="/x", endpoints=[{
+        "method": "POST", "path": "/auth/register",
+        "request_fields": ["email", "password", "username"],
+    }])
+    body = register_body(derive_auth_recipe(model), model, "a@b.c")
+    assert body["email"] == "a@b.c" and "user" not in body         # stays flat
 
 
 def test_field_names_handles_strings_and_dicts():

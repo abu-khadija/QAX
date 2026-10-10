@@ -13,6 +13,8 @@ app. Pure logic, no dependencies, no model calls.
 
 from __future__ import annotations
 
+import re
+
 
 def field_names(fields) -> list[str]:
     """Normalise a request/response field list to plain names."""
@@ -22,6 +24,31 @@ def field_names(fields) -> list[str]:
             out.append(f)
         elif isinstance(f, dict) and f.get("name"):
             out.append(str(f["name"]))
+    return out
+
+
+def nest_body(flat: dict) -> dict:
+    """
+    Expand dotted field names into nested objects so QAX speaks to APIs that WRAP a
+    resource: {"user.email": x, "user.password": y} -> {"user": {"email": x, ...}}.
+    A plain (dot-free) key stays at the top level, so flat apps are unchanged. This
+    is what lets QAX register/login on RealWorld ({"user":{...}}), JSON:API, and the
+    many Rails/Ember-style APIs that wrap request bodies.
+    """
+    out: dict = {}
+    for k, v in (flat or {}).items():
+        if "." in str(k):
+            parts = str(k).split(".")
+            cur = out
+            for p in parts[:-1]:
+                nxt = cur.get(p)
+                if not isinstance(nxt, dict):
+                    nxt = {}
+                    cur[p] = nxt
+                cur = nxt
+            cur[parts[-1]] = v
+        else:
+            out[k] = v
     return out
 
 
@@ -112,23 +139,30 @@ def register_body(recipe: dict, model, identity_value: str,
     for f in reg_fields:
         if f in body:
             continue
-        lf = f.lower()
-        if "email" in lf:
+        # Guess a type-sensible value from the LEAF name (after the last dot), so a
+        # wrapped field like "user.image" is judged on "image" — and matched with word
+        # boundaries so "image" is not misread as a number because it ends in "age".
+        leaf = f.lower().rsplit(".", 1)[-1]
+        if "email" in leaf:
             body[f] = identity_value if "@" in str(identity_value) else f"{identity_value}@example.com"
         # Identity fields (username/login/user) must be UNIQUE and usable as the JWT
         # subject — checked BEFORE the display-name branch, since "username" also
         # contains "name". A constant here collides and breaks subject matching.
-        elif any(k in lf for k in ("username", "login")) or lf in ("user", "uid", "handle"):
+        elif any(k in leaf for k in ("username", "login")) or leaf in ("user", "uid", "handle"):
             body[f] = identity_value
-        elif any(k in lf for k in ("phone", "mobile", "msisdn")):
+        elif any(k in leaf for k in ("image", "avatar", "photo", "picture", "url",
+                                     "link", "website", "uri")):
+            body[f] = "https://example.com/qax.png"
+        elif any(k in leaf for k in ("phone", "mobile", "msisdn")):
             body[f] = "+10000000000"
-        elif any(k in lf for k in ("first", "last", "title")) or "name" in lf:
+        elif any(k in leaf for k in ("first", "last", "title")) or "name" in leaf:
             body[f] = "Test"
-        elif any(k in lf for k in ("age", "count", "number", "qty", "id")):
+        elif re.search(r"(?:^|_)(age|count|number|num|qty|quantity|amount|price)(?:$|_)", leaf) \
+                or leaf == "id" or leaf.endswith("_id"):
             body[f] = 1
         else:
             body[f] = "test"
-    return body
+    return nest_body(body)
 
 
 def subject_candidates(victim_id_value: str, register_response: dict | None) -> list:
