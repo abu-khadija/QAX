@@ -161,6 +161,10 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
             "end_to_end": rec.get("completed_end_to_end"), "cost": rec.get("cost", {}),
             "claims": len(claims), "leads": len(leads),
         },
+        "housekeeping": {
+            "created": getattr(result, "created_records", 0),
+            "cleaned": getattr(result, "cleaned_records", 0),
+        },
     }
 
 

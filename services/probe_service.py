@@ -44,6 +44,7 @@ class ProbeService:
         base_url: str,
         *,
         auth: dict | None = None,
+        cleanup: bool = True,
         progress: ProgressReporter | None = None,
     ) -> ProbeResult:
         """
@@ -78,11 +79,11 @@ class ProbeService:
 
         prog.emit("probe", "start", "running active probes")
         findings = []
-        # One shared HTTP session for all probes: reuses the connection pool and lets
-        # self-registered auth tokens be cached once and reused, instead of each probe
-        # registering its own user (dozens of redundant register/login round-trips).
+        # One shared HTTP session for all probes: reuses the connection pool, and carries
+        # the registry of disposable records QAX creates so we can clean them up after.
         import requests
         shared = requests.Session()
+        shared._qax_created = []  # probes append every test record they write here
 
         # Forge-JWT — only when the model found a hardcoded secret to forge with.
         if model.exposed_secrets:
@@ -223,6 +224,17 @@ class ProbeService:
         except Exception as exc:
             logger.error("unpaginated_list probe failed: %s", exc)
 
-        result = ProbeResult(findings=findings)
+        # Clean up the disposable records we created (best-effort, only our own data).
+        created = len(getattr(shared, "_qax_created", []) or [])
+        cleaned = 0
+        if cleanup and created:
+            try:
+                from execution.probes import cleanup_artifacts
+                cleaned = cleanup_artifacts(model, base_url, shared)
+            except Exception as exc:
+                logger.error("probe cleanup failed: %s", exc)
+            prog.emit("probe", "info", f"test-data cleanup: removed {cleaned}/{created} record(s)")
+
+        result = ProbeResult(findings=findings, created_records=created, cleaned_records=cleaned)
         prog.emit("probe", "ok", result.summary())
         return result

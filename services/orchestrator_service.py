@@ -217,7 +217,9 @@ class OrchestratorService:
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=1,
             tests_run=len(executable), suspects=len(detection.findings),
-            ui_screens=ui_screens)
+            ui_screens=ui_screens,
+            created_records=getattr(probe_result, "created_records", 0),
+            cleaned_records=getattr(probe_result, "cleaned_records", 0))
         prog.emit("orchestrate", "ok", result.summary())
         return result
 

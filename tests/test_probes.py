@@ -782,6 +782,42 @@ def test_rate_limit_quiet_when_throttled():
     assert rate_limit_probe(_model_with_secret(), "http://x", session=_RateLimitSession(throttle_after=3)) == []
 
 
+# ── test-data cleanup ────────────────────────────────────────────────────────
+
+from execution.probes import _collection_of, _record_created, cleanup_artifacts  # noqa: E402
+
+
+def test_collection_of_strips_action_segment():
+    assert _collection_of("/users/v1/register") == "/users/v1"
+    assert _collection_of("/auth/signup") == "/auth"
+    assert _collection_of("/books/v1") == "/books/v1"
+
+
+def test_cleanup_deletes_only_recorded_records():
+    """cleanup_artifacts DELETEs the keys QAX recorded, matched to a DELETE endpoint."""
+    model = AppModel(root="/x", endpoints=[
+        {"method": "DELETE", "path": "/users/v1/{username}", "auth_required": True},
+    ])
+    deleted = []
+
+    class _Sess:
+        def delete(self, url, headers=None, timeout=None):
+            deleted.append(url)
+            return MagicMock(status_code=204, text="")
+
+    sess = _Sess()
+    sess._qax_created = []
+    _record_created(sess, "/users/v1", {"username": "qax_u1", "email": "a@b.c"}, {"Authorization": "Bearer t"})
+    _record_created(sess, "/books/v1", {"book_title": "qax_b1"}, {})   # no DELETE endpoint → skipped
+    cleaned = cleanup_artifacts(model, "http://x", sess)
+    assert cleaned == 1
+    assert deleted == ["http://x/users/v1/qax_u1"]
+
+
+def test_cleanup_noop_without_registry():
+    assert cleanup_artifacts(AppModel(root="/x"), "http://x", MagicMock(spec=[])) == 0
+
+
 # ── persistence probe (silent data loss on save) ─────────────────────────────
 
 def _model_persist() -> AppModel:

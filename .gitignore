@@ -68,3 +68,4 @@ career-ops/
 output/scorecard/
 .venv-exec/
 .venv/
+output/cache/

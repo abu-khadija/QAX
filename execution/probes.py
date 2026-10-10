@@ -254,22 +254,27 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     id_value = reg_body.get(id_field, identity)
     login_url = f"{base}{recipe['login_path']}"
 
+    tok = None
     # 1) JSON login (FastAPI/Flask-RESTX/connexion style).
     try:
         lr = sess.post(login_url, json={id_field: id_value, sec_field: password}, timeout=15)
         tok = _extract_token(lr, recipe)
-        if tok:
-            return tok
     except Exception:
-        pass
+        tok = None
     # 2) OAuth2 form login (OAuth2PasswordRequestForm): x-www-form-urlencoded with the
     #    literal fields `username`/`password`. Common on FastAPI apps — without this
     #    QAX can't get a token there and every auth'd probe silently skips.
-    try:
-        lr = sess.post(login_url, data={"username": id_value, "password": password}, timeout=15)
-        return _extract_token(lr, recipe)
-    except Exception:
-        return None
+    if not tok:
+        try:
+            lr = sess.post(login_url, data={"username": id_value, "password": password}, timeout=15)
+            tok = _extract_token(lr, recipe)
+        except Exception:
+            tok = None
+    # Record the user we just created (with its own token) so the scan can delete it.
+    if tok:
+        _record_created(sess, _collection_of(recipe["register_path"]), reg_body,
+                        {"Authorization": f"Bearer {tok}"})
+    return tok
 
 
 def _extract_token(response, recipe):
@@ -300,6 +305,78 @@ def _auth_headers(token, auth: dict | None = None) -> dict:
     scheme = auth.get("scheme", "Bearer") if "scheme" in auth else "Bearer"
     value = f"{scheme} {token}".strip() if scheme else str(token)
     return {header: value}
+
+
+# Trailing path segments that denote an action, not the resource collection.
+_ACTION_SEGS = ("register", "signup", "sign-up", "sign_up", "create", "new", "add")
+
+
+def _collection_of(path: str) -> str:
+    """The resource collection a create endpoint writes into (strip a trailing action)."""
+    segs = str(path).rstrip("/").split("/")
+    if segs and segs[-1].lower() in _ACTION_SEGS:
+        return "/".join(segs[:-1]) or "/"
+    return str(path).rstrip("/")
+
+
+def _record_created(sess, collection: str, body: dict, headers: dict) -> None:
+    """
+    Note a disposable record QAX just created, so the scan can clean it up afterwards.
+    No-op unless the caller (ProbeService) opened a registry on the session, so probes
+    run in isolation (and tests) write nothing extra. Never raises.
+    """
+    try:
+        reg = getattr(sess, "_qax_created", None)
+        if reg is None:
+            return
+        reg.append({"collection": collection, "body": dict(body or {}), "headers": dict(headers or {})})
+    except Exception:
+        pass
+
+
+def cleanup_artifacts(model, base_url: str, session) -> int:
+    """
+    Best-effort DELETE of the disposable records QAX created this scan. Deletes ONLY
+    keys QAX itself recorded, matched to a DELETE endpoint on the same collection and
+    authorized with the creator's own token. Never deletes anything it did not create,
+    and never raises. Returns the count actually removed.
+    """
+    reg = getattr(session, "_qax_created", None)
+    if not reg:
+        return 0
+    base = base_url.rstrip("/")
+    dels = []
+    for e in getattr(model, "endpoints", []):
+        if isinstance(e, dict) and str(e.get("method", "")).upper() == "DELETE":
+            p = str(e.get("path", ""))
+            m = re.search(r"\{([^}]+)\}", p)
+            if m:
+                dels.append((p, m.group(1), p[:m.start()].rstrip("/")))
+    if not dels:
+        return 0
+    cleaned = 0
+    for art in reg:
+        match = next((d for d in dels if d[2] == art.get("collection", "")), None)
+        if not match:
+            continue
+        path, param, _ = match
+        body = art.get("body", {})
+        key = body.get(param)
+        if key is None:
+            key = next((v for k, v in body.items() if k.lower() == param.lower()), None)
+        if key is None:
+            key = next((body[f] for f in body if any(k in f.lower()
+                        for k in ("username", "email", "title", "name", "id", "key", "slug"))), None)
+        if key is None:
+            continue
+        url = f"{base}{path.replace('{' + param + '}', str(key))}"
+        try:
+            r = session.delete(url, headers=art.get("headers", {}), timeout=15)
+            if getattr(r, "status_code", 500) < 300:
+                cleaned += 1
+        except Exception:
+            continue
+    return cleaned
 
 
 def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = None, slot: str = "primary"):
@@ -399,6 +476,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
             cr = sess.post(f"{base}{prefix}", json=body, headers=auth_a, timeout=15)
             if cr.status_code >= 400:
                 continue
+            _record_created(sess, prefix, body, auth_a)
             read_path = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
             ar = sess.get(read_path, headers=auth_a, timeout=15)
             if ar.status_code >= 400:  # control: A must be able to read its own object
@@ -1365,6 +1443,7 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
             continue
         if not (200 <= cr.status_code < 300):      # control: the create must be accepted
             continue
+        _record_created(sess, prefix, body, headers)
         read_url = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
         try:
             rr = sess.get(read_url, headers=headers, timeout=15)
@@ -1623,6 +1702,7 @@ def mass_assignment_probe(model, base_url: str, *, session: requests.Session | N
         return out
     if r.status_code >= 300:
         return out
+    _record_created(sess, _collection_of(recipe["register_path"]), body, {})
     try:
         data = r.json()
     except Exception:

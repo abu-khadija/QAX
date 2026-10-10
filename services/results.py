@@ -419,6 +419,8 @@ class OrchestratorResult:
     tests_run: int = 0
     suspects: int = 0
     ui_screens: list = field(default_factory=list)
+    created_records: int = 0
+    cleaned_records: int = 0
     error: str | None = None
 
     @property
@@ -446,6 +448,8 @@ class OrchestratorResult:
             "tests_run": self.tests_run,
             "suspects": self.suspects,
             "ui_screens": self.ui_screens,
+            "created_records": self.created_records,
+            "cleaned_records": self.cleaned_records,
             "error": self.error,
             "success": self.success,
         }
@@ -490,6 +494,11 @@ class ProbeResult:
 
     findings: list = field(default_factory=list)
     error: str | None = None
+    # Housekeeping: how many disposable test records QAX created on the target and how
+    # many it cleaned up afterwards (best-effort). Lets the product be transparent
+    # about its footprint instead of silently polluting the target.
+    created_records: int = 0
+    cleaned_records: int = 0
 
     @property
     def success(self) -> bool:
@@ -509,6 +518,8 @@ class ProbeResult:
             "exploited": len(self.exploited),
             "run": len(self.findings),
             "findings": [f.to_dict() for f in self.findings],
+            "created_records": self.created_records,
+            "cleaned_records": self.cleaned_records,
             "error": self.error,
             "success": self.success,
         }
