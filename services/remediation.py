@@ -122,6 +122,13 @@ _MAP = {
         "fix": "Redirect only to an allow-list of known internal paths/hosts; reject absolute "
                "external URLs, or map a redirect key to a server-side URL table.",
     },
+    "command-injection": {
+        "why": "User input reaches an OS shell, so an attacker can run arbitrary commands "
+               "on the server — full remote code execution and host compromise.",
+        "fix": "Never pass user input to a shell. Call the program directly with an argument "
+               "array (no shell), validate against a strict allow-list, and drop shell "
+               "metacharacters; avoid system()/exec with a composed string.",
+    },
     "rate-limit": {
         "why": "The login endpoint has no throttling or lockout, so credentials can be "
                "brute-forced or sprayed at speed.",

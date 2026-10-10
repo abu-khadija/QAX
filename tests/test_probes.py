@@ -14,6 +14,7 @@ import json as _json
 
 from execution.probes import _auth_token as _auth_token_fn  # noqa: F401
 from execution.probes import (_auth_headers, _resolve_token, auth_error_probe, bola_probe,
+                               command_injection_probe,
                                cookie_flags_probe, cors_probe, crash_fuzz_probe,
                                debug_disclosure_probe, error_handling_probe, excessive_data_probe,
                                forge_jwt_probe, injection_probe, jwt_flaws_probe,
@@ -661,6 +662,31 @@ def test_path_traversal_via_query_param():
         {"method": "GET", "path": "/api/vul/read", "query_params": ["filename"], "auth_required": False}])
     out = path_traversal_probe(model, "http://x", session=_QueryTraversalSession())
     assert len(out) == 1 and out[0].severity == "P1" and "query param" in out[0].title
+
+
+class _CmdInjectionSession:
+    """A ping-style endpoint that reflects shell output — so `;echo TOKEN` comes back."""
+    def get(self, url, params=None, headers=None, timeout=None):
+        ip = str((params or {}).get("ip", ""))
+        out = f"PING {ip}"
+        # emulate the shell running the injected `echo TOKEN` after a separator
+        for sep in (";", "&&", "|"):
+            if f"{sep}echo " in ip:
+                out += "\n" + ip.split("echo ", 1)[1]
+        return MagicMock(status_code=200, text='{"success":"' + out + '"}')
+
+
+def test_command_injection_output_based():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/cmd1", "query_params": ["ip"], "auth_required": False}])
+    out = command_injection_probe(model, "http://x", session=_CmdInjectionSession())
+    assert len(out) == 1 and out[0].severity == "P1" and out[0].probe == "command-injection"
+
+
+def test_command_injection_quiet_without_cmd_params():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/articles", "query_params": ["title"], "auth_required": False}])
+    assert command_injection_probe(model, "http://x", session=_CmdInjectionSession()) == []
 
 
 class _EndpointCorsSession:

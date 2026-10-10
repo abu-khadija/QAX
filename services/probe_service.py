@@ -70,7 +70,7 @@ class ProbeService:
             return ProbeResult(error="No base_url to probe against.")
 
         from execution.probes import (_resolve_token, auth_error_probe, bola_probe,
-                                       cookie_flags_probe, cors_probe,
+                                       command_injection_probe, cookie_flags_probe, cors_probe,
                                        crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
                                        jwt_flaws_probe, malformed_input_probe, mass_assignment_probe,
@@ -148,6 +148,12 @@ class ProbeService:
             findings.extend(path_traversal_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("path_traversal probe failed: %s", exc)
+
+        # Command injection — a param that feeds a shell command (proven by echo/sleep).
+        try:
+            findings.extend(command_injection_probe(model, base_url, session=shared, auth=read_auth))
+        except Exception as exc:
+            logger.error("command_injection probe failed: %s", exc)
 
         # Mass assignment — registration binds a client-supplied privileged field.
         try:

