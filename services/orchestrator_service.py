@@ -15,8 +15,11 @@ The coverage loop is the point. QAX kept catching the pagination boundary bug on
 orchestrator derives the high-value coverage goals from the model, checks whether
 the generated tests actually meet them, and for any critical gap it injects a
 DETERMINISTIC template test — so a known-critical goal is covered every run, not by
-luck. It also decides how much to generate from the app's surface, instead of a
-hard-coded cap.
+luck. Functional generation (deep mode) is budgeted: it ranks the router files by
+risk and generates for the top `max_router_files`, and records every router it
+covered or SKIPPED in the coverage map — so the report never implies a router was
+tested when it wasn't. (The probes and coverage templates always run over the whole
+endpoint map, independent of this budget.)
 
 Never prints, never calls sys.exit(); failures are captured in the result.
 """
@@ -176,9 +179,22 @@ class OrchestratorService:
 
         # 4) Generate: functional (per router) + adversarial (red-team) — deep only.
         tests: list[dict] = []
+        chosen_routers: list[str] = []
+        skipped_routers: list[str] = []
         if deep:
             prog.emit("orchestrate", "step", "generating tests")
-            for fpath in self._router_files(model, repo_path)[:max_router_files]:
+            ranked = self._ranked_router_files(model, repo_path)   # highest-risk first
+            chosen_routers = ranked[:max_router_files]
+            skipped_routers = ranked[max_router_files:]
+            if ranked:
+                prog.emit("orchestrate", "info",
+                          f"functional generation: {len(chosen_routers)} of {len(ranked)} router(s) "
+                          f"(budget {max_router_files}, highest-risk first)")
+            elif getattr(model, "endpoints", None):
+                prog.emit("orchestrate", "warn",
+                          "no router files detected — functional generation produced nothing "
+                          "(probes still cover the endpoint map)")
+            for fpath in chosen_routers:
                 try:
                     gen = GenerationService(self.context).generate(
                         fpath, options=GenerationOptions(
@@ -196,6 +212,16 @@ class OrchestratorService:
 
         # 5) Coverage loop: check the high-value goals; fill gaps with templates.
         coverage = self._measure_and_fill(model, tests, prog)
+        # Honesty: record which routers got functional generation and which were
+        # skipped for budget, so the report never implies a router was tested when
+        # it wasn't. Deep mode only (quick scan does no functional generation).
+        import os as _os
+        for fp in chosen_routers:
+            coverage[f"functional:{_os.path.relpath(fp, repo_path)}"] = "generation"
+        for fp in skipped_routers:
+            coverage[f"functional:{_os.path.relpath(fp, repo_path)}"] = "skipped (budget)"
+        if deep and not chosen_routers and getattr(model, "endpoints", None):
+            coverage["functional:routers"] = "skipped (no router files detected)"
 
         # 6) Execute → Critic → Investigator. The verify legs make LLM calls only
         #    when there are failures; wrapped so a missing key/credit degrades to
@@ -410,6 +436,41 @@ class OrchestratorService:
                 if p.exists():
                     out.append(str(p))
         return out
+
+    # Router file names that usually hold sensitive logic vs. low-value surface.
+    _HIGH_RISK_KW = ("auth", "login", "logout", "register", "signup", "password", "token",
+                     "session", "payment", "billing", "checkout", "card", "invoice", "order",
+                     "transfer", "wallet", "account", "user", "admin", "role", "permission",
+                     "transaction", "fund", "money", "bank", "secret", "key", "oauth")
+    _LOW_RISK_KW = ("health", "ping", "status", "about", "docs", "swagger", "openapi",
+                    "static", "index", "home", "version", "metrics", "favicon", "robots")
+
+    @classmethod
+    def _router_score(cls, path: str, model: AppModel) -> int:
+        """
+        Risk score for a router file, so the generation budget goes to the most
+        dangerous ones first (payments before health). Uses the file name plus the
+        endpoints attributed to it by name convention (write methods and auth weigh
+        more) — reliable without a per-file endpoint link.
+        """
+        name = Path(path).stem.lower()
+        score = 0
+        if any(k in name for k in cls._HIGH_RISK_KW):
+            score += 10
+        if any(k in name for k in cls._LOW_RISK_KW):
+            score -= 6
+        stem = name.rstrip("s") or name
+        eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)
+               and stem and stem in str(e.get("path", "")).lower()]
+        score += len(eps)
+        score += sum(2 for e in eps if str(e.get("method", "")).upper() in ("POST", "PUT", "DELETE", "PATCH"))
+        score += sum(1 for e in eps if e.get("auth_required"))
+        return score
+
+    def _ranked_router_files(self, model: AppModel, repo_path: str) -> list[str]:
+        """Router files ordered highest-risk first (for the functional-generation budget)."""
+        files = self._router_files(model, repo_path)
+        return sorted(files, key=lambda p: self._router_score(p, model), reverse=True)
 
     _COV_SEVERITY = {"COV-AUTH": "P1", "COV-IDOR": "P1", "COV-VAL": "P3", "COV-PAG": "P2"}
 

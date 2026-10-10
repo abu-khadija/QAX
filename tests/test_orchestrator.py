@@ -148,3 +148,18 @@ def test_measure_and_fill_injects_template_when_uncovered():
     goal = "pagination-boundary:/todos"
     assert coverage.get(goal) == "template"
     assert any(t.get("attack") == "coverage-template" for t in tests)   # injected
+
+
+# ── functional-generation budget: rank routers by risk (coverage honesty) ──────
+
+def test_router_score_ranks_sensitive_over_trivial():
+    m = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/payments/charge", "auth_required": True},
+        {"method": "GET", "path": "/payments/{id}", "auth_required": True},
+        {"method": "GET", "path": "/health", "auth_required": False},
+    ])
+    s = {f: OrchestratorService._router_score(f, m) for f in
+         ("routers/payments.py", "routers/health.py", "routers/about.py")}
+    assert s["routers/payments.py"] > s["routers/health.py"]
+    assert s["routers/payments.py"] > s["routers/about.py"]
+    assert s["routers/health.py"] < 0 and s["routers/about.py"] < 0   # low-risk demoted
