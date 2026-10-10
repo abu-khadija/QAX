@@ -221,9 +221,11 @@
 
   <section id="results">
     <div class="rtool" id="rtool">
+      <button class="btn2" id="filebtn" onclick="fileFindings()">⤴ File to Jira/Xray</button>
       <button class="btn2" onclick="downloadReport()">⤓ Download report</button>
       <button class="btn2" onclick="printReport()">⎙ Print / PDF</button>
     </div>
+    <div id="exportmsg" class="hk" style="display:none"></div>
     <div class="verdict" id="verdict"></div>
     <div class="stats" id="stats"></div>
     <div class="layers" id="layers"></div>
@@ -233,6 +235,9 @@
   </section>
 
   <section id="genresults">
+    <div class="rtool" id="gentool" style="display:none">
+      <button class="btn2" id="gentfilebtn" onclick="fileTests()">⤴ Push to Jira/Xray</button>
+    </div>
     <div class="sec-title">Generated test cases <span id="gencount" style="color:var(--txt)"></span></div>
     <div id="tests"></div>
     <div class="hint" id="genjira" style="margin-top:14px"></div>
@@ -283,8 +288,11 @@ async function runGenerate(){
   }catch(e){ showErr('Generation failed: '+e); }
   finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; }
 }
+window._lastTests=[];
 function renderTests(cases){
+  window._lastTests=cases||[];
   $('genresults').style.display='block';
+  $('gentool').style.display = (cases&&cases.length)?'flex':'none';
   $('gencount').textContent = cases.length ? '· '+cases.length : '';
   if(!cases.length){ $('tests').innerHTML='<div class="hint">No test cases generated — try a more specific story.</div>'; $('genjira').innerHTML=''; return; }
   $('tests').innerHTML = cases.map(tc=>{
@@ -310,7 +318,34 @@ function renderTests(cases){
       +(exp?'<div class="exp"><div class="k">Expected</div>'+esc(exp)+'</div>':'')
       +'</div>';
   }).join('');
-  $('genjira').innerHTML = '🔗 Next: push these to <b>Jira / Xray</b> — the export adapters already exist; wiring the button is the next step.';
+  $('genjira').innerHTML = 'Review, then <b>push to Jira / Xray</b> with the button above.';
+}
+
+async function doExport(items, kind, btn, msgEl){
+  if(!items || !items.length){ msgEl.style.display='block'; msgEl.innerHTML='Nothing to file yet.'; return; }
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='Filing…';
+  msgEl.style.display='block'; msgEl.innerHTML='Filing to Jira/Xray…';
+  try{
+    const r=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({items,kind,target:'xray'})});
+    const d=await r.json();
+    if(d.error){ msgEl.innerHTML='⚠️ '+esc(d.error); }
+    else {
+      const dry=d.dry_run; const n=d.exported_count||0;
+      msgEl.innerHTML=(dry?'🧪 <b>Dry run</b> — ':'✅ ')
+        +'would create '+n+' issue'+(n!==1?'s':'')+' in <b>'+esc((d.target||'xray').toUpperCase())+'</b>'
+        +(d.references&&d.references.length?' ('+d.references.slice(0,3).map(esc).join(', ')+(d.references.length>3?'…':'')+')':'')
+        +(dry?'. Add your Jira/Xray credentials to <code>.env</code> to file for real.':'.');
+    }
+  }catch(e){ msgEl.innerHTML='⚠️ Export failed: '+esc(String(e)); }
+  finally{ btn.disabled=false; btn.textContent=orig; }
+}
+function fileFindings(){
+  const d=window._last||{}; const items=[].concat(d.claims||[]).concat(d.leads||[]);
+  doExport(items,'findings',$('filebtn'),$('exportmsg'));
+}
+function fileTests(){
+  doExport(window._lastTests||[],'tests',$('gentfilebtn'),$('genjira'));
 }
 
 function runScan(){

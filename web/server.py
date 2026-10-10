@@ -203,6 +203,67 @@ def generate():
     return jsonify({"tests": cases or []})
 
 
+_SEV_TO_PRIORITY = {"P1": "critical", "P2": "high", "P3": "medium", "P4": "low"}
+_EXPORT_TARGETS = ("xray", "zephyr", "excel", "csv", "memory")
+
+
+def _finding_to_testcase(b: dict, i: int) -> dict:
+    """Map a security finding to the test-case shape the export adapters expect, so a
+    proven bug (and a regression test for it) can be filed to Jira/Xray."""
+    sev = str(b.get("severity", "P3")).upper()
+    rem = b.get("remediation") or {}
+    probe = str(b.get("probe", "") or b.get("source", "") or "sec")
+    parts = []
+    if b.get("target"):
+        parts.append("Endpoint: " + str(b["target"]))
+    if b.get("evidence"):
+        parts.append("Evidence: " + str(b["evidence"]))
+    if rem.get("why"):
+        parts.append("Why it matters: " + str(rem["why"]))
+    if rem.get("fix"):
+        parts.append("How to fix: " + str(rem["fix"]))
+    return {
+        "test_case_id": f"QAX-{probe.upper().replace(' ', '-')}-{i + 1}",
+        "title": f"[Security] {b.get('title', 'Finding')}",
+        "priority": _SEV_TO_PRIORITY.get(sev, "medium"),
+        "manual_steps": [{"action": f"Reproduce against {b.get('target', 'the endpoint')}",
+                          "expected_result": rem.get("fix", "Input should be rejected / handled safely"),
+                          "data": ""}],
+        "description": "\n".join(parts),
+        "labels": ["qax", "security"] + ([probe] if probe and probe != "sec" else []),
+    }
+
+
+@app.post("/api/export")
+def export():
+    """
+    File test cases or security findings to Jira/Xray/Zephyr/Excel via the existing
+    export adapters. Defaults to DRY_RUN (previews what would be created) so nothing is
+    filed until the caller opts in and credentials are configured. Never raises.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    items = data.get("items") or []
+    kind = str(data.get("kind", "tests")).lower()
+    target = str(data.get("target", "xray")).lower()
+    project = str(data.get("project", "")).strip() or None
+    dry_run = data.get("dry_run", True) is not False   # default True (safe)
+    if not items:
+        return jsonify({"error": "Nothing to file."}), 400
+    if target not in _EXPORT_TARGETS:
+        return jsonify({"error": f"Unknown target '{target}'. One of: {', '.join(_EXPORT_TARGETS)}."}), 400
+    if kind == "findings":
+        items = [_finding_to_testcase(b, i) for i, b in enumerate(items) if isinstance(b, dict)]
+    try:
+        from core.adapters import get_adapter
+        result = get_adapter(target).export(items, project=project, dry_run=dry_run)
+    except Exception as exc:
+        return jsonify({"error": f"Export failed: {exc}"}), 502
+    result = dict(result or {})
+    result["dry_run"] = dry_run
+    result["target"] = target
+    return jsonify(result)
+
+
 @app.get("/api/scan/stream")
 def scan_stream():
     url, repo, auth = _inputs()
