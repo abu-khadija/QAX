@@ -177,6 +177,32 @@ def scan():
     return (jsonify(payload), 502) if payload.get("error") else jsonify(payload)
 
 
+@app.post("/api/generate")
+def generate():
+    """
+    Generate test cases from a user story and/or source code — the other half of the
+    platform (no running app needed). Returns {"tests": [...]} or {"error": ...}.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    story = str(data.get("story", "")).strip()
+    code = str(data.get("code", "")).strip()
+    if not story and not code:
+        return jsonify({"error": "Enter a user story or paste some source code."}), 400
+    try:
+        from core.claude_client import ClaudeClient
+        from services.context import QAXContext
+        proj = getattr(QAXContext.from_env(), "project", "") or os.getenv("DEFAULT_PROJECT", "") or "example"
+        claude = ClaudeClient(project=proj)
+        # The story adapter feeds the story text to Claude AS the content to analyze;
+        # when real code is given we use that instead and keep the story as context.
+        content = code or story
+        cases = claude.analyze_code(code=content, file_path="input.py" if code else "story.txt",
+                                    user_story=story or None, use_cache=True)
+    except Exception as exc:
+        return jsonify({"error": f"Generation failed: {exc}"}), 502
+    return jsonify({"tests": cases or []})
+
+
 @app.get("/api/scan/stream")
 def scan_stream():
     url, repo, auth = _inputs()

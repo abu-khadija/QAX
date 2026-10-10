@@ -56,6 +56,28 @@
   .adv .row{margin-top:12px}
   .hint{color:var(--faint);font-size:12.5px;margin-top:12px}
 
+  /* capability switcher — two ways into one workflow */
+  .modes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+  .mode{text-align:left;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:16px 18px;cursor:pointer;transition:border .15s,background .15s,transform .08s;color:var(--txt);font-family:inherit}
+  .mode:hover{border-color:#2e3e5c}
+  .mode.active{border-color:var(--accent);background:linear-gradient(180deg,#1a2238,#141a2a);box-shadow:0 0 0 3px #6366f122}
+  .mode .mt{font-size:15.5px;font-weight:700;letter-spacing:-.2px}
+  .mode .md{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.35}
+  textarea{background:#0c111c;border:1px solid var(--line);color:var(--txt);border-radius:11px;
+    padding:13px 14px;font-size:14.5px;font-family:inherit;outline:none;width:100%;resize:vertical;line-height:1.5}
+  textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px #6366f133}
+  textarea::placeholder{color:var(--faint)}
+  #genresults{display:none;margin-top:26px}
+  .tc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin-bottom:10px}
+  .tc .th{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tc .tt{font-weight:600;font-size:15px}
+  .tc .pri{font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--card2);border:1px solid var(--line);color:var(--muted)}
+  .tc .rev{font-size:11px;color:var(--p2);border:1px solid #f6a33855;background:#f6a33822;border-radius:7px;padding:3px 9px}
+  .tc .steps{margin:9px 0 0;padding-left:20px;color:#cdd7e6;font-size:13.5px;line-height:1.5}
+  .tc .exp{margin-top:9px;background:#0c1a1b;border:1px solid #16403a;border-radius:9px;padding:9px 12px;font-size:13px;color:#e7f3ec}
+  .tc .exp .k{color:var(--ok);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+
   /* live feed */
   #scanning{display:none;margin-top:22px}
   .live-head{display:flex;align-items:center;gap:12px;color:var(--txt);font-size:15px;font-weight:600;margin-bottom:12px}
@@ -129,19 +151,30 @@
 <div class="wrap">
   <header>
     <span class="logo">QA<span class="dot">X</span></span>
-    <span class="tag">deterministic exploit scanner</span>
+    <span class="tag">AI QA platform</span>
     <span class="spacer"></span>
     <span class="pill-ghost">local · nothing leaves your machine</span>
   </header>
 
   <section class="hero">
-    <h1>Point it at your app.<br><span class="grad">Prove the bugs others miss.</span></h1>
-    <p>QAX models your running app, runs deterministic exploit probes + a browser tour,
-       and reports only what it can <b>prove</b> — confirmed issues separated from
-       low-confidence leads. No crying wolf.</p>
+    <h1>Generate the tests.<br><span class="grad">Prove the bugs. Ship to Jira.</span></h1>
+    <p>One platform for software quality: QAX <b>generates test cases</b> from your stories or code,
+       <b>scans your running app</b> and proves the bugs others miss, and pushes both into
+       <b>Jira / Xray</b>. Two ways in — the same workflow.</p>
   </section>
 
-  <div class="panel">
+  <div class="modes">
+    <button class="mode active" id="mode-scan" onclick="setMode('scan')">
+      <div class="mt">🛡️ Scan &amp; prove bugs</div>
+      <div class="md">Point at a running app → confirmed vulnerabilities, with evidence and fixes.</div>
+    </button>
+    <button class="mode" id="mode-gen" onclick="setMode('gen')">
+      <div class="mt">🧪 Generate test cases</div>
+      <div class="md">From a user story or source code → structured, reviewable test cases.</div>
+    </button>
+  </div>
+
+  <div class="panel" id="panel-scan">
     <div class="row">
       <div class="field">
         <label for="url">Running app URL</label>
@@ -164,6 +197,22 @@
     <div class="hint">Quick scan — deterministic probes + coverage, ~seconds and near-free. The app must be running and reachable.</div>
   </div>
 
+  <div class="panel" id="panel-gen" style="display:none">
+    <div class="field">
+      <label for="story">User story / acceptance criteria</label>
+      <textarea id="story" rows="5" placeholder="As a user, I can reset my password via an emailed link that expires in 15 minutes. The link works once; an expired or reused link shows an error."></textarea>
+    </div>
+    <details class="adv">
+      <summary>Or paste source code instead (optional)</summary>
+      <div class="field" style="margin-top:12px"><label for="code">Source code</label>
+        <textarea id="code" rows="6" placeholder="// paste a function, endpoint, or module"></textarea></div>
+    </details>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn" id="gengo" onclick="runGenerate()">Generate test cases</button>
+    </div>
+    <div class="hint">Turns requirements or code into structured test cases you can review, run, and push to Jira/Xray.</div>
+  </div>
+
   <div id="scanning">
     <div class="live-head"><span class="radar"></span><span id="scanmsg">Scanning…</span></div>
     <div class="live" id="live"></div>
@@ -181,6 +230,12 @@
     <div id="housekeeping"></div>
     <div id="tour"></div>
     <div id="findings"></div>
+  </section>
+
+  <section id="genresults">
+    <div class="sec-title">Generated test cases <span id="gencount" style="color:var(--txt)"></span></div>
+    <div id="tests"></div>
+    <div class="hint" id="genjira" style="margin-top:14px"></div>
   </section>
 </div>
 
@@ -201,9 +256,67 @@ function logLine(step,status,detail){
     +'<span>'+esc(detail||step)+'</span>';
   const box=$('live'); box.appendChild(el); box.scrollTop=box.scrollHeight;
 }
+function setMode(m){
+  const scan = m==='scan';
+  $('panel-scan').style.display = scan?'':'none';
+  $('panel-gen').style.display = scan?'none':'';
+  $('mode-scan').classList.toggle('active', scan);
+  $('mode-gen').classList.toggle('active', !scan);
+  $('results').style.display='none'; $('genresults').style.display='none';
+  $('scanning').style.display='none'; $('err').style.display='none';
+}
+function showErr(m){ $('err').textContent=m; $('err').style.display='block'; }
+
+async function runGenerate(){
+  const story=$('story').value.trim(), code=$('code').value.trim();
+  if(!story && !code){ showErr('Enter a user story or paste some source code.'); return; }
+  $('err').style.display='none'; $('results').style.display='none'; $('genresults').style.display='none';
+  const btn=$('gengo'); btn.disabled=true; const orig=btn.textContent; btn.textContent='Generating…';
+  $('scanning').style.display='block'; $('scanmsg').textContent='Generating test cases…'; $('live').innerHTML='';
+  logLine('generate','start','asking QAX to draft test cases from your input');
+  try{
+    const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({story,code})});
+    const d=await r.json();
+    if(d.error){ showErr(d.error); }
+    else { logLine('generate','ok',(d.tests||[]).length+' test case(s) drafted'); renderTests(d.tests||[]); }
+  }catch(e){ showErr('Generation failed: '+e); }
+  finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; }
+}
+function renderTests(cases){
+  $('genresults').style.display='block';
+  $('gencount').textContent = cases.length ? '· '+cases.length : '';
+  if(!cases.length){ $('tests').innerHTML='<div class="hint">No test cases generated — try a more specific story.</div>'; $('genjira').innerHTML=''; return; }
+  $('tests').innerHTML = cases.map(tc=>{
+    const raw=(tc.steps||tc.test_steps||tc.automation_steps||[]);
+    const steps=Array.isArray(raw)?raw:[];
+    const fmtStep=s=>{
+      if(typeof s==='string') return s;
+      if(s.action||s.step||s.description) return s.action||s.step||s.description;
+      const act=(s.playwright_action||'').replace(/_/g,' ');
+      const sel=String(s.selector_key||s.selector||'').replace(/^TODO_/,'');
+      const val=s.value?(' → "'+s.value+'"'):'';
+      const asrt=(s.assertion_type&&!act.includes('fill')&&!act.includes('navigat'))?(' ['+s.assertion_type+(s.assertion_value?(' '+s.assertion_value):'')+']'):'';
+      return ((act+' '+sel).trim()+val+asrt).trim()||JSON.stringify(s);
+    };
+    const stepsH = steps.length ? '<ol class="steps">'+steps.map(s=>'<li>'+esc(fmtStep(s))+'</li>').join('')+'</ol>' : '';
+    const exp = tc.expected_result||tc.expected||tc.expectedResult||'';
+    const pri = tc.priority||tc.severity||'';
+    const rev = tc.needs_review||tc.needsReview;
+    return '<div class="tc"><div class="th"><span class="tt">'+esc(tc.title||tc.name||'Test case')+'</span>'
+      +(pri?'<span class="pri">'+esc(pri)+'</span>':'')
+      +(rev?'<span class="rev">needs review</span>':'')+'</div>'
+      +stepsH
+      +(exp?'<div class="exp"><div class="k">Expected</div>'+esc(exp)+'</div>':'')
+      +'</div>';
+  }).join('');
+  $('genjira').innerHTML = '🔗 Next: push these to <b>Jira / Xray</b> — the export adapters already exist; wiring the button is the next step.';
+}
+
 function runScan(){
   const url=$('url').value.trim();
   if(!url){ $('url').focus(); return; }
+  $('genresults').style.display='none';
   $('go').disabled=true;
   $('err').style.display='none'; $('results').style.display='none';
   $('live').innerHTML=''; $('scanmsg').textContent='Scanning '+url+' …';
