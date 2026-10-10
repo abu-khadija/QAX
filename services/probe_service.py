@@ -69,7 +69,8 @@ class ProbeService:
         if not base_url or not str(base_url).strip():
             return ProbeResult(error="No base_url to probe against.")
 
-        from execution.probes import (auth_error_probe, bola_probe, cookie_flags_probe, cors_probe,
+        from execution.probes import (_resolve_token, auth_error_probe, bola_probe,
+                                       cookie_flags_probe, cors_probe,
                                        crash_fuzz_probe, debug_disclosure_probe, error_handling_probe,
                                        excessive_data_probe, forge_jwt_probe, injection_probe,
                                        jwt_flaws_probe, malformed_input_probe, mass_assignment_probe,
@@ -82,8 +83,26 @@ class ProbeService:
         # One shared HTTP session for all probes: reuses the connection pool, and carries
         # the registry of disposable records QAX creates so we can clean them up after.
         import requests
+        import uuid
         shared = requests.Session()
         shared._qax_created = []  # probes append every test record they write here
+
+        # Resolve ONE shared "utility" user for the read-only probes that only need a
+        # valid login (sqli, injection, path-traversal, ...), so they don't each
+        # self-register. Probes that test the registration flow itself or need isolated
+        # users (BOLA's two users, mass-assignment, rate-limit, ...) still get `auth`
+        # unchanged and create their own. Only self-registering apps need this; when the
+        # caller supplied a token we pass it straight through.
+        read_auth = auth
+        if not (auth or {}).get("token"):
+            try:
+                from core.auth_recipe import derive_auth_recipe
+                util = _resolve_token(shared, base_url.rstrip("/"), derive_auth_recipe(model),
+                                      model, f"qax_util_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+                if util:
+                    read_auth = {**(auth or {}), "token": util}
+            except Exception as exc:
+                logger.error("utility token resolve failed: %s", exc)
 
         # Forge-JWT — only when the model found a hardcoded secret to forge with.
         if model.exposed_secrets:
@@ -102,31 +121,31 @@ class ProbeService:
 
         # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
-            findings.extend(sqli_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(sqli_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("sqli probe failed: %s", exc)
 
         # Injection via query params and request bodies (same control).
         try:
-            findings.extend(injection_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(injection_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("injection probe failed: %s", exc)
 
         # NoSQL (operator) injection on write endpoints whose body feeds a query.
         try:
-            findings.extend(nosql_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(nosql_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("nosql probe failed: %s", exc)
 
         # Malformed input → unhandled 500 / debug disclosure on write endpoints.
         try:
-            findings.extend(malformed_input_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(malformed_input_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("malformed_input probe failed: %s", exc)
 
         # Path traversal / local file read via a path param (proven by an OS-file signature).
         try:
-            findings.extend(path_traversal_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(path_traversal_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("path_traversal probe failed: %s", exc)
 
@@ -156,7 +175,7 @@ class ProbeService:
 
         # Excessive data exposure — credentials/secrets returned in a response body.
         try:
-            findings.extend(excessive_data_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(excessive_data_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("excessive_data probe failed: %s", exc)
 
@@ -202,7 +221,7 @@ class ProbeService:
         # Persistence — a field saved with a 2xx "success" that is blank on read-back
         # (silent data loss, the QA field manual's highest-value class).
         try:
-            findings.extend(persistence_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(persistence_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("persistence probe failed: %s", exc)
 
@@ -214,13 +233,13 @@ class ProbeService:
 
         # Search robustness — a search/filter param that 405/5xx's on an ordinary character.
         try:
-            findings.extend(search_robustness_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(search_robustness_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("search_robustness probe failed: %s", exc)
 
         # Unpaginated list — a collection that returns an unbounded array (no pagination).
         try:
-            findings.extend(unpaginated_list_probe(model, base_url, session=shared, auth=auth))
+            findings.extend(unpaginated_list_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("unpaginated_list probe failed: %s", exc)
 
