@@ -122,6 +122,14 @@ _MAP = {
         "fix": "Redirect only to an allow-list of known internal paths/hosts; reject absolute "
                "external URLs, or map a redirect key to a server-side URL table.",
     },
+    "xss": {
+        "why": "User input is reflected into the page without encoding, so an attacker can "
+               "run script in victims' browsers — session theft, account takeover, and "
+               "actions performed as the victim.",
+        "fix": "Context-aware output encoding (HTML/attribute/JS) on every reflected value, "
+               "a strict Content-Security-Policy, and a template engine that auto-escapes; "
+               "never build HTML by string concatenation of raw input.",
+    },
     "ssrf": {
         "why": "The server fetches a URL supplied by the client, so an attacker can make "
                "it reach internal-only services, cloud metadata endpoints (credentials), "

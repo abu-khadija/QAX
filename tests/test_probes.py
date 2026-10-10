@@ -689,6 +689,36 @@ def test_command_injection_quiet_without_cmd_params():
     assert command_injection_probe(model, "http://x", session=_CmdInjectionSession()) == []
 
 
+class _XssSession:
+    """Reflects the 'name' param into HTML. `encode=True` HTML-encodes it (safe)."""
+    def __init__(self, encode=False, html=True):
+        self.encode = encode
+        self.html = html
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        v = str((params or {}).get("name", ""))
+        if self.encode:
+            v = v.replace("<", "&lt;").replace(">", "&gt;")
+        ct = "text/html; charset=utf-8" if self.html else "application/json"
+        return MagicMock(status_code=200, text=f"<h1>Hello {v}</h1>", headers={"Content-Type": ct})
+
+
+def test_xss_reflected_unencoded_html():
+    from execution.probes import xss_probe
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/xss", "query_params": ["name"], "auth_required": False}])
+    out = xss_probe(model, "http://x", session=_XssSession(encode=False, html=True))
+    assert len(out) == 1 and out[0].probe == "xss" and out[0].severity == "P2"
+
+
+def test_xss_quiet_when_encoded_or_not_html():
+    from execution.probes import xss_probe
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/xss", "query_params": ["name"], "auth_required": False}])
+    assert xss_probe(model, "http://x", session=_XssSession(encode=True, html=True)) == []   # encoded
+    assert xss_probe(model, "http://x", session=_XssSession(encode=False, html=False)) == []  # JSON
+
+
 class _SsrfSession:
     """A server that FETCHES the URL in the 'q' param (vulnerable) — hits QAX's listener."""
     def __init__(self, vulnerable=True):

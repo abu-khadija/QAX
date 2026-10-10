@@ -2145,3 +2145,53 @@ def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
         except Exception:
             pass
     return out
+
+
+# ── reflected XSS ─────────────────────────────────────────────────────────────
+def xss_probe(model, base_url: str, *, session: requests.Session | None = None,
+              auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Reflected cross-site scripting (OWASP). Inject a unique markup token `<qax…>` into
+    GET query params; confirm ONLY when the EXACT markup comes back UNENCODED in an
+    HTML response (Content-Type: text/html). An app that encodes output returns
+    `&lt;qax…&gt;` (no match) and a JSON API isn't HTML, so this is a proven reflection
+    into an HTML sink — not a guess. P2. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    cands = [e for e in getattr(model, "endpoints", [])
+             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+             and (e.get("query_params"))]
+    token = None
+    if any(e.get("auth_required") for e in cands):
+        token = _resolve_token(sess, base, recipe, model, f"xss_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    seen: set = set()
+    for e in cands[:8]:
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
+        for qp in list(e.get("query_params") or [])[:3]:
+            if (path, qp) in seen:
+                continue
+            seen.add((path, qp))
+            marker = f"<qax{uuid.uuid4().hex[:10]}>"
+            try:
+                r = sess.get(f"{base}{path}", params={qp: marker}, headers=headers, timeout=15)
+            except Exception:
+                continue
+            ct = str(r.headers.get("Content-Type", "")).lower()
+            if "html" in ct and marker in (r.text or ""):
+                out.append(ProbeFinding(
+                    probe="xss",
+                    title=f"Reflected XSS via query param '{qp}' on {e.get('path')}",
+                    exploited=True, severity="P2",
+                    evidence=(f"GET {e.get('path')} reflected the markup {marker} verbatim (unencoded) "
+                              f"into an HTML response. Script in '{qp}' would execute in the victim's "
+                              f"browser — the output is not HTML-encoded."),
+                    target=str(e.get("path", ""))))
+                break   # one proven param per endpoint is enough
+    return out

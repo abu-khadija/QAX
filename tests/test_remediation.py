@@ -8,7 +8,7 @@ def test_probe_findings_get_guidance():
                   "malformed-input", "debug-disclosure", "cookie-flags", "error-handling",
                   "path-traversal", "cors", "security-headers",
                   "mass-assignment", "open-redirect", "rate-limit", "command-injection",
-                  "ssrf"):
+                  "ssrf", "xss"):
         r = remediation_for({"probe": probe, "title": "x"})
         assert r.get("why") and r.get("fix"), probe
 
