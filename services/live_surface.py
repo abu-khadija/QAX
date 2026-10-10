@@ -19,11 +19,15 @@ to the code-derived model.
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urlparse
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Prefixes a REST API is commonly mounted under when the code-derived paths omit it.
+_BASE_PREFIX_CANDIDATES = ("/api", "/api/v1", "/v1", "/api/v2", "/v2", "/rest")
 
 # Common locations an API serves its OpenAPI/Swagger spec.
 _SPEC_PATHS = [
@@ -196,3 +200,68 @@ def ground_endpoints(base_url: str, *, session: requests.Session | None = None) 
     eps = endpoints_from_spec(spec)
     logger.info("live_surface: grounded %d endpoint(s) from the running app's spec", len(eps))
     return eps
+
+
+def _route_exists(base: str, path: str, sess: requests.Session) -> bool:
+    """
+    True only when a GET to `path` gets a DEFINITIVE "a handler ran" response.
+    404 means no route. 401/403 are ambiguous — some frameworks (e.g. Spring
+    Security) answer 401 for unmatched paths too — so they are NOT counted as
+    evidence, which would otherwise make a wrong prefix look valid. A real handler
+    answers 2xx/3xx or a 4xx/5xx other than 401/403/404.
+    """
+    probe = re.sub(r"\{[^}]+\}|:([A-Za-z_]+)", "1", path)   # fill path params/{id}/:slug
+    try:
+        r = sess.get(base + probe, timeout=10, allow_redirects=False)
+    except Exception:
+        return False
+    return getattr(r, "status_code", 404) not in (401, 403, 404)
+
+
+def recover_base_path(model, base_url: str, *, session: requests.Session | None = None) -> str:
+    """
+    Grounding fallback for apps with no OpenAPI: the code model can omit the base path
+    the API is really mounted under (e.g. it extracts `/users` but the live route is
+    `/api/users`). We GET a few modelled paths as-is and under common prefixes; if a
+    prefix resolves routes that the bare paths do NOT, we prepend it to every endpoint.
+
+    Only rewrites when a prefix is STRICTLY better than the paths as they are, so a
+    correctly-modelled app (paths already resolve) is never touched. Returns the prefix
+    applied ("" when none). Best-effort, GET-only (no side effects), never raises.
+    """
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict) and e.get("path")]
+    if not eps:
+        return ""
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    # A small, de-duplicated sample of paths to vote with.
+    sample, seen = [], set()
+    for e in eps:
+        p = str(e["path"])
+        if p not in seen:
+            seen.add(p)
+            sample.append(p)
+        if len(sample) >= 5:
+            break
+
+    def score(prefix: str) -> int:
+        return sum(1 for p in sample if _route_exists(base, prefix + p, sess))
+
+    as_is = score("")
+    best_prefix, best_score = "", as_is
+    for pref in _BASE_PREFIX_CANDIDATES:
+        # don't double-apply a prefix the paths already carry
+        if all(str(e["path"]).startswith(pref + "/") for e in eps):
+            continue
+        s = score(pref)
+        if s > best_score:
+            best_prefix, best_score = pref, s
+
+    if best_prefix and best_score > as_is:
+        for e in eps:
+            p = str(e["path"])
+            if not p.startswith(best_prefix + "/"):
+                e["path"] = best_prefix + p
+        logger.info("live_surface: recovered base path %s (%d/%d routes resolved vs %d)",
+                    best_prefix, best_score, len(sample), as_is)
+    return best_prefix

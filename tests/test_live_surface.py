@@ -7,7 +7,62 @@ Run with:
     pytest tests/test_live_surface.py -v
 """
 
-from services.live_surface import _base_path, _join_base, endpoints_from_spec
+from unittest.mock import MagicMock
+
+from services.live_surface import _base_path, _join_base, endpoints_from_spec, recover_base_path
+from services.results import AppModel
+
+
+# ── base-path recovery (no OpenAPI) ──────────────────────────────────────────
+
+class _PrefixSession:
+    """A live app mounted under `mount` (e.g. /api): only those routes are not 404."""
+    def __init__(self, mount):
+        self.mount = mount
+
+    def get(self, url, timeout=None, allow_redirects=None):
+        path = url.split("://", 1)[-1].split("/", 1)[-1]
+        path = "/" + path if not path.startswith("/") else path
+        exists = path.startswith(self.mount + "/") or path == self.mount
+        # 200 = a handler ran (definitive). 401/403/404 would NOT count as existence.
+        return MagicMock(status_code=200 if exists else 404)
+
+
+def test_recover_base_path_prepends_missing_prefix():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/users"},
+        {"method": "GET", "path": "/articles/{slug}"},
+    ])
+    pref = recover_base_path(model, "http://x", session=_PrefixSession("/api"))
+    assert pref == "/api"
+    assert {e["path"] for e in model.endpoints} == {"/api/users", "/api/articles/{slug}"}
+
+
+def test_recover_base_path_noop_when_paths_already_resolve():
+    model = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/users/v1"}])
+    pref = recover_base_path(model, "http://x", session=_PrefixSession(""))  # root mount
+    # "" mount means every path resolves as-is → no prefix applied
+    assert pref == "" and model.endpoints[0]["path"] == "/users/v1"
+
+
+class _SpringLikeSession:
+    """Real routes live at root (200); the security filter answers 401 for anything
+    under /api (and for unmatched paths). 401 must NOT be read as 'route exists'."""
+    def get(self, url, timeout=None, allow_redirects=None):
+        path = "/" + url.split("://", 1)[-1].split("/", 1)[-1]
+        if path.startswith("/api/"):
+            return MagicMock(status_code=401)
+        if path in ("/articles", "/tags", "/articles/1"):
+            return MagicMock(status_code=200)
+        return MagicMock(status_code=404)
+
+
+def test_recover_base_path_not_fooled_by_401_on_unmatched():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/articles"}, {"method": "GET", "path": "/tags"}])
+    pref = recover_base_path(model, "http://x", session=_SpringLikeSession())
+    assert pref == ""                                      # /api 401s are not evidence
+    assert {e["path"] for e in model.endpoints} == {"/articles", "/tags"}
 
 
 # ── base-path extraction ─────────────────────────────────────────────────────

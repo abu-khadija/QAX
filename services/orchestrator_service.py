@@ -110,12 +110,18 @@ class OrchestratorService:
         #     the source of truth; the code only says WHAT is risky). The code model
         #     keeps config/secrets/risks; the live OpenAPI spec supplies exact paths.
         try:
-            from services.live_surface import ground_endpoints
+            from services.live_surface import ground_endpoints, recover_base_path
             live = ground_endpoints(base_url)
             if live:
                 model.endpoints = live
                 prog.emit("orchestrate", "info",
                           f"grounded {len(live)} endpoint(s) from the live app spec")
+            else:
+                # No OpenAPI: the code-derived paths may miss the base path the API is
+                # mounted under (e.g. /users vs /api/users). Recover it from the live app.
+                pref = recover_base_path(model, base_url)
+                if pref:
+                    prog.emit("orchestrate", "info", f"recovered base path '{pref}' from the live app")
         except Exception as exc:
             logger.warning("live endpoint grounding failed: %s", exc)
 

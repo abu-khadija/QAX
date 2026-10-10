@@ -227,6 +227,24 @@ _ID_KW = ("email", "username", "login", "phone", "mobile", "msisdn", "user")
 _SECRET_KW = ("password", "passwd", "pwd", "secret", "pin", "pass")
 
 
+_RES_SKIP_SEGS = {"api", "rest", "register", "signup", "sign-up", "sign_up", "login",
+                  "signin", "sign-in", "session", "sessions", "token", "auth", "authenticate"}
+
+
+def _resource_key(path: str) -> str | None:
+    """
+    The singular resource name an API likely wraps a body under, from the endpoint
+    path: /api/users -> "user", /users/v1/register -> "user". Skips version/action
+    segments. Used to recover from a model that missed a wrapper like {"user":{...}}.
+    """
+    for seg in reversed([p for p in str(path).strip("/").split("/") if p]):
+        s = seg.lower()
+        if "{" in seg or ":" in seg or s in _RES_SKIP_SEGS or re.fullmatch(r"v\d+", s):
+            continue
+        return s[:-1] if s.endswith("s") and len(s) > 1 else s
+    return None
+
+
 def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     """
     Register `identity` then log in and return a bearer token (or None).
@@ -235,13 +253,28 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     register id field — because an app can register with one identifier (email) and
     log in with another (username). The value reused is whatever the register body
     put in that same field, so the two always match.
+
+    If the modelled register body is rejected (4xx), we retry once with it WRAPPED
+    under the resource name (e.g. {"user": {...}}) — recovering on APIs whose wrapper
+    the source model didn't capture — and apply the same wrapper to the login body.
     """
     from core.auth_recipe import field_names, nest_body, register_body
     reg_body = register_body(recipe, model, identity, password=password)
+    reg_url = f"{base}{recipe['register_path']}"
+    wrapper = None
     try:
-        sess.post(f"{base}{recipe['register_path']}", json=reg_body, timeout=15)
+        rr = sess.post(reg_url, json=reg_body, timeout=15)
     except Exception:
         return None
+    if getattr(rr, "status_code", 500) >= 400:
+        w = _resource_key(recipe["register_path"])
+        if w and not (isinstance(reg_body, dict) and w in reg_body):
+            try:
+                rr2 = sess.post(reg_url, json={w: reg_body}, timeout=15)
+                if getattr(rr2, "status_code", 500) < 400:
+                    wrapper = w
+            except Exception:
+                pass
 
     login_fields: list[str] = []
     for e in getattr(model, "endpoints", []):
@@ -254,11 +287,15 @@ def _auth_token(sess, base, recipe, model, identity, password="Secret123!"):
     id_value = reg_body.get(id_field, identity)
     login_url = f"{base}{recipe['login_path']}"
 
+    def _wrap(bdy):
+        return {wrapper: bdy} if (wrapper and not (isinstance(bdy, dict) and wrapper in bdy)) else bdy
+
     tok = None
     # 1) JSON login (FastAPI/Flask-RESTX/connexion style). nest_body wraps dotted
-    #    fields so this also works on APIs that wrap the body (e.g. {"user":{...}}).
+    #    fields, and _wrap applies the resource wrapper recovered at registration,
+    #    so this works on APIs that wrap the body (e.g. {"user":{...}}).
     try:
-        lr = sess.post(login_url, json=nest_body({id_field: id_value, sec_field: password}), timeout=15)
+        lr = sess.post(login_url, json=_wrap(nest_body({id_field: id_value, sec_field: password})), timeout=15)
         tok = _extract_token(lr, recipe)
     except Exception:
         tok = None
