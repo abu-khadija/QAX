@@ -314,6 +314,9 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
         return auth["token_b"]
     if slot == "primary" and auth.get("token"):
         return auth["token"]
+    # NB: each call self-registers a FRESH user on purpose — do not cache/share the
+    # token across probes. BOLA's two-user control needs genuinely distinct users, and
+    # sharing one "primary" user across probes defeats it (B would read its own object).
     return _auth_token(sess, base, recipe, model, identity)
 
 
@@ -1649,6 +1652,9 @@ def mass_assignment_probe(model, base_url: str, *, session: requests.Session | N
 _REDIRECT_PARAMS = ("next", "url", "redirect", "redirect_uri", "redirect_url", "return",
                     "returnTo", "return_to", "dest", "destination", "continue", "to", "goto")
 _REDIRECT_EVIL = "https://qax-redirect.example/evil"
+# Endpoint-path hints where a redirect target is commonly taken from a parameter.
+_REDIRECT_EP_KW = ("login", "logout", "redirect", "oauth", "sso", "auth", "continue",
+                   "return", "callback", "next", "goto", "signin", "signout")
 
 
 def open_redirect_probe(model, base_url: str, *, session: requests.Session | None = None,
@@ -1666,11 +1672,16 @@ def open_redirect_probe(model, base_url: str, *, session: requests.Session | Non
     out: list[ProbeFinding] = []
     evil_host = urlparse(_REDIRECT_EVIL).netloc
 
+    # Open redirects almost always live on auth/navigation endpoints, so test the
+    # root plus GET endpoints whose path hints at a redirect — not every GET × every
+    # param (which would explode on a large API). Capped for safety.
     targets = ["/"]
     for e in getattr(model, "endpoints", []):
         if (isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
-                and "{" not in str(e.get("path", ""))):
+                and "{" not in str(e.get("path", ""))
+                and any(k in str(e.get("path", "")).lower() for k in _REDIRECT_EP_KW)):
             targets.append(str(e.get("path", "")))
+    targets = targets[:6]
     seen_target: set = set()
     for path in targets:
         if path in seen_target:

@@ -78,11 +78,16 @@ class ProbeService:
 
         prog.emit("probe", "start", "running active probes")
         findings = []
+        # One shared HTTP session for all probes: reuses the connection pool and lets
+        # self-registered auth tokens be cached once and reused, instead of each probe
+        # registering its own user (dozens of redundant register/login round-trips).
+        import requests
+        shared = requests.Session()
 
         # Forge-JWT — only when the model found a hardcoded secret to forge with.
         if model.exposed_secrets:
             try:
-                f = forge_jwt_probe(model, base_url)
+                f = forge_jwt_probe(model, base_url, session=shared)
                 if f is not None:
                     findings.append(f)
             except Exception as exc:
@@ -90,67 +95,67 @@ class ProbeService:
 
         # JWT validation flaws (alg=none, signature not verified) — needs a token.
         try:
-            findings.extend(jwt_flaws_probe(model, base_url, auth=auth))
+            findings.extend(jwt_flaws_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("jwt_flaws probe failed: %s", exc)
 
         # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
-            findings.extend(sqli_probe(model, base_url, auth=auth))
+            findings.extend(sqli_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("sqli probe failed: %s", exc)
 
         # Injection via query params and request bodies (same control).
         try:
-            findings.extend(injection_probe(model, base_url, auth=auth))
+            findings.extend(injection_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("injection probe failed: %s", exc)
 
         # NoSQL (operator) injection on write endpoints whose body feeds a query.
         try:
-            findings.extend(nosql_probe(model, base_url, auth=auth))
+            findings.extend(nosql_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("nosql probe failed: %s", exc)
 
         # Malformed input → unhandled 500 / debug disclosure on write endpoints.
         try:
-            findings.extend(malformed_input_probe(model, base_url, auth=auth))
+            findings.extend(malformed_input_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("malformed_input probe failed: %s", exc)
 
         # Path traversal / local file read via a path param (proven by an OS-file signature).
         try:
-            findings.extend(path_traversal_probe(model, base_url, auth=auth))
+            findings.extend(path_traversal_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("path_traversal probe failed: %s", exc)
 
         # Mass assignment — registration binds a client-supplied privileged field.
         try:
-            findings.extend(mass_assignment_probe(model, base_url, auth=auth))
+            findings.extend(mass_assignment_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("mass_assignment probe failed: %s", exc)
 
         # Open redirect — a redirect param bounces to an attacker-controlled host.
         try:
-            findings.extend(open_redirect_probe(model, base_url, auth=auth))
+            findings.extend(open_redirect_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("open_redirect probe failed: %s", exc)
 
         # Rate limiting — no brute-force throttling/lockout on login (P3 lead).
         try:
-            findings.extend(rate_limit_probe(model, base_url, auth=auth))
+            findings.extend(rate_limit_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("rate_limit probe failed: %s", exc)
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
-            findings.extend(bola_probe(model, base_url, auth=auth))
+            findings.extend(bola_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("bola probe failed: %s", exc)
 
         # Excessive data exposure — credentials/secrets returned in a response body.
         try:
-            findings.extend(excessive_data_probe(model, base_url, auth=auth))
+            findings.extend(excessive_data_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("excessive_data probe failed: %s", exc)
 
@@ -159,62 +164,62 @@ class ProbeService:
         # a static server's 501 as a crash).
         if getattr(model, "endpoints", None):
             try:
-                findings.extend(crash_fuzz_probe(model, base_url))
+                findings.extend(crash_fuzz_probe(model, base_url, session=shared))
             except Exception as exc:
                 logger.error("crash_fuzz probe failed: %s", exc)
 
         # Error-handling — unknown routes should 404, not 5xx (control: a nonsense path).
         try:
-            findings.extend(error_handling_probe(model, base_url))
+            findings.extend(error_handling_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("error_handling probe failed: %s", exc)
 
         # Cookie flags — a login cookie missing HttpOnly/Secure (no-ops on bearer APIs).
         try:
-            findings.extend(cookie_flags_probe(model, base_url))
+            findings.extend(cookie_flags_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("cookie_flags probe failed: %s", exc)
 
         # Debug disclosure — an interactive debugger / stack trace on an error.
         try:
-            findings.extend(debug_disclosure_probe(model, base_url))
+            findings.extend(debug_disclosure_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("debug_disclosure probe failed: %s", exc)
 
         # CORS — does the app reflect an arbitrary Origin (trusts any site)?
         try:
-            findings.extend(cors_probe(model, base_url, auth=auth))
+            findings.extend(cors_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("cors probe failed: %s", exc)
 
         # Response security headers (HSTS / clickjacking / MIME-sniff / CSP).
         try:
-            findings.extend(security_headers_probe(model, base_url))
+            findings.extend(security_headers_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("security_headers probe failed: %s", exc)
 
         # Persistence — a field saved with a 2xx "success" that is blank on read-back
         # (silent data loss, the QA field manual's highest-value class).
         try:
-            findings.extend(persistence_probe(model, base_url, auth=auth))
+            findings.extend(persistence_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("persistence probe failed: %s", exc)
 
         # Auth error handling — a forbidden request that 5xx's instead of a clean 401/403.
         try:
-            findings.extend(auth_error_probe(model, base_url, auth=auth))
+            findings.extend(auth_error_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("auth_error probe failed: %s", exc)
 
         # Search robustness — a search/filter param that 405/5xx's on an ordinary character.
         try:
-            findings.extend(search_robustness_probe(model, base_url, auth=auth))
+            findings.extend(search_robustness_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("search_robustness probe failed: %s", exc)
 
         # Unpaginated list — a collection that returns an unbounded array (no pagination).
         try:
-            findings.extend(unpaginated_list_probe(model, base_url, auth=auth))
+            findings.extend(unpaginated_list_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("unpaginated_list probe failed: %s", exc)
 
