@@ -130,6 +130,14 @@ _MAP = {
                "a strict Content-Security-Policy, and a template engine that auto-escapes; "
                "never build HTML by string concatenation of raw input.",
     },
+    "stored-xss": {
+        "why": "User input is stored and later rendered to OTHER users without encoding, so "
+               "injected script runs in every viewer's browser — the most damaging XSS "
+               "(mass session theft, wormable account takeover).",
+        "fix": "HTML-encode stored values on output (context-aware), add a strict "
+               "Content-Security-Policy, and sanitise rich text server-side with a vetted "
+               "allow-list library; never mark stored input as safe/raw HTML.",
+    },
     "ssrf": {
         "why": "The server fetches a URL supplied by the client, so an attacker can make "
                "it reach internal-only services, cloud metadata endpoints (credentials), "

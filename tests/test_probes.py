@@ -747,6 +747,42 @@ def test_xss_quiet_when_encoded_or_not_html():
     assert xss_probe(model, "http://x", session=_XssSession(encode=False, html=False)) == []  # JSON
 
 
+class _StoredXssSession:
+    """Stores 'content' raw and renders it in HTML on read; 'username' is escaped (safe)."""
+    def __init__(self, escape=False):
+        self.escape = escape
+        self.store = []
+
+    def request(self, method, url, data=None, json=None, headers=None, timeout=None):
+        payload = data or json or {}
+        c = str(payload.get("content", ""))
+        if c:
+            self.store.append(c.replace("<", "&lt;").replace(">", "&gt;") if self.escape else c)
+        return MagicMock(status_code=200, text="")
+
+    def get(self, url, headers=None, timeout=None):
+        html = "<table>" + "".join(f"<td>{c}</td>" for c in self.store) + "</table>"
+        return MagicMock(status_code=200, text=html, headers={"Content-Type": "text/html"})
+
+
+def test_stored_xss_write_then_read():
+    from execution.probes import stored_xss_probe
+    model = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/api/vul/addcomments", "request_fields": ["username", "content"], "auth_required": False},
+        {"method": "GET", "path": "/api/vul/getcomments", "auth_required": False}])
+    out = stored_xss_probe(model, "http://x", session=_StoredXssSession(escape=False))
+    assert len(out) == 1 and out[0].probe == "stored-xss" and out[0].severity == "P1"
+    assert "content" in out[0].title
+
+
+def test_stored_xss_quiet_when_encoded():
+    from execution.probes import stored_xss_probe
+    model = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/api/vul/addcomments", "request_fields": ["content"], "auth_required": False},
+        {"method": "GET", "path": "/api/vul/getcomments", "auth_required": False}])
+    assert stored_xss_probe(model, "http://x", session=_StoredXssSession(escape=True)) == []
+
+
 class _SsrfSession:
     """A server that FETCHES the URL in the 'q' param (vulnerable) — hits QAX's listener."""
     def __init__(self, vulnerable=True):

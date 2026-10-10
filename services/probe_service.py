@@ -169,6 +169,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("xss probe failed: %s", exc)
 
+        # Stored XSS — markup written then rendered unencoded on read-back (P1).
+        try:
+            from execution.probes import stored_xss_probe
+            findings.extend(stored_xss_probe(model, base_url, session=shared, auth=read_auth))
+        except Exception as exc:
+            logger.error("stored_xss probe failed: %s", exc)
+
         # Mass assignment — registration binds a client-supplied privileged field.
         try:
             findings.extend(mass_assignment_probe(model, base_url, session=shared, auth=auth))

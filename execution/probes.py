@@ -2209,3 +2209,84 @@ def xss_probe(model, base_url: str, *, session: requests.Session | None = None,
                     target=str(e.get("path", ""))))
                 break   # one proven param per endpoint is enough
     return out
+
+
+# ── stored XSS ────────────────────────────────────────────────────────────────
+# Body fields that typically hold displayed free text.
+_STORED_TEXT_KW = ("content", "comment", "message", "body", "text", "description", "desc",
+                   "title", "bio", "review", "post", "note", "caption", "subject", "name")
+
+
+def stored_xss_probe(model, base_url: str, *, session: requests.Session | None = None,
+                     auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Stored (persistent) XSS (OWASP). Write a unique markup token `<qax…>` into a
+    free-text field of a create endpoint, then read the collection back; confirm ONLY
+    when the exact markup returns UNENCODED in an HTML response. Stored XSS is worse
+    than reflected — it persists and fires for every viewer — so this is P1. The unique
+    token written then read back is the control (near-zero false positives).
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import field_names, nest_body, derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+
+    writes = []
+    for e in eps:
+        if str(e.get("method", "")).upper() in ("POST", "PUT", "PATCH"):
+            fields = field_names(e.get("request_fields"))
+            # Test EACH text-ish field separately — some (e.g. username) are escaped while
+            # another (e.g. content) is rendered raw; picking only the first would miss it.
+            text_fields = [f for f in fields if any(k in str(f).lower() for k in _STORED_TEXT_KW)]
+            if text_fields:
+                writes.append((e, text_fields[:3], fields))
+    reads = [e for e in eps if str(e.get("method", "")).upper() == "GET"]
+    if not writes or not reads:
+        return out
+
+    token = None
+    if any(e.get("auth_required") for e, _, _ in writes) or any(e.get("auth_required") for e in reads):
+        token = _resolve_token(sess, base, recipe, model, f"sxss_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    def _read_has(marker):
+        for re_ in reads[:8]:
+            rpath = re.sub(r"\{[^}]+\}", "1", str(re_.get("path", "")))
+            rheaders = _auth_headers(token, auth) if re_.get("auth_required") else {}
+            try:
+                r = sess.get(f"{base}{rpath}", headers=rheaders, timeout=15)
+            except Exception:
+                continue
+            if "html" in str(r.headers.get("Content-Type", "")).lower() and marker in (r.text or ""):
+                return re_
+        return None
+
+    for we, text_fields, fields in writes[:4]:
+        wpath = re.sub(r"\{[^}]+\}", "1", str(we.get("path", "")))
+        method = str(we.get("method", "POST")).upper()
+        wheaders = _auth_headers(token, auth) if we.get("auth_required") else {}
+        done = False
+        for field in text_fields:
+            marker = f"<qax{uuid.uuid4().hex[:10]}>"
+            body = {f: (marker if f == field else "qax") for f in fields} or {field: marker}
+            for kw in ({"data": body}, {"json": nest_body(body)}):  # form or JSON
+                try:
+                    sess.request(method, f"{base}{wpath}", headers=wheaders, timeout=15, **kw)
+                except Exception:
+                    pass
+            hit = _read_has(marker)
+            if hit:
+                out.append(ProbeFinding(
+                    probe="stored-xss",
+                    title=f"Stored XSS: '{field}' from {method} {we.get('path')} rendered unencoded on {hit.get('path')}",
+                    exploited=True, severity="P1",
+                    evidence=(f"Markup {marker} written via '{field}' on {we.get('path')} came back verbatim "
+                              f"(unencoded) in the HTML of {hit.get('path')}. Stored script executes for "
+                              f"every viewer of that page."),
+                    target=str(we.get("path", ""))))
+                done = True
+                break
+        if done:
+            continue
+    return out
