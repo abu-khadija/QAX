@@ -266,8 +266,37 @@ class OrchestratorService:
         except Exception as exc:
             logger.warning("family expansion failed: %s", exc)
 
+        # 7c) One bounded second round: re-attack the suspects round 1 left UNRESOLVED.
+        #     This covers both "orphan" suspects (no test was written) and tests that
+        #     broke on setup (the suspect went unverified) — in both cases the suspect
+        #     is simply not reflected in any confirmed bug. Deep mode only, capped, and
+        #     exactly one extra round so it can't loop or burn budget.
+        rounds = 1
+        if deep:
+            unresolved = self._unresolved_suspects(getattr(detection, "findings", []), confirmed)[:10]
+            if unresolved:
+                try:
+                    prog.emit("orchestrate", "step",
+                              f"round 2 — re-attacking {len(unresolved)} unresolved suspect(s)")
+                    rt2 = RedTeamService(self.context).generate(model, unresolved, progress=prog)
+                    exe2 = ExecutionService(self.context).execute(
+                        [t for t in rt2.test_cases if t.get("api_steps")], mode="api", base_url=base_url)
+                    gen2 = [t for t in rt2.test_cases if t.get("attack") != "coverage-template"]
+                    crit2 = CriticService(self.context).review(exe2, gen2)
+                    inv2 = InvestigatorService(self.context).investigate(crit2, gen2, base_url=base_url)
+                    rounds = 2
+                    seen = {(str(b.get("title", "")), str(b.get("target", ""))) for b in confirmed}
+                    new2 = [b for b in self._unify(inv2, None)
+                            if (str(b.get("title", "")), str(b.get("target", ""))) not in seen]
+                    confirmed += new2
+                    prog.emit("orchestrate", "info",
+                              f"round 2: +{len(new2)} confirmed bug(s) from re-attack" if new2
+                              else "round 2: no new confirmed bugs")
+                except Exception as exc:
+                    logger.warning("round 2 re-attack failed: %s", exc)
+
         result = OrchestratorResult(
-            confirmed=confirmed, coverage=coverage, rounds=1,
+            confirmed=confirmed, coverage=coverage, rounds=rounds,
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens,
             created_records=getattr(probe_result, "created_records", 0),
@@ -517,6 +546,23 @@ class OrchestratorService:
                                     "probe": getattr(f, "probe", ""), "target": getattr(f, "target", "")})
             except Exception as exc:
                 logger.warning("family expansion for %s failed: %s", cid, exc)
+        return out
+
+    @staticmethod
+    def _unresolved_suspects(findings, confirmed: list[dict]) -> list:
+        """
+        Detector suspects NOT reflected in any confirmed bug — the candidates for a
+        second red-team pass. A suspect counts as resolved when the file/endpoint it
+        points at (`where`) appears in a confirmed bug's target or title; otherwise it
+        went unverified (no test, or its test broke on setup) and is re-attacked.
+        """
+        resolved = " ".join((str(b.get("target", "")) + " " + str(b.get("title", "")))
+                            for b in (confirmed or [])).lower()
+        out = []
+        for f in (findings or []):
+            where = str(getattr(f, "where", "")).strip()
+            if where and where.lower() not in resolved:
+                out.append(f)
         return out
 
     _COV_SEVERITY = {"COV-AUTH": "P1", "COV-IDOR": "P1", "COV-VAL": "P3", "COV-PAG": "P2"}

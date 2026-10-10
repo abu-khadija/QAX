@@ -198,3 +198,23 @@ def test_expand_families_noop_without_confirmed_family_class():
     from services.context import QAXContext
     svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
     assert svc._expand_families([{"probe": "security-headers", "target": "/"}], AppModel(root="/x"), "http://x") == []
+
+
+# ── round 2: re-attack suspects left unresolved (orphans + setup-broken) ────────
+
+def test_unresolved_suspects_excludes_confirmed_ones():
+    from services.results import Finding
+    findings = [Finding(title="IDOR tasks", where="/tasks/{id}"),
+                Finding(title="IDOR projects", where="/projects/{id}"),
+                Finding(title="weak jwt", where="auth.py")]
+    confirmed = [{"title": "Broken object-level authorization in GET /tasks/{id}", "target": "/tasks/{id}"}]
+    out = OrchestratorService._unresolved_suspects(findings, confirmed)
+    wheres = {f.where for f in out}
+    assert "/tasks/{id}" not in wheres                         # resolved → dropped
+    assert "/projects/{id}" in wheres and "auth.py" in wheres  # unresolved → re-attack
+
+
+def test_unresolved_suspects_empty_when_all_resolved():
+    from services.results import Finding
+    assert OrchestratorService._unresolved_suspects(
+        [Finding(title="x", where="/a")], [{"target": "/a", "title": "bug on /a"}]) == []
