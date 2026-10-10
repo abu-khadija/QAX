@@ -163,3 +163,38 @@ def test_router_score_ranks_sensitive_over_trivial():
     assert s["routers/payments.py"] > s["routers/health.py"]
     assert s["routers/payments.py"] > s["routers/about.py"]
     assert s["routers/health.py"] < 0 and s["routers/about.py"] < 0   # low-risk demoted
+
+
+# ── family expansion: confirmed class → sweep siblings (never from suspects) ────
+
+def test_expand_families_sweeps_confirmed_class_and_dedupes(monkeypatch):
+    import execution.probes as P
+    from services.context import QAXContext
+    from services.results import ProbeFinding
+    called = []
+
+    def fake_bola(model, base_url, *, session=None, auth=None, limit=4):
+        called.append(("bola", limit))
+        return [ProbeFinding(probe="bola", title="BOLA /tasks/{id}", target="/tasks/{id}",
+                             exploited=True, severity="P1"),
+                ProbeFinding(probe="bola", title="BOLA /projects/{id}", target="/projects/{id}",
+                             exploited=True, severity="P1")]
+
+    def fake_sqli(*a, **k):
+        called.append(("sqli", None))
+        return []
+
+    monkeypatch.setattr(P, "bola_probe", fake_bola)
+    monkeypatch.setattr(P, "sqli_probe", fake_sqli)
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    confirmed = [{"probe": "bola", "target": "/tasks/{id}", "title": "BOLA"}]   # bola is confirmed, sqli is NOT
+    out = svc._expand_families(confirmed, AppModel(root="/x"), "http://x")
+    assert [c[0] for c in called] == ["bola"]          # only the confirmed class ran
+    assert called[0][1] >= 50                            # cap lifted for the sweep
+    assert len(out) == 1 and out[0]["target"] == "/projects/{id}"   # sibling only, known one deduped
+
+
+def test_expand_families_noop_without_confirmed_family_class():
+    from services.context import QAXContext
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    assert svc._expand_families([{"probe": "security-headers", "target": "/"}], AppModel(root="/x"), "http://x") == []

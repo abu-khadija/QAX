@@ -252,6 +252,20 @@ class OrchestratorService:
         confirmed += self._confirmed_from_templates(execution, executable, confirmed)
         confirmed += ui_confirmed  # browser-observed UI bugs (console/network)
 
+        # 7b) Family expansion: bugs come in families (the same dev made the same
+        #     mistake elsewhere). Once a class is CONFIRMED, sweep EVERY matching
+        #     endpoint for it with the per-class cap lifted. Deterministic and bounded,
+        #     and it starts ONLY from confirmed bugs — never suspects — so a false
+        #     positive can't compound across the family.
+        try:
+            family = self._expand_families(confirmed, model, base_url, auth=auth)
+            if family:
+                confirmed += family
+                prog.emit("orchestrate", "info",
+                          f"family expansion: +{len(family)} sibling bug(s) of confirmed classes")
+        except Exception as exc:
+            logger.warning("family expansion failed: %s", exc)
+
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=1,
             tests_run=len(executable), suspects=len(detection.findings),
@@ -471,6 +485,39 @@ class OrchestratorService:
         """Router files ordered highest-risk first (for the functional-generation budget)."""
         files = self._router_files(model, repo_path)
         return sorted(files, key=lambda p: self._router_score(p, model), reverse=True)
+
+    # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
+    _FAMILY_SWEEP_LIMIT = 50
+
+    def _expand_families(self, confirmed: list[dict], model: AppModel, base_url: str,
+                         *, auth: dict | None = None) -> list[dict]:
+        """
+        For each CONFIRMED probe class, re-run that probe over EVERY matching endpoint
+        (cap lifted) and return the sibling bugs not already confirmed. Deterministic,
+        bounded, and driven only by confirmed classes — never suspects.
+        """
+        import requests
+        from execution.probes import (bola_probe, injection_probe, path_traversal_probe, sqli_probe)
+        family = {"bola": bola_probe, "sqli": sqli_probe,
+                  "injection": injection_probe, "path-traversal": path_traversal_probe}
+        classes = {str(b.get("probe", "")).lower() for b in confirmed if b.get("probe")}
+        todo = [(c, family[c]) for c in classes if c in family]
+        if not todo:
+            return []
+        seen = {(str(b.get("probe", "")).lower(), str(b.get("target", ""))) for b in confirmed}
+        out: list[dict] = []
+        sess = requests.Session()
+        for cid, fn in todo:
+            try:
+                for f in fn(model, base_url, session=sess, auth=auth, limit=self._FAMILY_SWEEP_LIMIT):
+                    if getattr(f, "exploited", False) and (cid, str(getattr(f, "target", ""))) not in seen:
+                        seen.add((cid, str(getattr(f, "target", ""))))
+                        out.append({"title": getattr(f, "title", ""), "severity": getattr(f, "severity", ""),
+                                    "evidence": getattr(f, "evidence", ""), "source": "probe",
+                                    "probe": getattr(f, "probe", ""), "target": getattr(f, "target", "")})
+            except Exception as exc:
+                logger.warning("family expansion for %s failed: %s", cid, exc)
+        return out
 
     _COV_SEVERITY = {"COV-AUTH": "P1", "COV-IDOR": "P1", "COV-VAL": "P3", "COV-PAG": "P2"}
 

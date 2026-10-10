@@ -447,7 +447,7 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
 
 
 def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
-               auth: dict | None = None) -> list[ProbeFinding]:
+               auth: dict | None = None, limit: int = 4) -> list[ProbeFinding]:
     """
     Broken Object-Level Authorization via a TWO-USER control experiment.
 
@@ -497,7 +497,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         return out
 
     _CONTENT_KW = ("secret", "content", "body", "data", "value", "text", "note", "description", "payload")
-    for post, ge, prefix, param, key_field, pf in pairs[:4]:
+    for post, ge, prefix, param, key_field, pf in pairs[:limit]:
         key = f"qaxbola{uuid.uuid4().hex[:10]}"
         marker = f"qaxmarker{uuid.uuid4().hex[:12]}"
         body: dict = {}
@@ -545,7 +545,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
 
 
 def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
-               auth: dict | None = None) -> list[ProbeFinding]:
+               auth: dict | None = None, limit: int = 5) -> list[ProbeFinding]:
     """
     Error-based SQL injection with a CONTROL: a benign value vs the same value with
     a single quote. If the quote breaks the query (5xx or a SQL error in the body)
@@ -564,7 +564,7 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"sqli_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
 
-    for e in cands[:5]:
+    for e in cands[:limit]:
         path = str(e.get("path", ""))
         m = re.search(r"\{([^}]+)\}", path)
         if not m:
@@ -819,7 +819,7 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
 
 
 def injection_probe(model, base_url: str, *, session: requests.Session | None = None,
-                    auth: dict | None = None) -> list[ProbeFinding]:
+                    auth: dict | None = None, limit: int = 6) -> list[ProbeFinding]:
     """
     SQL injection via QUERY parameters and request-BODY fields (the path-param case
     is sqli_probe). Uses the same error-based + boolean-differential control. Query
@@ -843,7 +843,7 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
         return _auth_headers(_tok["v"], auth)
 
     # Query-param injection — GET only (safe to repeat).
-    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:6]:
+    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:limit]:
         path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
         headers = token_for(e)
         qps = list(e.get("query_params") or [])
@@ -864,7 +864,7 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
 
     # Body-field injection — POST/PUT/PATCH only (never DELETE).
     for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
-              and field_names(x.get("request_fields"))][:6]:
+              and field_names(x.get("request_fields"))][:limit]:
         method = str(e.get("method", "POST")).upper()
         path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
         headers = token_for(e)
@@ -1363,7 +1363,7 @@ _FILE_PARAM_KW = ("file", "filename", "filepath", "path", "dir", "folder", "docu
 
 
 def path_traversal_probe(model, base_url: str, *, session: requests.Session | None = None,
-                         auth: dict | None = None) -> list[ProbeFinding]:
+                         auth: dict | None = None, limit: int = 5) -> list[ProbeFinding]:
     """
     Path traversal / local file inclusion (OWASP). For GET endpoints that build a file
     path from a PATH parameter or a file-ish QUERY parameter (filename, path, ...), we
@@ -1391,7 +1391,7 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
         return any(sig.search(r.text or "") for sig in _TRAVERSAL_SIGS)
 
     # Path parameters: substitute the payload into the {segment}.
-    for e in path_cands[:5]:
+    for e in path_cands[:limit]:
         path = str(e.get("path", ""))
         m = re.search(r"\{([^}]+)\}", path)
         if not m:
@@ -1416,7 +1416,7 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
 
     # File-ish query parameters: send the payload as that query value.
     seen: set = set()
-    for e, qp in query_cands[:6]:
+    for e, qp in query_cands[:limit]:
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         if (path, qp) in seen:
             continue
