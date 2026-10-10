@@ -14,7 +14,7 @@
     {"id": "open-redirect",  "class": "open-redirect",      "endpoint": "/api/vul/redirect",  "match": ["open redirect"]},
     {"id": "cors-1",         "class": "cors",               "endpoint": "/api/vul/cors1",     "match": ["cors"]},
     {"id": "cors-2",         "class": "cors",               "endpoint": "/api/vul/cors2",     "match": ["cors"]},
-    {"id": "reflected-xss",  "class": "xss",                "endpoint": "/api/vul/xss",       "match": ["xss"]},
-    {"id": "stored-xss",     "class": "stored-xss",         "endpoint": "/api/vul/addcomments","match": ["xss"]}
+    {"id": "reflected-xss",  "class": "xss",                "endpoint": "/api/vul/xss",       "match": ["xss", "/api/vul/xss"]},
+    {"id": "stored-xss",     "class": "stored-xss",         "endpoint": "/api/vul/addcomments","match": ["xss", "/api/vul/addcomments"]}
   ]
 }

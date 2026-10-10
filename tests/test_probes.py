@@ -647,6 +647,41 @@ def test_path_traversal_quiet_when_not_vulnerable():
     assert path_traversal_probe(_model_lookup(), "http://x", session=_TraversalSession(vulnerable=False)) == []
 
 
+class _QueryTraversalSession:
+    """A file-read endpoint that serves /etc/passwd when a file-ish QUERY param asks."""
+    def get(self, url, params=None, headers=None, timeout=None):
+        val = str((params or {}).get("filename", ""))
+        if "etc/passwd" in val or val == "/etc/passwd":
+            return MagicMock(status_code=200, text="root:*:0:0:System Administrator:/var/root:/bin/sh\n")
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_path_traversal_via_query_param():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/read", "query_params": ["filename"], "auth_required": False}])
+    out = path_traversal_probe(model, "http://x", session=_QueryTraversalSession())
+    assert len(out) == 1 and out[0].severity == "P1" and "query param" in out[0].title
+
+
+class _EndpointCorsSession:
+    """Reflects an arbitrary Origin ONLY on a specific non-root endpoint."""
+    def __init__(self, reflecting_path):
+        self.reflecting_path = reflecting_path
+
+    def get(self, url, headers=None, timeout=None):
+        origin = (headers or {}).get("Origin", "")
+        path = "/" + url.split("://", 1)[-1].split("/", 1)[-1] if "://" in url else url
+        h = {"Access-Control-Allow-Origin": origin} if (origin and path == self.reflecting_path) else {}
+        return MagicMock(status_code=200, text="{}", headers=h)
+
+
+def test_cors_detected_on_non_root_endpoint():
+    model = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/vul/cors2", "auth_required": False}])
+    out = cors_probe(model, "http://x", session=_EndpointCorsSession("/api/vul/cors2"))
+    assert len(out) == 1 and out[0].probe == "cors" and out[0].target == "/api/vul/cors2"
+
+
 # ── CORS ─────────────────────────────────────────────────────────────────────
 
 class _CorsSession:

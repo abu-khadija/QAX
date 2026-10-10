@@ -163,10 +163,26 @@ endpoints directly and running `ProbeService`.
 | zip-slip | ❌ | no probe |
 
 ### Prioritized probe backlog (from this real recall test)
-1. **Extend path-traversal to query params** (quick, catches `/read`,`/dir`).
-2. **Extend CORS to per-endpoint, not just `/`** (quick, catches `/cors1`,`/cors2`).
+1. ~~Extend path-traversal to query params~~ ✅ **done** — catches `/api/vul/read`.
+2. ~~Extend CORS to per-endpoint, not just `/`~~ ✅ **done** — catches `/api/vul/cors2`.
 3. **Blind/boolean SQLi via response-content differential** (medium; catches same-status SQLi).
 4. **New probes**: command-injection, SSRF, reflected+stored XSS, zip-slip (the classes QAX has no probe for).
+
+### After the two quick-win probe upgrades (same target, re-measured)
+Detection rose from **1 → 3 vuln classes**, still **0 false positives** (no `/safe/`
+twin flagged):
+
+| Class | Before | After | How |
+|---|---|---|---|
+| open-redirect | ✅ | ✅ | open_redirect_probe |
+| path-traversal | ❌ | ✅ **(new)** | now probes file-ish **query** params + absolute paths → caught `?filename=/etc/passwd` |
+| cors | ❌ | ✅ **(new)** | now probes per-endpoint → caught reflected Origin on `/cors2` (P3; bare `*` on `/cors1` left unflagged on purpose — often intentional) |
+
+Still missed (honest): command-injection, SSRF, XSS, stored-XSS, zip-slip (no probe),
+and the blind SQLi (same-status / benign-500, needs content-differential). These are
+the remaining backlog items. Note: recall over *confirmed claims* (P1/P2) counts
+path-traversal + open-redirect; the CORS reflection is a P3 lead (detected, lower
+severity).
 
 **Honest verdict on recall:** QAX's deterministic probes are precise (0 FP, no safe
 twin flagged) but **narrow** — they caught 1 of 9 vuln classes on this target. The

