@@ -331,9 +331,10 @@ async function doExport(items, kind, btn, msgEl){
     const d=await r.json();
     if(d.error){ msgEl.innerHTML='⚠️ '+esc(d.error); }
     else {
-      const dry=d.dry_run; const n=d.exported_count||0;
-      msgEl.innerHTML=(dry?'🧪 <b>Dry run</b> — ':'✅ ')
-        +'would create '+n+' issue'+(n!==1?'s':'')+' in <b>'+esc((d.target||'xray').toUpperCase())+'</b>'
+      const dry=d.dry_run, n=d.exported_count||0;
+      const noun=(d.kind==='findings')?('bug'+(n!==1?'s':'')):('test case'+(n!==1?'s':''));
+      const where=(d.kind==='findings')?'Jira':esc((d.target||'xray').toUpperCase());
+      msgEl.innerHTML=(dry?'🧪 <b>Dry run</b> — would file ':'✅ filed ')+n+' '+noun+' in <b>'+where+'</b>'
         +(d.references&&d.references.length?' ('+d.references.slice(0,3).map(esc).join(', ')+(d.references.length>3?'…':'')+')':'')
         +(dry?'. Add your Jira/Xray credentials to <code>.env</code> to file for real.':'.');
     }

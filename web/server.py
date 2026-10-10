@@ -249,18 +249,37 @@ def export():
     dry_run = data.get("dry_run", True) is not False   # default True (safe)
     if not items:
         return jsonify({"error": "Nothing to file."}), 400
+
+    # Findings are filed as Jira BUGS (standard Jira issue API), not Xray Tests.
+    if kind == "findings":
+        bugs = [_finding_to_testcase(b, i) for i, b in enumerate(items) if isinstance(b, dict)]
+        orig = os.environ.get("DRY_RUN")
+        os.environ["DRY_RUN"] = "true" if dry_run else "false"
+        try:
+            from core.xray_client import XrayClient
+            result = XrayClient().push_bugs(bugs)
+        except Exception as exc:
+            result = {"success": False, "exported_count": 0, "failed_count": len(bugs),
+                      "references": [], "error": f"Bug filing failed: {exc}"}
+        finally:
+            if orig is None:
+                os.environ.pop("DRY_RUN", None)
+            else:
+                os.environ["DRY_RUN"] = orig
+        result = dict(result or {})
+        result.update({"dry_run": dry_run, "target": "jira", "kind": "findings"})
+        return jsonify(result)
+
+    # Test cases go to the chosen export adapter (Xray/Zephyr/Excel/…).
     if target not in _EXPORT_TARGETS:
         return jsonify({"error": f"Unknown target '{target}'. One of: {', '.join(_EXPORT_TARGETS)}."}), 400
-    if kind == "findings":
-        items = [_finding_to_testcase(b, i) for i, b in enumerate(items) if isinstance(b, dict)]
     try:
         from core.adapters import get_adapter
         result = get_adapter(target).export(items, project=project, dry_run=dry_run)
     except Exception as exc:
         return jsonify({"error": f"Export failed: {exc}"}), 502
     result = dict(result or {})
-    result["dry_run"] = dry_run
-    result["target"] = target
+    result.update({"dry_run": dry_run, "target": target, "kind": "tests"})
     return jsonify(result)
 
 

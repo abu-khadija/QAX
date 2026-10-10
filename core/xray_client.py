@@ -267,6 +267,64 @@ class XrayClient:
         }
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Bug filing (standard Jira issue API — findings, not Xray Tests)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _adf(text: str) -> dict:
+        """Minimal Atlassian Document Format doc from plain text (Jira Cloud needs ADF)."""
+        paras = [{"type": "paragraph", "content": [{"type": "text", "text": ln}]}
+                 for ln in str(text or "").split("\n") if ln.strip()]
+        return {"type": "doc", "version": 1, "content": paras or
+                [{"type": "paragraph", "content": [{"type": "text", "text": " "}]}]}
+
+    def push_bug(self, bug: dict) -> dict:
+        """
+        File ONE security finding as a Jira **Bug** via the standard Jira issue API
+        (not Xray's test-import endpoint, which is for Tests). DRY_RUN previews only.
+        `bug` keys used: title, description, priority (critical/high/medium/low), labels.
+        """
+        bid = bug.get("test_case_id") or bug.get("id") or "BUG"
+        if self.dry_run:
+            logger.info("[DRY RUN] Would file Jira Bug: %s — %s", bid, bug.get("title"))
+            return {"success": True, "test_case_id": bid, "jira_key": f"DRY-RUN-BUG-{bid}", "error": None}
+        try:
+            import base64
+            pri = {"critical": "Highest", "high": "High", "medium": "Medium",
+                   "low": "Low"}.get(str(bug.get("priority", "medium")).lower(), "Medium")
+            payload = {"fields": {
+                "project": {"key": self.project_key},
+                "summary": str(bug.get("title", "Security finding"))[:250],
+                "description": self._adf(bug.get("description", "")),
+                "issuetype": {"name": "Bug"},
+                "priority": {"name": pri},
+                "labels": bug.get("labels", ["qax", "security"]),
+            }}
+            auth = base64.b64encode(f"{self.jira_email}:{self.jira_api_token}".encode()).decode()
+            resp = requests.post(f"{self.jira_base_url.rstrip('/')}/rest/api/3/issue",
+                                 headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"},
+                                 json=payload, timeout=30)
+            if resp.status_code in (200, 201):
+                return {"success": True, "test_case_id": bid,
+                        "jira_key": (resp.json() or {}).get("key"), "error": None}
+            return {"success": False, "test_case_id": bid, "jira_key": None,
+                    "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+        except Exception as exc:  # pragma: no cover - network
+            return {"success": False, "test_case_id": bid, "jira_key": None, "error": str(exc)}
+
+    def push_bugs(self, findings: list) -> dict:
+        """File a batch of findings as Jira Bugs. Adapter-shaped result (never raises)."""
+        results = [self.push_bug(b) for b in (findings or []) if isinstance(b, dict)]
+        ok = [r for r in results if r.get("success")]
+        return {
+            "success": bool(results) and len(ok) == len(results),
+            "exported_count": len(ok),
+            "failed_count": len(results) - len(ok),
+            "references": [r["jira_key"] for r in ok if r.get("jira_key")],
+            "error": None if ok or not results else (results[0].get("error") or "all failed"),
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Payload Builder (Internal)
     # ─────────────────────────────────────────────────────────────────────────
 
