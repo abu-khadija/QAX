@@ -629,6 +629,20 @@ def _detect_injection(send, *, method: str, path: str, where: str) -> ProbeFindi
                           f"({len(bt_t)}B) than a matched FALSE one ({len(bt_f)}B) or the benign value "
                           f"({nben}B) — the WHERE clause was bypassed."),
                 target=path)
+        # Status-differential (auth-bypass / single-record style): the TRUE tautology
+        # changes the OUTCOME status to a success while the matched FALSE one stays
+        # identical to the benign value. FALSE==benign is the control — it proves the
+        # status flip tracks the injected boolean, not just "any extra input".
+        if (st_t is not None and st_f is not None and st_f == sb
+                and st_t != sb and 200 <= st_t < 400 and st_f >= 400):
+            return ProbeFinding(
+                probe="sqli", title=f"SQL injection in {method} {path} ({where})",
+                exploited=True, severity="P1",
+                evidence=(f"Boolean injection in {where}: a TRUE tautology returned HTTP {st_t} "
+                          f"(success) while the benign value and a matched FALSE tautology both "
+                          f"returned {sb} — the injected condition is evaluated by the database "
+                          f"(auth/record bypass)."),
+                target=path)
         # Then error-based: a quote that yields a SQL error = confirmed (P1); a bare
         # 5xx = robustness lead only (P3 — not proof, don't cry wolf).
         st, bt = ask("qaxprobe1" + q)

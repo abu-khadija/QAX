@@ -167,6 +167,34 @@ def test_sqli_quiet_when_parameterized():
     assert sqli_probe(_model_lookup(), "http://x", session=_SqliSession(vulnerable=False)) == []
 
 
+class _BlindAuthSqlSession:
+    """Auth-bypass blind SQLi: a TRUE tautology flips the status to 200; benign and a
+    matched FALSE tautology both return 403 (same body length, so only status differs)."""
+    def get(self, url, headers=None, timeout=None):
+        if "'1'='1" in url:                                   # TRUE tautology
+            return MagicMock(status_code=200, text='{"result":"ok____"}')
+        return MagicMock(status_code=403, text='{"result":"no_____"}')  # benign & FALSE
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_sqli_blind_status_differential():
+    out = sqli_probe(_model_lookup(), "http://x", session=_BlindAuthSqlSession())
+    assert len(out) == 1 and out[0].severity == "P1" and out[0].probe == "sqli"
+    assert "injection" in out[0].title.lower()
+
+
+def test_sqli_blind_quiet_when_status_stable():
+    # every response is 403 regardless of the boolean → no differential → no finding
+    class _Stable:
+        def get(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=403, text='{"result":"no_____"}')
+        def post(self, *a, **k):
+            return MagicMock(status_code=200, text="{}")
+    assert sqli_probe(_model_lookup(), "http://x", session=_Stable()) == []
+
+
 class _Quote500NoSqlSession:
     """The quote 500s but with no SQL error text — robustness, not injection."""
     def get(self, url, headers=None, timeout=None):
