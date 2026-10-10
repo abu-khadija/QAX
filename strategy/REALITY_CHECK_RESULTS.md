@@ -46,6 +46,90 @@ only (3.4 needed → railsgoat skipped), Docker ✗ (docker-only apps skipped).
 
 ---
 
-## T2 — Java / Spring Boot (pending)
+## T3 — Go / Gin / gorm (RealWorld backend)
 
-## T3 — Go (go-gin-vul, known-vulnerable, recall test) (pending)
+- **Repo:** gothinkster/golang-gin-realworld-example-app (well-written; SQLite via
+  gorm, no external services → boots with `go run hello.go`). Served on :3100.
+- **Note:** go-gin-vul (the known-vulnerable Go target) was **skipped** — it needs
+  MySQL **and** Redis and there is no Docker here (boot-cost; see vet-first lesson).
+  Swapped in this well-written Go app as a generalization + FP test instead.
+
+### Result
+- Modeled **19 endpoints from Go source**, authenticated (created 3), full probe set.
+- **Confirmed P1/P2: 0** — zero false alarms on well-written Go.
+- **Leads (P3): 2** — no login rate-limiting, missing security headers (both legit).
+
+### Gap surfaced + fixed (commit 9f6bcf9)
+- **QAX couldn't read non-Python/JS source at all.** The model builder's extension
+  allow-list was `{.py .ts .tsx .js .jsx}`, so a Go repo gave "No source files found"
+  and scanned nothing — despite QAX being advertised as language-generic. Widened to
+  Go/Ruby/Java/Kotlin/PHP/C#/Rust/Scala/Elixir, and added vendor/target/bin/obj skips.
+
+### Honest caveat
+- Model-building is LLM-based and **non-deterministic**: a fresh (uncached) build
+  sometimes modeled the login fields worse and auth failed (created 0). With a good
+  cached model, auth works and the result is stable (0 FP, 2 leads). Model quality
+  variance is a real robustness risk worth tracking.
+
+---
+
+## Summary so far (2 stacks, 3 QAX gaps found + fixed)
+
+| Target | Stack | Confirmed FP | Leads | Auth worked |
+|---|---|---|---|---|
+| T1 | Node/Express/Prisma | 0 | 1 | yes (3) |
+| T3 | Go/Gin/gorm | 0 | 2 | yes (3) |
+
+**Three real QAX gaps the reality-check caught and fixed**: wrapped request bodies,
+the `register_body` type heuristic (`image`→number), and the Python/JS-only source
+reader. Each would have silently blocked QAX on a large class of real apps. The
+headline: on two unfamiliar, well-written stacks QAX produced **zero false P1/P2**
+and only legitimate low-severity leads — strong "doesn't cry wolf" evidence.
+
+## T2 — Java / Spring Boot (RealWorld backend)
+
+- **Repo:** gothinkster/spring-boot-realworld-example-app (Spring Boot 2.6, SQLite via
+  Flyway, GraphQL + REST). Built with the already-installed JDK 17 (Gradle 7.4);
+  booted on :8080 in ~2s. Every endpoint is auth-gated (even `/api/tags` → 401).
+
+### Result
+- **The `.java` source reader works**: QAX modeled **19 endpoints** from Java source
+  (proving the extension fix generalises beyond Go). Scan: 0 confirmed, 1 lead (CSP).
+- **But auth was blocked (created 0)** — so this was NOT a full scan.
+
+### Gap surfaced (NOT yet fixed — the deeper one)
+- **Base-path detection without OpenAPI.** The model extracted the register path as
+  `/users`, but the live route is `/api/users` — the `/api` context path was dropped,
+  and the wrapped `user.*` fields weren't captured either. With no OpenAPI to ground
+  the base path (this app has no springdoc), QAX posted to the wrong path with a flat
+  body → 400 → no token → authenticated probes skipped.
+- Unlike the first three gaps (small, fixed in-session), this one is a real design
+  task: recover the base path when there is no spec — e.g. probe a few candidate
+  prefixes (`/api`, `/v1`, `/api/v1`) against a known route and prepend the one that
+  resolves, or parse the framework's class-level route prefix / context-path from
+  source. **Flagged as the #1 follow-up.**
+
+---
+
+## Reality-Check conclusion (3 stacks)
+
+| Target | Stack | Source modeled | Auth worked | False P1/P2 | Leads |
+|---|---|---|---|---|---|
+| T1 | Node/Express/Prisma | ✓ 12 | ✓ (3) | **0** | 1 (legit) |
+| T3 | Go/Gin/gorm | ✓ 19 | ✓ (3) | **0** | 2 (legit) |
+| T2 | Java/Spring Boot | ✓ 19 | ✗ (base-path gap) | 0* | 1 |
+
+\* T2 not a full scan — auth blocked.
+
+**Verdict.** On the two stacks QAX could fully reach (Node, Go — both unfamiliar,
+well-written), it produced **zero false P1/P2** and only legitimate low-severity
+leads: strong "doesn't cry wolf, generalises across stacks" evidence. The exercise's
+biggest payoff was finding **four concrete gaps** — three fixed in-session (wrapped
+bodies, the type heuristic, the Python/JS-only reader) and one flagged
+(base-path-without-OpenAPI). Each was silently limiting QAX on real-world APIs.
+
+**Honest limitations.** (1) LLM model-building is non-deterministic — a weak model
+can break auth; always confirm `created_records > 0`. (2) Reality-check targets were
+well-written RealWorld apps (good FP tests); recall vs. known CVEs on a new stack was
+not measured here (go-gin-vul needed MySQL+Redis, skipped for boot-cost) — prior
+sessions' two real P1 finds remain the recall evidence.
