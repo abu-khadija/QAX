@@ -178,11 +178,30 @@ twin flagged):
 | path-traversal | ❌ | ✅ **(new)** | now probes file-ish **query** params + absolute paths → caught `?filename=/etc/passwd` |
 | cors | ❌ | ✅ **(new)** | now probes per-endpoint → caught reflected Origin on `/cors2` (P3; bare `*` on `/cors1` left unflagged on purpose — often intentional) |
 
-Still missed (honest): command-injection, SSRF, XSS, stored-XSS, zip-slip (no probe),
-and the blind SQLi (same-status / benign-500, needs content-differential). These are
-the remaining backlog items. Note: recall over *confirmed claims* (P1/P2) counts
-path-traversal + open-redirect; the CORS reflection is a P3 lead (detected, lower
-severity).
+### After building the new probes (command-injection, SSRF, XSS)
+
+Detection climbed to **6 of 9 vuln classes, still 0 false positives** (no `/safe/`
+twin flagged). The full journey on this target: **1 → 3 → 6 classes**.
+
+| Class | Caught | Probe |
+|---|---|---|
+| open-redirect | ✅ | open-redirect |
+| path-traversal | ✅ | path-traversal (query-param + absolute-path) |
+| cors | ✅ | cors (per-endpoint, P3) |
+| command-injection | ✅ **new** | command-injection (echo-token / sleep, P1) — caught cmd1 & cmd2 |
+| ssrf | ✅ **new** | ssrf (out-of-band callback, P2) |
+| xss (reflected) | ✅ **new** | xss (unencoded markup in HTML, P2) |
+| sql-injection | ❌ | blind: same-status / benign-500 → needs a response-content differential |
+| stored-xss | ❌ | needs write→read pairing (no stored-XSS probe yet) |
+| zip-slip | ❌ | niche; hard to confirm deterministically without filesystem access |
+
+Commits: `bae15f7` (command-injection), `c137320` (SSRF), `71fb23d` (XSS), plus
+`8ff6b12` (path-traversal query params + per-endpoint CORS).
+
+**Remaining backlog:** blind/boolean SQLi (content-differential), stored XSS
+(write→read), zip-slip. **Precision held at 0 false positives throughout** — every
+new probe keeps a control (unique token, OOB callback, HTML-context check) so it only
+fires on proof.
 
 **Honest verdict on recall:** QAX's deterministic probes are precise (0 FP, no safe
 twin flagged) but **narrow** — they caught 1 of 9 vuln classes on this target. The
