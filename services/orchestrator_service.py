@@ -273,7 +273,9 @@ class OrchestratorService:
         #     exactly one extra round so it can't loop or burn budget.
         rounds = 1
         if deep:
-            unresolved = self._unresolved_suspects(getattr(detection, "findings", []), confirmed)[:10]
+            unresolved = self._unresolved_suspects(
+                getattr(detection, "findings", []), confirmed,
+                execution=execution, tests=executable)[:10]
             if unresolved:
                 try:
                     prog.emit("orchestrate", "step",
@@ -518,22 +520,69 @@ class OrchestratorService:
     # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
     _FAMILY_SWEEP_LIMIT = 50
 
+    # Keywords that classify a confirmed bug into a family-sweepable probe class when
+    # it carries no `probe` field — i.e. bugs confirmed by a coverage template
+    # (source "coverage", e.g. COV-IDOR) or by the LLM Investigator (source "test").
+    # Order matters: the most specific class is listed first so "sql injection" maps
+    # to sqli, not the generic injection class. Each class maps to a probe that is a
+    # strict, zero-false-positive control, so classifying loosely only ever costs a
+    # bounded deterministic sweep — it can never manufacture a false sibling.
+    _CLASS_KEYWORDS = (
+        ("sqli", ("sql injection", "sqli", "sql-injection")),
+        ("path-traversal", ("path traversal", "directory traversal", "path-traversal",
+                            "lfi", "local file inclusion", "arbitrary file read")),
+        ("bola", ("idor", "bola", "object-level", "object level", "broken object",
+                  "another user", "other user", "unauthorized object")),
+        ("injection", ("command injection", "os command", "code injection", "injection")),
+    )
+
+    @classmethod
+    def _family_class(cls, bug: dict) -> str | None:
+        """
+        Map a confirmed bug to a family probe id (bola/sqli/injection/path-traversal),
+        or None when it has no sibling-sweepable class.
+
+        Probe-confirmed bugs name the class directly in `probe`. Template- and
+        Investigator-confirmed bugs carry no `probe`, so they are classified from
+        their id/title/evidence text — this is what lets a template-confirmed IDOR or
+        an LLM-confirmed SQL injection sweep its whole family, not just probe hits.
+        """
+        family = {"bola", "sqli", "injection", "path-traversal"}
+        probe = str(bug.get("probe", "")).lower()
+        if probe in family:
+            return probe
+        text = " ".join(str(bug.get(k, "")) for k in
+                        ("test_case_id", "title", "evidence")).lower()
+        for cid, kws in cls._CLASS_KEYWORDS:
+            if any(k in text for k in kws):
+                return cid
+        return None
+
     def _expand_families(self, confirmed: list[dict], model: AppModel, base_url: str,
                          *, auth: dict | None = None) -> list[dict]:
         """
-        For each CONFIRMED probe class, re-run that probe over EVERY matching endpoint
-        (cap lifted) and return the sibling bugs not already confirmed. Deterministic,
-        bounded, and driven only by confirmed classes — never suspects.
+        For each CONFIRMED class, re-run its probe over EVERY matching endpoint (cap
+        lifted) and return the sibling bugs not already confirmed. Deterministic,
+        bounded, and driven only by confirmed bugs — never suspects. The class comes
+        from the bug's `probe` when present, else is inferred from its text
+        (_family_class), so template- and Investigator-confirmed bugs expand too.
         """
         import requests
         from execution.probes import (bola_probe, injection_probe, path_traversal_probe, sqli_probe)
         family = {"bola": bola_probe, "sqli": sqli_probe,
                   "injection": injection_probe, "path-traversal": path_traversal_probe}
-        classes = {str(b.get("probe", "")).lower() for b in confirmed if b.get("probe")}
-        todo = [(c, family[c]) for c in classes if c in family]
+        classes: set[str] = set()
+        seen: set[tuple[str, str]] = set()
+        for b in confirmed:
+            c = self._family_class(b)
+            if not c:
+                continue
+            classes.add(c)
+            if b.get("target"):
+                seen.add((c, str(b.get("target", ""))))
+        todo = [(c, family[c]) for c in sorted(classes) if c in family]
         if not todo:
             return []
-        seen = {(str(b.get("probe", "")).lower(), str(b.get("target", ""))) for b in confirmed}
         out: list[dict] = []
         sess = requests.Session()
         for cid, fn in todo:
@@ -548,22 +597,86 @@ class OrchestratorService:
                 logger.warning("family expansion for %s failed: %s", cid, exc)
         return out
 
-    @staticmethod
-    def _unresolved_suspects(findings, confirmed: list[dict]) -> list:
+    @classmethod
+    def _unresolved_suspects(cls, findings, confirmed: list[dict],
+                             execution=None, tests: list[dict] | None = None) -> list:
         """
-        Detector suspects NOT reflected in any confirmed bug — the candidates for a
-        second red-team pass. A suspect counts as resolved when the file/endpoint it
-        points at (`where`) appears in a confirmed bug's target or title; otherwise it
-        went unverified (no test, or its test broke on setup) and is re-attacked.
+        Detector suspects worth a second red-team pass: those neither confirmed NOR
+        already cleanly tested in round 1.
+
+        A suspect is dropped when (a) the endpoint it points at (`where`) appears in a
+        confirmed bug's target/title — it became a bug — OR (b) round 1 delivered an
+        attack all the way to that endpoint and the app HELD (an executed test whose
+        final step ran, that did not become a confirmed bug). Re-attacking a suspect
+        the app already defended just burns model calls every scan. What's left is the
+        genuinely unverified: suspects whose round-1 test broke on setup (the attack
+        never landed), or that no test touched — exactly the cases round 2 can rescue.
         """
         resolved = " ".join((str(b.get("target", "")) + " " + str(b.get("title", "")))
                             for b in (confirmed or [])).lower()
+        cleared = cls._cleared_endpoints(execution, tests)
         out = []
         for f in (findings or []):
             where = str(getattr(f, "where", "")).strip()
-            if where and where.lower() not in resolved:
-                out.append(f)
+            if not where:
+                continue
+            if where.lower() in resolved:
+                continue  # became a confirmed bug
+            toks = cls._endpoint_tokens(where)
+            if toks and cleared and any(cls._paths_match(t, c) for t in toks for c in cleared):
+                continue  # attacked in round 1 and the app held — don't re-attack
+            out.append(f)
         return out
+
+    @staticmethod
+    def _endpoint_tokens(text: str) -> set[str]:
+        """Normalized endpoint path tokens (`/a/{id}`) parsed out of a free-text `where`."""
+        import re
+        from services.live_surface import normalize_path_params
+        toks = set()
+        for m in re.findall(r"/[^\s,;:'\"()]+", str(text)):
+            p = normalize_path_params(m.split("?")[0]).rstrip("/").lower()
+            if p and p != "/":
+                toks.add(p)
+        return toks
+
+    @staticmethod
+    def _paths_match(a: str, b: str) -> bool:
+        """True when two normalized endpoint paths refer to the same route."""
+        return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+    @classmethod
+    def _cleared_endpoints(cls, execution, tests: list[dict] | None) -> set[str]:
+        """
+        Endpoint paths round 1 delivered an attack to where the app HELD: the set of
+        normalized paths touched by executed tests whose FINAL step actually ran (so
+        the attack landed, not a setup break). Used to stop round 2 re-attacking a
+        suspect the app already defended.
+        """
+        if not execution or not tests:
+            return set()
+        from services.live_surface import normalize_path_params
+        by_key: dict = {}
+        for t in tests:
+            by_key[t.get("test_case_id", "")] = t
+            by_key[t.get("title", "")] = t
+        cleared: set[str] = set()
+        for r in getattr(execution, "results", []):
+            tc = by_key.get(r.get("test_case_id", "")) or by_key.get(r.get("title", ""))
+            if not tc:
+                continue
+            steps = tc.get("api_steps") or []
+            rsteps = r.get("steps") or []
+            if not steps or not rsteps:
+                continue
+            ran = {s.get("step_number") for s in rsteps if s.get("status") in ("PASS", "FAIL")}
+            if steps[-1].get("step_number") not in ran:
+                continue  # broke before the attack landed — leave it for round 2
+            for s in steps:
+                p = normalize_path_params(str(s.get("path", "")).split("?")[0]).rstrip("/").lower()
+                if p and p != "/":
+                    cleared.add(p)
+        return cleared
 
     _COV_SEVERITY = {"COV-AUTH": "P1", "COV-IDOR": "P1", "COV-VAL": "P3", "COV-PAG": "P2"}
 
@@ -607,8 +720,15 @@ class OrchestratorService:
                 continue
             sev = next((v for k, v in cls._COV_SEVERITY.items()
                         if str(tc.get("test_case_id", "")).startswith(k)), "P2")
+            # Carry the asserted endpoint as `target` and the template id as
+            # `test_case_id` so family expansion can classify and sweep siblings of a
+            # template-confirmed class (e.g. COV-IDOR → the bola family).
+            last = steps[-1]
+            target = (f"{str(last.get('method', '')).upper()} "
+                      f"{str(last.get('path', '')).split('?')[0]}").strip()
             out.append({"title": title, "severity": sev,
-                        "evidence": str(fstep.get("error", ""))[:200], "source": "coverage"})
+                        "evidence": str(fstep.get("error", ""))[:200], "source": "coverage",
+                        "test_case_id": str(tc.get("test_case_id", "")), "target": target})
         return out
 
     @staticmethod

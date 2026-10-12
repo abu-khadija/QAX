@@ -218,3 +218,102 @@ def test_unresolved_suspects_empty_when_all_resolved():
     from services.results import Finding
     assert OrchestratorService._unresolved_suspects(
         [Finding(title="x", where="/a")], [{"target": "/a", "title": "bug on /a"}]) == []
+
+
+# ── item 1: template- and investigator-confirmed bugs expand their family ──────
+
+def _sweep_probes(monkeypatch, ran: list):
+    """Patch the family probes to record which classes get swept (no network)."""
+    import execution.probes as P
+    from services.results import ProbeFinding
+
+    def mk(cid):
+        def fn(model, base_url, *, session=None, auth=None, limit=4):
+            ran.append(cid)
+            return [ProbeFinding(probe=cid, title=f"{cid} /other/{{id}}",
+                                 target="/other/{id}", exploited=True, severity="P1")]
+        return fn
+    for cid, name in (("bola", "bola_probe"), ("sqli", "sqli_probe"),
+                      ("injection", "injection_probe"), ("path-traversal", "path_traversal_probe")):
+        monkeypatch.setattr(P, name, mk(cid))
+
+
+def test_expand_families_from_template_confirmed_idor(monkeypatch):
+    """A COV-IDOR template bug (no `probe` field) must sweep the bola family."""
+    from services.context import QAXContext
+    ran: list = []
+    _sweep_probes(monkeypatch, ran)
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    confirmed = [{"source": "coverage", "test_case_id": "COV-IDOR-0001",
+                  "title": "Coverage: object-level authorization", "target": "GET /tasks/{id}"}]
+    out = svc._expand_families(confirmed, AppModel(root="/x"), "http://x")
+    assert ran == ["bola"]                               # classified from the template id
+    assert out and out[0]["target"] == "/other/{id}"     # sibling found
+
+
+def test_expand_families_from_investigator_sql_injection(monkeypatch):
+    """An Investigator-confirmed 'SQL injection' (source test, no probe) sweeps sqli."""
+    from services.context import QAXContext
+    ran: list = []
+    _sweep_probes(monkeypatch, ran)
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    confirmed = [{"source": "test", "title": "SQL injection in GET /search", "target": "/search"}]
+    out = svc._expand_families(confirmed, AppModel(root="/x"), "http://x")
+    assert ran == ["sqli"] and out                       # classified from the title
+
+
+def test_family_class_prefers_sqli_over_generic_injection():
+    assert OrchestratorService._family_class({"title": "SQL injection in /x"}) == "sqli"
+    assert OrchestratorService._family_class({"title": "OS command injection"}) == "injection"
+    assert OrchestratorService._family_class({"title": "accepts an empty title"}) is None
+
+
+# ── item 2: round 2 skips suspects round 1 already cleared (app held) ───────────
+
+def _round1(exec_results):
+    class Ex:
+        results = exec_results
+    return Ex()
+
+
+def test_unresolved_suspects_drops_cleared_but_keeps_setup_broken():
+    from services.results import Finding
+    findings = [Finding(title="IDOR tasks", where="GET /tasks/{id}"),      # attacked, app held
+                Finding(title="IDOR projects", where="GET /projects/{id}")]  # test broke on setup
+    tests = [
+        {"test_case_id": "RT-1", "api_steps": [
+            {"step_number": 1, "path": "/login"}, {"step_number": 2, "path": "/tasks/{id}"}]},
+        {"test_case_id": "RT-2", "api_steps": [
+            {"step_number": 1, "path": "/login"}, {"step_number": 2, "path": "/projects/{id}"}]},
+    ]
+    execution = _round1([
+        # RT-1 reached its final step (2) → /tasks/{id} is cleared
+        {"test_case_id": "RT-1", "steps": [
+            {"step_number": 1, "status": "PASS"}, {"step_number": 2, "status": "PASS"}]},
+        # RT-2 errored at setup (step 1) → final step never ran → NOT cleared
+        {"test_case_id": "RT-2", "steps": [{"step_number": 1, "status": "ERROR"}]},
+    ])
+    out = OrchestratorService._unresolved_suspects(
+        findings, confirmed=[], execution=execution, tests=tests)
+    wheres = {f.where for f in out}
+    assert "GET /tasks/{id}" not in wheres        # cleared in round 1 → don't re-attack
+    assert "GET /projects/{id}" in wheres         # setup-broken → still worth round 2
+
+
+def test_unresolved_suspects_no_execution_keeps_all_unconfirmed():
+    from services.results import Finding
+    findings = [Finding(title="x", where="/a"), Finding(title="y", where="/b")]
+    out = OrchestratorService._unresolved_suspects(findings, confirmed=[])
+    assert {f.where for f in out} == {"/a", "/b"}  # no round-1 data → nothing cleared
+
+
+# ── item 7: the A/B harness proves recall up, cost down, FP flat ───────────────
+
+def test_orchestrator_ab_shows_recall_up_cost_down_fp_flat():
+    from evals.orchestrator_ab import measure
+    m = measure()
+    r, c, fp = (m["recall_classes_expanded"], m["round2_suspects_reattacked"],
+                m["unproven_findings_added"])
+    assert r["after"] > r["before"]   # family expansion reaches more classes
+    assert c["after"] < c["before"]   # round 2 re-attacks fewer suspects
+    assert fp["after"] == fp["before"] == 0   # no unproven findings introduced
