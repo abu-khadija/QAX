@@ -189,6 +189,7 @@ class OrchestratorService:
         tests: list[dict] = []
         chosen_routers: list[str] = []
         skipped_routers: list[str] = []
+        endpoint_groups: list[str] = []
         if deep:
             prog.emit("orchestrate", "step", "generating tests")
             ranked = self._ranked_router_files(model, repo_path, detection=detection)
@@ -201,9 +202,13 @@ class OrchestratorService:
                           f"(~{chosen_eps} endpoint(s), budget {max_endpoints} ep / {max_router_files} files, "
                           f"risk-ranked: suspects + churn + surface)")
             elif getattr(model, "endpoints", None):
-                prog.emit("orchestrate", "warn",
-                          "no router files detected — functional generation produced nothing "
-                          "(probes still cover the endpoint map)")
+                # Fallback: no router source files (UI-only repo, unreadable source,
+                # or a live-only target). Generate functional tests straight from the
+                # endpoint surface, grouped by file/collection, so a no-router repo
+                # still gets generated coverage — not just probes.
+                egen, endpoint_groups = self._generate_from_endpoints(
+                    model, max_router_files, max_endpoints, prog)
+                tests.extend(egen)
             for fpath in chosen_routers:
                 try:
                     gen = GenerationService(self.context).generate(
@@ -230,7 +235,9 @@ class OrchestratorService:
             coverage[f"functional:{_os.path.relpath(fp, repo_path)}"] = "generation"
         for fp in skipped_routers:
             coverage[f"functional:{_os.path.relpath(fp, repo_path)}"] = "skipped (budget)"
-        if deep and not chosen_routers and getattr(model, "endpoints", None):
+        for grp in endpoint_groups:
+            coverage[f"functional:endpoints:{grp}"] = "generation (from endpoints, no router file)"
+        if deep and not chosen_routers and not endpoint_groups and getattr(model, "endpoints", None):
             coverage["functional:routers"] = "skipped (no router files detected)"
 
         # 6) Execute → Critic → Investigator. The verify legs make LLM calls only
@@ -591,6 +598,89 @@ class OrchestratorService:
             chosen.append(p)
             used += cost
         return chosen, ranked[len(chosen):]
+
+    # ── Fallback generation: no router files → generate from the endpoint surface ──
+
+    @staticmethod
+    def _group_endpoints(model: AppModel) -> list[tuple[str, list]]:
+        """
+        Group the model's endpoints by their source file (when known) else by the
+        first non-parameter path segment (/api/orders/{id} → "orders"), ranked
+        highest-risk-first (size + write methods + auth). This is the unit the
+        no-router fallback generates from.
+        """
+        groups: dict[str, list] = {}
+        for e in getattr(model, "endpoints", []):
+            if not isinstance(e, dict):
+                continue
+            key = str(e.get("file") or e.get("source") or "").strip()
+            if not key:
+                segs = [s for s in str(e.get("path", "")).split("/") if s and not s.startswith("{")]
+                key = segs[0] if segs else "api"
+            groups.setdefault(key, []).append(e)
+
+        def gscore(eps: list) -> int:
+            return (len(eps)
+                    + sum(2 for e in eps if str(e.get("method", "")).upper() in ("POST", "PUT", "DELETE", "PATCH"))
+                    + sum(1 for e in eps if e.get("auth_required")))
+        return sorted(groups.items(), key=lambda kv: gscore(kv[1]), reverse=True)
+
+    @staticmethod
+    def _endpoints_as_spec(key: str, eps: list) -> str:
+        """Render an endpoint group as a readable spec for GenerationService."""
+        from core.auth_recipe import field_names
+        lines = [f"# API endpoints for '{key}' "
+                 "(no router source file — generated from the live/model surface)"]
+        for e in eps:
+            m = str(e.get("method", "GET")).upper()
+            p = str(e.get("path", ""))
+            auth = "  [auth required]" if e.get("auth_required") else ""
+            fields = field_names(e.get("request_fields"))
+            body = f"  body: {', '.join(fields)}" if fields else ""
+            lines.append(f"{m} {p}{auth}{body}")
+        return "\n".join(lines)
+
+    def _generate_from_endpoints(self, model: AppModel, max_files: int,
+                                 max_endpoints: int, prog: ProgressReporter) -> tuple[list, list]:
+        """
+        Generate functional API tests directly from the endpoint surface, grouped by
+        file/collection, honouring the same endpoint budget. Returns (test_cases,
+        covered_group_keys). Never raises — a failed group is logged and skipped.
+        """
+        from services.generation_service import GenerationOptions, GenerationService
+
+        ranked = self._group_endpoints(model)
+        if not ranked:
+            return [], []
+        # Budget the groups the same way routers are budgeted: highest-risk-first
+        # until the endpoint budget is spent, bounded by the file ceiling.
+        chosen: list[tuple[str, list]] = []
+        used = 0
+        for key, eps in ranked:
+            if len(chosen) >= max(1, max_files):
+                break
+            if chosen and max_endpoints and used + len(eps) > max_endpoints:
+                break
+            chosen.append((key, eps))
+            used += len(eps)
+
+        prog.emit("orchestrate", "info",
+                  f"no router files — generating from the endpoint surface: "
+                  f"{len(chosen)} group(s), ~{used} endpoint(s)")
+        gs = GenerationService(self.context)
+        ctx = model.as_context()
+        out: list = []
+        covered: list[str] = []
+        for key, eps in chosen:
+            try:
+                gen = gs.generate(f"endpoints://{key}", options=GenerationOptions(
+                    content=self._endpoints_as_spec(key, eps), test_type="api",
+                    module=key, repo_context=ctx, use_cache=False))
+                out.extend(gen.test_cases)
+                covered.append(key)
+            except Exception as exc:
+                logger.warning("endpoint-group generation failed for %s: %s", key, exc)
+        return out, covered
 
     # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
     _FAMILY_SWEEP_LIMIT = 50

@@ -353,3 +353,52 @@ def test_select_within_budget_respects_file_ceiling():
     ranked = [f"r{i}.py" for i in range(10)]
     chosen, _ = OrchestratorService._select_within_budget(ranked, m, max_files=3, max_endpoints=999)
     assert len(chosen) == 3                        # file ceiling caps it even with budget to spare
+
+
+# ── item 5: no-router fallback generates from the endpoint surface ─────────────
+
+def test_group_endpoints_by_segment_ranks_by_risk():
+    m = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/api/orders", "auth_required": True},
+        {"method": "GET", "path": "/api/orders/{id}", "auth_required": True},
+        {"method": "GET", "path": "/health"},
+    ])
+    groups = OrchestratorService._group_endpoints(m)
+    keys = [k for k, _ in groups]
+    assert keys[0] == "api"            # grouped by first non-param segment; "api" segment wins
+    # a model that groups by file keeps distinct keys
+    m2 = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/orders/{id}", "file": "orders.py"},
+        {"method": "GET", "path": "/health", "file": "health.py"}])
+    g2 = dict(OrchestratorService._group_endpoints(m2))
+    assert set(g2) == {"orders.py", "health.py"}
+
+
+def test_endpoints_as_spec_lists_methods_and_auth():
+    spec = OrchestratorService._endpoints_as_spec("orders", [
+        {"method": "post", "path": "/orders", "auth_required": True,
+         "request_fields": ["item_id", "qty"]}])
+    assert "POST /orders" in spec and "[auth required]" in spec and "item_id" in spec
+
+
+def test_generate_from_endpoints_budgets_and_calls_generation(monkeypatch):
+    from services.context import QAXContext
+    import services.generation_service as G
+    from services.results import GenerationResult
+    calls = []
+
+    class FakeGS:
+        def __init__(self, *a, **k): pass
+        def generate(self, source, options=None):
+            calls.append(source)
+            return GenerationResult(source=source, test_cases=[{"test_case_id": source}])
+    monkeypatch.setattr(G, "GenerationService", FakeGS)
+
+    m = AppModel(root="/x", endpoints=(
+        [{"method": "GET", "path": f"/orders/{i}", "file": "orders.py"} for i in range(30)]
+        + [{"method": "GET", "path": "/health", "file": "health.py"}]))
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    from services.progress import NullProgressReporter
+    tests, covered = svc._generate_from_endpoints(m, max_files=4, max_endpoints=10, prog=NullProgressReporter())
+    assert covered == ["orders.py"]       # dense group taken; health skipped by budget (always keep 1)
+    assert tests and tests[0]["test_case_id"].startswith("endpoints://")
