@@ -16,10 +16,11 @@ orchestrator derives the high-value coverage goals from the model, checks whethe
 the generated tests actually meet them, and for any critical gap it injects a
 DETERMINISTIC template test — so a known-critical goal is covered every run, not by
 luck. Functional generation (deep mode) is budgeted: it ranks the router files by
-risk and generates for the top `max_router_files`, and records every router it
-covered or SKIPPED in the coverage map — so the report never implies a router was
-tested when it wasn't. (The probes and coverage templates always run over the whole
-endpoint map, independent of this budget.)
+risk (Detector suspects + git churn + endpoint surface, not the file name alone) and
+spends an ENDPOINT budget on them highest-risk-first (bounded by a file ceiling),
+recording every router it covered or SKIPPED in the coverage map — so the report
+never implies a router was tested when it wasn't. (The probes and coverage templates
+always run over the whole endpoint map, independent of this budget.)
 
 Never prints, never calls sys.exit(); failures are captured in the result.
 """
@@ -55,6 +56,7 @@ class OrchestratorService:
         *,
         deep: bool = True,
         max_router_files: int = 4,
+        max_endpoints: int = 40,
         use_cache: bool = True,
         auth: dict | None = None,
         tour: bool = False,
@@ -74,7 +76,13 @@ class OrchestratorService:
                 detectors, the active probes, and the deterministic coverage
                 templates. A quick scan makes ~1 model call (or 0 when cached) yet
                 still proves the exploit probes and the guaranteed security classes.
-            max_router_files (int): Cap on router files for functional generation.
+            max_router_files (int): Hard ceiling on router files for functional
+                generation (safety bound on a pathological repo).
+            max_endpoints (int): The real generation budget — routers are chosen
+                highest-risk-first until this many endpoints are covered (budget by
+                work, not a flat file count), bounded by max_router_files. Routers
+                are ranked by Detector suspects + git churn + endpoint surface, not
+                the file name alone.
             use_cache (bool): Reuse a cached AppModel for unchanged source.
             progress (ProgressReporter | None): Progress sink.
 
@@ -183,13 +191,15 @@ class OrchestratorService:
         skipped_routers: list[str] = []
         if deep:
             prog.emit("orchestrate", "step", "generating tests")
-            ranked = self._ranked_router_files(model, repo_path)   # highest-risk first
-            chosen_routers = ranked[:max_router_files]
-            skipped_routers = ranked[max_router_files:]
+            ranked = self._ranked_router_files(model, repo_path, detection=detection)
+            chosen_routers, skipped_routers = self._select_within_budget(
+                ranked, model, max_router_files, max_endpoints)
             if ranked:
+                chosen_eps = sum(self._router_endpoint_count(p, model) for p in chosen_routers)
                 prog.emit("orchestrate", "info",
                           f"functional generation: {len(chosen_routers)} of {len(ranked)} router(s) "
-                          f"(budget {max_router_files}, highest-risk first)")
+                          f"(~{chosen_eps} endpoint(s), budget {max_endpoints} ep / {max_router_files} files, "
+                          f"risk-ranked: suspects + churn + surface)")
             elif getattr(model, "endpoints", None):
                 prog.emit("orchestrate", "warn",
                           "no router files detected — functional generation produced nothing "
@@ -491,12 +501,18 @@ class OrchestratorService:
                     "static", "index", "home", "version", "metrics", "favicon", "robots")
 
     @classmethod
-    def _router_score(cls, path: str, model: AppModel) -> int:
+    def _router_score(cls, path: str, model: AppModel, detection=None,
+                      churn: int = 0) -> int:
         """
         Risk score for a router file, so the generation budget goes to the most
-        dangerous ones first (payments before health). Uses the file name plus the
-        endpoints attributed to it by name convention (write methods and auth weigh
-        more) — reliable without a per-file endpoint link.
+        dangerous ones first (payments before health). Combines four signals:
+          • the file name (high-risk vs trivial keywords),
+          • the endpoints attributed to it by name convention (writes + auth weigh more),
+          • the Detector's suspects pointing AT this file — a rule or the knowledge
+            pass already flagged real risk here, the strongest single signal, and
+          • git churn (bug-fix commits in its history — regression-prone code).
+        `detection` and `churn` are optional, so the bare (path, model) call still
+        scores on the static signals alone.
         """
         name = Path(path).stem.lower()
         score = 0
@@ -510,12 +526,71 @@ class OrchestratorService:
         score += len(eps)
         score += sum(2 for e in eps if str(e.get("method", "")).upper() in ("POST", "PUT", "DELETE", "PATCH"))
         score += sum(1 for e in eps if e.get("auth_required"))
+        score += 3 * cls._file_suspect_count(path, detection)   # Detector already flagged it
+        score += 2 * min(int(churn or 0), 3)                     # bug-fix-prone history (capped)
         return score
 
-    def _ranked_router_files(self, model: AppModel, repo_path: str) -> list[str]:
+    @staticmethod
+    def _file_suspect_count(path: str, detection) -> int:
+        """How many Detector suspects point at this router file (by name/relpath)."""
+        if not detection:
+            return 0
+        findings = getattr(detection, "findings", detection) or []
+        name = Path(path).name.lower()
+        stem = Path(path).stem.lower()
+        n = 0
+        for f in findings:
+            where = str(getattr(f, "where", "")).lower()
+            if where and (name in where or (stem and f"/{stem}" in where) or where.endswith(stem)):
+                n += 1
+        return n
+
+    @classmethod
+    def _router_endpoint_count(cls, path: str, model: AppModel) -> int:
+        """Endpoints attributed to a router by name convention (min 1 so it has a cost)."""
+        stem = Path(path).stem.lower().rstrip("s") or Path(path).stem.lower()
+        n = sum(1 for e in getattr(model, "endpoints", []) if isinstance(e, dict)
+                and stem and stem in str(e.get("path", "")).lower())
+        return n or 1
+
+    def _ranked_router_files(self, model: AppModel, repo_path: str,
+                             detection=None) -> list[str]:
         """Router files ordered highest-risk first (for the functional-generation budget)."""
         files = self._router_files(model, repo_path)
-        return sorted(files, key=lambda p: self._router_score(p, model), reverse=True)
+        churn: dict = {}
+        try:
+            from core.git_analyzer import GitAnalyzer
+            ga = GitAnalyzer()
+            for f in files:
+                try:
+                    churn[f] = int(ga.get_file_history(f).get("bug_fix_count", 0))
+                except Exception:
+                    churn[f] = 0
+        except Exception:
+            pass
+        return sorted(files, key=lambda p: self._router_score(
+            p, model, detection=detection, churn=churn.get(p, 0)), reverse=True)
+
+    @classmethod
+    def _select_within_budget(cls, ranked: list[str], model: AppModel,
+                              max_files: int, max_endpoints: int | None) -> tuple[list, list]:
+        """
+        Choose routers highest-risk-first until the ENDPOINT budget is spent (budget
+        by the work each router implies, not a flat file count), bounded by a hard
+        file ceiling so a pathological repo can't blow the budget. Always keeps at
+        least the single highest-risk router.
+        """
+        chosen: list[str] = []
+        used = 0
+        for p in ranked:
+            if len(chosen) >= max(1, max_files):
+                break
+            cost = cls._router_endpoint_count(p, model)
+            if chosen and max_endpoints and used + cost > max_endpoints:
+                break
+            chosen.append(p)
+            used += cost
+        return chosen, ranked[len(chosen):]
 
     # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
     _FAMILY_SWEEP_LIMIT = 50

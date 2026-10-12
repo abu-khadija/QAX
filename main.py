@@ -2471,7 +2471,10 @@ def run_scan_command() -> None:
                         help="Base URL of the running app (e.g. http://localhost:8000).")
     parser.add_argument("--project", default=None, help="QAX project name (optional).")
     parser.add_argument("--max-router-files", type=int, default=4,
-                        help="Cap on router files to generate functional tests from.")
+                        help="Hard ceiling on router files for functional generation.")
+    parser.add_argument("--max-endpoints", type=int, default=40,
+                        help="Functional-generation budget in endpoints (routers chosen "
+                             "highest-risk-first until spent, bounded by --max-router-files).")
     parser.add_argument("--quick", action="store_true",
                         help="Quick scan — skip the LLM-heavy passes (knowledge, functional "
                              "generation, red-team). Uses probes + deterministic coverage only; "
@@ -2541,6 +2544,7 @@ def run_scan_command() -> None:
         repo_path, args.url,
         deep=not args.quick,
         max_router_files=args.max_router_files,
+        max_endpoints=args.max_endpoints,
         use_cache=not args.refresh,
         auth=_auth,
         tour=args.tour,

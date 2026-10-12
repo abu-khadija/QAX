@@ -317,3 +317,39 @@ def test_orchestrator_ab_shows_recall_up_cost_down_fp_flat():
     assert r["after"] > r["before"]   # family expansion reaches more classes
     assert c["after"] < c["before"]   # round 2 re-attacks fewer suspects
     assert fp["after"] == fp["before"] == 0   # no unproven findings introduced
+
+
+# ── item 4: richer router ranking (suspects + churn) + endpoint budget ─────────
+
+def test_router_score_boosts_files_with_detector_suspects():
+    from services.results import Finding
+    m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/orders/{id}"}])
+    det = [Finding(title="IDOR", where="routers/orders.py:42"),
+           Finding(title="missing authz", where="routers/orders.py:60")]
+    base = OrchestratorService._router_score("routers/orders.py", m)
+    boosted = OrchestratorService._router_score("routers/orders.py", m, detection=det)
+    assert boosted > base            # suspects pointing at the file raise its rank
+
+
+def test_router_score_boosts_churn():
+    m = AppModel(root="/x", endpoints=[])
+    assert (OrchestratorService._router_score("routers/orders.py", m, churn=5)
+            > OrchestratorService._router_score("routers/orders.py", m, churn=0))
+
+
+def test_select_within_budget_spends_endpoints_not_flat_file_count():
+    m = AppModel(root="/x", endpoints=(
+        [{"method": "GET", "path": f"/orders/{i}"} for i in range(30)]     # orders: dense
+        + [{"method": "GET", "path": "/health"}]))                          # health: 1
+    ranked = ["routers/orders.py", "routers/health.py", "routers/about.py"]
+    chosen, skipped = OrchestratorService._select_within_budget(ranked, m, max_files=4, max_endpoints=10)
+    assert "routers/orders.py" in chosen          # highest-cost router still taken (always keep 1)
+    assert "routers/about.py" in skipped          # budget spent → later routers skipped
+    assert len(chosen) < len(ranked)
+
+
+def test_select_within_budget_respects_file_ceiling():
+    m = AppModel(root="/x", endpoints=[])
+    ranked = [f"r{i}.py" for i in range(10)]
+    chosen, _ = OrchestratorService._select_within_budget(ranked, m, max_files=3, max_endpoints=999)
+    assert len(chosen) == 3                        # file ceiling caps it even with budget to spare
