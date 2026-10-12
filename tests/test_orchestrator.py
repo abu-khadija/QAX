@@ -402,3 +402,59 @@ def test_generate_from_endpoints_budgets_and_calls_generation(monkeypatch):
     tests, covered = svc._generate_from_endpoints(m, max_files=4, max_endpoints=10, prog=NullProgressReporter())
     assert covered == ["orders.py"]       # dense group taken; health skipped by budget (always keep 1)
     assert tests and tests[0]["test_case_id"].startswith("endpoints://")
+
+
+# ── item 3: setup repair re-runs broken tests with a known-good preamble ───────
+
+def test_setup_broken_tests_finds_only_pre_attack_failures():
+    tests = [
+        {"test_case_id": "A", "api_steps": [{"step_number": 1}, {"step_number": 2}]},  # broke at setup
+        {"test_case_id": "B", "api_steps": [{"step_number": 1}, {"step_number": 2}]},  # attack landed
+    ]
+    class Ex:
+        results = [
+            {"test_case_id": "A", "steps": [{"step_number": 1, "status": "ERROR"}]},          # final (2) never ran
+            {"test_case_id": "B", "steps": [{"step_number": 1, "status": "PASS"},
+                                             {"step_number": 2, "status": "FAIL"}]},           # final ran
+        ]
+    broken = OrchestratorService._setup_broken_tests(Ex(), tests)
+    assert [t["test_case_id"] for t in broken] == ["A"]
+
+
+def test_attack_tail_strips_leading_auth_steps():
+    recipe = {"register_path": "/auth/register", "login_path": "/auth/login"}
+    steps = [{"path": "/auth/register"}, {"path": "/auth/login"},
+             {"path": "/orders/1"}, {"path": "/orders/2"}]
+    tail = OrchestratorService._attack_tail(steps, recipe)
+    assert [s["path"] for s in tail] == ["/orders/1", "/orders/2"]
+
+
+def test_repair_setup_prepends_good_preamble_and_attaches_token():
+    from services.context import QAXContext
+    m = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/auth/register", "request_fields": ["email", "password"]},
+        {"method": "POST", "path": "/auth/login", "request_fields": ["email", "password"]},
+        {"method": "GET", "path": "/orders/{id}"},
+    ])
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    broken = [{"test_case_id": "RT-9", "title": "IDOR orders",
+               "api_steps": [{"step_number": 1, "method": "POST", "path": "/auth/login", "body": {}},
+                             {"step_number": 2, "method": "GET", "path": "/orders/7"}]}]
+    out = svc._repair_setup(broken, m)
+    assert len(out) == 1
+    steps = out[0]["api_steps"]
+    assert steps[0]["path"] == "/auth/register" and steps[1]["path"] == "/auth/login"  # good preamble
+    assert "save" in steps[1]                                   # token saved
+    attack = steps[-1]
+    assert attack["path"] == "/orders/7" and attack["use_auth"] == "token"   # token attached
+    assert out[0]["test_case_id"].endswith("-rep")
+
+
+def test_repair_setup_skips_test_with_no_attack_tail():
+    from services.context import QAXContext
+    m = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/auth/register", "request_fields": ["email", "password"]},
+        {"method": "POST", "path": "/auth/login", "request_fields": ["email", "password"]}])
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    broken = [{"test_case_id": "RT-x", "api_steps": [{"step_number": 1, "path": "/auth/login"}]}]
+    assert svc._repair_setup(broken, m) == []

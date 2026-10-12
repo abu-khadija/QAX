@@ -283,36 +283,52 @@ class OrchestratorService:
         except Exception as exc:
             logger.warning("family expansion failed: %s", exc)
 
-        # 7c) One bounded second round: re-attack the suspects round 1 left UNRESOLVED.
-        #     This covers both "orphan" suspects (no test was written) and tests that
-        #     broke on setup (the suspect went unverified) — in both cases the suspect
-        #     is simply not reflected in any confirmed bug. Deep mode only, capped, and
-        #     exactly one extra round so it can't loop or burn budget.
+        # 7c) One bounded second round. It assembles its tests from two sources and
+        #     runs them together, exactly once (so it can't loop or burn budget):
+        #       (a) DETERMINISTIC setup repair — round-1 tests that broke before their
+        #           attack landed get a known-good register→login preamble spliced in
+        #           front of their original attack tail and re-run. This rescues the
+        #           "login without register" class WITHOUT asking the LLM to rewrite
+        #           the attack (which tends to repeat the same setup mistake).
+        #       (b) REGENERATION — suspects still genuinely unverified (orphans the
+        #           app already defended are excluded by _unresolved_suspects) get a
+        #           fresh red-team attack. Deep mode only.
         rounds = 1
         if deep:
+            round2_tests: list[dict] = []
+            repaired = self._repair_setup(
+                self._setup_broken_tests(execution, executable), model)
+            round2_tests.extend(repaired)
             unresolved = self._unresolved_suspects(
                 getattr(detection, "findings", []), confirmed,
                 execution=execution, tests=executable)[:10]
             if unresolved:
                 try:
-                    prog.emit("orchestrate", "step",
-                              f"round 2 — re-attacking {len(unresolved)} unresolved suspect(s)")
                     rt2 = RedTeamService(self.context).generate(model, unresolved, progress=prog)
+                    round2_tests.extend(rt2.test_cases)
+                except Exception as exc:
+                    logger.warning("round 2 red-team failed: %s", exc)
+            if round2_tests:
+                try:
+                    prog.emit("orchestrate", "step",
+                              f"round 2 — {len(repaired)} setup-repaired + "
+                              f"{len(round2_tests) - len(repaired)} re-attack test(s)")
                     exe2 = ExecutionService(self.context).execute(
-                        [t for t in rt2.test_cases if t.get("api_steps")], mode="api", base_url=base_url)
-                    gen2 = [t for t in rt2.test_cases if t.get("attack") != "coverage-template"]
+                        [t for t in round2_tests if t.get("api_steps")], mode="api", base_url=base_url)
+                    gen2 = [t for t in round2_tests if t.get("attack") != "coverage-template"]
                     crit2 = CriticService(self.context).review(exe2, gen2)
                     inv2 = InvestigatorService(self.context).investigate(crit2, gen2, base_url=base_url)
                     rounds = 2
                     seen = {(str(b.get("title", "")), str(b.get("target", ""))) for b in confirmed}
-                    new2 = [b for b in self._unify(inv2, None)
+                    new2 = [b for b in (self._unify(inv2, None)
+                                        + self._confirmed_from_templates(exe2, round2_tests, confirmed))
                             if (str(b.get("title", "")), str(b.get("target", ""))) not in seen]
                     confirmed += new2
                     prog.emit("orchestrate", "info",
-                              f"round 2: +{len(new2)} confirmed bug(s) from re-attack" if new2
+                              f"round 2: +{len(new2)} confirmed bug(s)" if new2
                               else "round 2: no new confirmed bugs")
                 except Exception as exc:
-                    logger.warning("round 2 re-attack failed: %s", exc)
+                    logger.warning("round 2 failed: %s", exc)
 
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=rounds,
@@ -842,6 +858,89 @@ class OrchestratorService:
                 if p and p != "/":
                     cleared.add(p)
         return cleared
+
+    # ── Setup repair: fix a broken auth preamble and re-run (item 3) ───────────
+
+    @classmethod
+    def _setup_broken_tests(cls, execution, tests: list[dict] | None) -> list[dict]:
+        """
+        Round-1 tests that broke BEFORE their attack landed: the final step never ran
+        and an earlier step failed/errored. These are the ones a setup repair rescues
+        (e.g. a login with no prior register) — distinct from tests the app defended.
+        """
+        if not execution or not tests:
+            return []
+        by_key: dict = {}
+        for t in tests:
+            by_key[t.get("test_case_id", "")] = t
+            by_key[t.get("title", "")] = t
+        broken: list[dict] = []
+        for r in getattr(execution, "results", []):
+            tc = by_key.get(r.get("test_case_id", "")) or by_key.get(r.get("title", ""))
+            if not tc:
+                continue
+            steps = tc.get("api_steps") or []
+            rsteps = r.get("steps") or []
+            if not steps or not rsteps:
+                continue
+            ran = {s.get("step_number") for s in rsteps if s.get("status") in ("PASS", "FAIL")}
+            if steps[-1].get("step_number") in ran:
+                continue  # attack landed — not a setup break
+            if any(s.get("status") in ("FAIL", "ERROR") for s in rsteps):
+                broken.append(tc)
+        return broken
+
+    @staticmethod
+    def _attack_tail(steps: list[dict], recipe: dict) -> list[dict]:
+        """Drop a test's leading register/login (setup) steps, keeping its attack tail."""
+        auth_paths = {str(recipe.get("register_path", "")).rstrip("/"),
+                      str(recipe.get("login_path", "")).rstrip("/")}
+        i = 0
+        while i < len(steps):
+            p = str(steps[i].get("path", "")).split("?")[0].rstrip("/")
+            if p in auth_paths:
+                i += 1
+            else:
+                break
+        return steps[i:]
+
+    @staticmethod
+    def _has_auth_header(step: dict) -> bool:
+        headers = step.get("headers") or {}
+        return any(str(k).lower() == "authorization" for k in headers)
+
+    def _repair_setup(self, broken: list[dict], model: AppModel) -> list[dict]:
+        """
+        Rebuild each setup-broken test with a KNOWN-GOOD auth preamble (the same
+        register→login→save-token steps the coverage templates use successfully) in
+        front of its original attack tail, and re-run that — instead of asking the
+        LLM to regenerate the whole attack, which can repeat the same setup mistake.
+        Deterministic; returns [] when no auth recipe can be derived.
+        """
+        from core.auth_recipe import derive_auth_recipe
+        from services.coverage_goals import _auth_steps
+        recipe = derive_auth_recipe(model)
+        if not recipe:
+            return []
+        repaired: list[dict] = []
+        for t in broken:
+            tail = self._attack_tail(t.get("api_steps") or [], recipe)
+            if not tail:
+                continue  # nothing but setup — no attack to replay
+            preamble = _auth_steps(recipe, model, "rp", "token", 1)
+            start = len(preamble) + 1
+            new_tail = []
+            for i, s in enumerate(tail):
+                ns = dict(s)
+                ns["step_number"] = start + i
+                if "use_auth" not in ns and not self._has_auth_header(ns):
+                    ns["use_auth"] = "token"   # attach the repaired token to the attack
+                new_tail.append(ns)
+            repaired.append({**t,
+                             "test_case_id": f"{t.get('test_case_id', 'RT')}-rep",
+                             "title": f"[setup-repaired] {t.get('title', '')}".strip(),
+                             "api_steps": preamble + new_tail})
+        return repaired
 
     _COV_SEVERITY = {"COV-AUTH": "P1", "COV-IDOR": "P1", "COV-VAL": "P3", "COV-PAG": "P2"}
 
