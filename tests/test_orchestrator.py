@@ -458,3 +458,31 @@ def test_repair_setup_skips_test_with_no_attack_tail():
     svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
     broken = [{"test_case_id": "RT-x", "api_steps": [{"step_number": 1, "path": "/auth/login"}]}]
     assert svc._repair_setup(broken, m) == []
+
+
+# ── B1: deterministic CONFIRMED vs non-deterministic AI leads, stable ordering ──
+
+def test_result_splits_deterministic_from_ai_leads():
+    from services.results import OrchestratorResult
+    r = OrchestratorResult(confirmed=[
+        {"source": "test", "severity": "P1", "title": "LLM says SQLi", "target": "/x"},
+        {"source": "probe", "probe": "bola", "severity": "P1", "title": "BOLA", "target": "/a"},
+        {"source": "coverage", "severity": "P1", "title": "auth bypass", "target": "GET /b"},
+        {"source": "ui", "severity": "P2", "title": "console error"},
+    ])
+    det = {b["title"] for b in r.confirmed_deterministic}
+    ai = {b["title"] for b in r.leads_ai}
+    assert det == {"BOLA", "auth bypass"}          # probe + coverage only
+    assert ai == {"LLM says SQLi", "console error"}  # test + ui are leads
+
+
+def test_deterministic_block_is_order_stable():
+    from services.results import OrchestratorResult
+    a = [{"source": "probe", "probe": "bola", "severity": "P1", "title": "B", "target": "/b"},
+         {"source": "probe", "probe": "sqli", "severity": "P1", "title": "A", "target": "/a"},
+         {"source": "coverage", "severity": "P2", "title": "C", "target": "/c"}]
+    r1 = OrchestratorResult(confirmed=list(a))
+    r2 = OrchestratorResult(confirmed=list(reversed(a)))   # same findings, different input order
+    k1 = [OrchestratorResult._confirmed_key(b) for b in r1.confirmed_deterministic]
+    k2 = [OrchestratorResult._confirmed_key(b) for b in r2.confirmed_deterministic]
+    assert k1 == k2                                 # canonical order → reproducible block

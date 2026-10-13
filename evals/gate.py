@@ -134,11 +134,19 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     proc = _boot(port, secure=False)
     try:
         res, rec = _scan(f"http://127.0.0.1:{port}")
+        res2, _ = _scan(f"http://127.0.0.1:{port}")   # second scan — must match deterministically
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
     acc = rec.get("accuracy", {})
     probes = {b.get("probe") for b in res.confirmed}
+
+    from services.results import OrchestratorResult as _OR
+    k1 = [_OR._confirmed_key(b) for b in res.confirmed_deterministic]
+    k2 = [_OR._confirmed_key(b) for b in res2.confirmed_deterministic]
+    checks.append(("B1: deterministic CONFIRMED block reproducible (2 scans identical)",
+                   k1 == k2 and len(k1) > 0,
+                   f"{len(k1)} confirmed, identical={k1 == k2}, {len(res.leads_ai)} AI lead(s) excluded"))
     checks.append(("quick-scan recall == 100%", acc.get("recall_pct") == 100.0,
                    f"recall={acc.get('recall_pct')}% caught {acc.get('caught')}/{acc.get('documented')} "
                    f"missed={acc.get('missed')}"))

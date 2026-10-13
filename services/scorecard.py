@@ -58,6 +58,13 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
     claims = [b for b in confirmed if str(b.get("severity", "")).upper() in ("P1", "P2")]
     leads = [b for b in confirmed if str(b.get("severity", "")).upper() not in ("P1", "P2")]
 
+    # Split by TRUST, not just severity: deterministic (probe + self-proving template,
+    # reproducible + 0-FP) vs AI leads (Investigator/tour, may vary run to run). This is
+    # what a buyer needs labelled — the CONFIRMED block is the reproducible guarantee.
+    _DET = ("probe", "coverage")
+    deterministic = [b for b in confirmed if str(b.get("source", "")) in _DET]
+    ai_leads = [b for b in confirmed if str(b.get("source", "")) not in _DET]
+
     rec: dict = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "repo": repo,
@@ -70,6 +77,8 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
         "confirmed_count": len(confirmed),
         "claims_count": len(claims),
         "leads_count": len(leads),
+        "deterministic_count": len(deterministic),
+        "ai_leads_count": len(ai_leads),
         "by_layer": by_layer,
         "coverage": dict(getattr(result, "coverage", {}) or {}),
         "completed_end_to_end": bool(getattr(result, "success", False)),
@@ -141,10 +150,15 @@ def render(rec: dict) -> str:
     name = Path(rec.get("repo", "repo")).name
     claims = rec.get("claims_count", rec.get("confirmed_count", 0))
     leads = rec.get("leads_count", 0)
+    det = rec.get("deterministic_count")
+    ai = rec.get("ai_leads_count")
     lines = [f"  📊 Scorecard — {rec.get('mode')} scan · {name}",
              f"     confirmed (P1/P2): {claims}  ·  leads (P3): {leads}  ·  "
              f"tests: {rec.get('tests_run', 0)}  ·  {rec.get('duration_sec', 0)}s  ·  "
              f"end-to-end: {'yes' if rec.get('completed_end_to_end') else 'no'}"]
+    if det is not None:
+        lines.append(f"     CONFIRMED (deterministic, 0-FP): {det}  ·  "
+                     f"AI leads (may vary): {ai}")
     if rec.get("by_layer"):
         lines.append("     by layer: " + ", ".join(f"{k}:{v}" for k, v in rec["by_layer"].items()))
     c = rec.get("cost")

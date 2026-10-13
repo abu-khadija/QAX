@@ -128,14 +128,17 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
     rec = scorecard.score_run(result, repo=repo, url=url, mode="quick",
                               duration_sec=time.time() - t0, usage=usage.snapshot())
     from services.remediation import remediation_for
-    confirmed = list(result.confirmed or [])
-    for b in confirmed:
+    for b in (result.confirmed or []):
         b["remediation"] = remediation_for(b)
-    claims = [b for b in confirmed if str(b.get("severity", "")).upper() in ("P1", "P2")]
-    leads = [b for b in confirmed if b not in claims]
-    # Supply-chain angle: known-CVE and copyleft/non-commercial dependencies. These
-    # are real but not proven-exploitable on the live app, so they are reported as
-    # leads (hygiene), never confirmed claims — in keeping with "don't cry wolf".
+    # B1 — separate by TRUST, not severity: the CONFIRMED block is the deterministic,
+    # reproducible, zero-false-positive layer (probes + self-proving templates) in a
+    # canonical order; the LEADS block is the AI Investigator / UI tour (may vary run
+    # to run) plus supply-chain hygiene. A buyer can re-run and get the same CONFIRMED.
+    claims = list(result.confirmed_deterministic)
+    leads = list(result.leads_ai)
+    # Supply-chain angle: known-CVE and copyleft/non-commercial dependencies. Real but
+    # not proven-exploitable on the live app, so they ride in leads (hygiene), never
+    # the confirmed block — in keeping with "don't cry wolf".
     leads.extend(_supply_chain_leads(repo))
     screens = []
     for s in (getattr(result, "ui_screens", []) or []):

@@ -36,15 +36,14 @@ assessment, ordered highest-risk-first. **March through them one at a time, top 
 bottom; a task is done only when its "done when" holds and the gate stays green.**
 Overlapping Phase-2/3 items are absorbed here.
 
-- [ ] **B1 — LLM non-determinism is visible to the buyer.** Risk: the deep scan's
-      confirmed count varied run-to-run (8/11/12); a buyer who runs twice and sees
-      different results loses trust — this attacks our core differentiator.
-      Task: separate the two layers in every output — a **CONFIRMED (deterministic,
-      0-FP)** section that is byte-stable across runs, and a clearly-labelled
-      **LEADS (AI, may vary)** section; make the deterministic core reproducible and
-      add a gate check that two quick scans of the golden target yield identical
-      confirmed sets. Done when: two consecutive scans show an identical CONFIRMED
-      block, and the UI/report/scorecard label the AI layer as non-deterministic.
+- [x] **B1 — LLM non-determinism visible to the buyer (DONE).** The output now
+      splits by TRUST, not severity: `OrchestratorResult.confirmed_deterministic`
+      (probes + self-proving templates, canonical-ordered, byte-stable) vs
+      `.leads_ai` (Investigator/tour, may vary). Labelled everywhere — scorecard
+      (`deterministic_count`/`ai_leads_count` + render line), web UI (CONFIRMED ·
+      deterministic / Leads · AI-hygiene, footer reworded), and `summary()`. Gate
+      hard-check: two quick scans of the golden target yield an identical CONFIRMED
+      block (passing: 5 confirmed, identical=True). +2 unit tests. Done.
 
 - [ ] **B2 — silent gaps in the pipeline.** Risk: the API-validation bug sat hidden
       ~8 months and zeroed all API generation; there are likely more silent no-ops.

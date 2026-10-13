@@ -432,13 +432,45 @@ class OrchestratorResult:
         """Goals a generated test missed that the orchestrator filled itself."""
         return [g for g, s in self.coverage.items() if s == "template"]
 
+    # Sources whose findings are DETERMINISTIC (reproducible, zero-false-positive):
+    # the active probes and the self-proving coverage templates. The LLM Investigator
+    # ("test") and the browser tour ("ui") are NOT — they can vary run to run.
+    _DETERMINISTIC_SOURCES = ("probe", "coverage")
+
+    @staticmethod
+    def _confirmed_key(b: dict) -> tuple:
+        """A stable identity for a confirmed bug, for canonical ordering + diffing."""
+        return (str(b.get("source", "")), str(b.get("probe", "")),
+                str(b.get("severity", "")), str(b.get("target", "")), str(b.get("title", "")))
+
+    @property
+    def confirmed_deterministic(self) -> list:
+        """
+        The CONFIRMED block: probe- and template-proven bugs, in a canonical order so
+        two runs of the same target yield a byte-identical list. This is the trust
+        guarantee a buyer can reproduce — it never depends on a lucky LLM generation.
+        """
+        det = [b for b in self.confirmed
+               if str(b.get("source", "")) in self._DETERMINISTIC_SOURCES]
+        return sorted(det, key=self._confirmed_key)
+
+    @property
+    def leads_ai(self) -> list:
+        """
+        The LEADS block: findings from the LLM Investigator / UI tour. Higher recall
+        but NON-DETERMINISTIC (may differ between runs) — surfaced separately so the
+        deterministic CONFIRMED block is never muddied by them.
+        """
+        return [b for b in self.confirmed
+                if str(b.get("source", "")) not in self._DETERMINISTIC_SOURCES]
+
     def summary(self) -> str:
-        """One-line human summary: confirmed (P1/P2) vs low-confidence leads (P3)."""
-        claims = sum(1 for b in self.confirmed
-                     if str(b.get("severity", "")).upper() in ("P1", "P2"))
-        leads = len(self.confirmed) - claims
-        return (f"{claims} confirmed (P1/P2) · {leads} lead(s) · {self.tests_run} test(s) · "
-                f"{self.rounds} round(s) · {len(self.gaps_filled)} coverage gap(s) filled")
+        """One-line human summary: deterministic CONFIRMED vs non-deterministic AI leads."""
+        det = len(self.confirmed_deterministic)
+        ai = len(self.leads_ai)
+        return (f"{det} confirmed (deterministic, 0-FP) · {ai} AI lead(s), may vary · "
+                f"{self.tests_run} test(s) · {self.rounds} round(s) · "
+                f"{len(self.gaps_filled)} coverage gap(s) filled")
 
     def to_dict(self) -> dict:
         return {

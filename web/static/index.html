@@ -244,8 +244,9 @@
   </section>
 </div>
 
-<footer>QAX runs locally against an app you control. It reports <b>confirmed (P1/P2)</b> issues it proved,
-and <b>leads (P3)</b> it could not — separately, on purpose.</footer>
+<footer>QAX runs locally against an app you control. The <b>confirmed</b> block is deterministic and
+zero-false-positive — re-run and you get the same list. <b>Leads</b> (AI findings + dependency
+hygiene) are higher-recall but may vary — shown separately, on purpose.</footer>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -389,8 +390,8 @@ function render(d){
   // stats
   const cstr = cost && cost.tracked ? ('$'+cost.estimated_usd) : '—';
   $('stats').innerHTML = [
-    ['n p1',nClaims,'Confirmed (P1/P2)'],
-    ['n p3',nLeads,'Leads (P3)'],
+    ['n p1',nClaims,'Confirmed · deterministic'],
+    ['n p3',nLeads,'Leads · AI / hygiene'],
     ['n',sc.tests_run??'—','Tests run'],
     ['n',(sc.duration_sec??'—')+'s','Duration'],
     ['n',cstr,'LLM cost'],
@@ -494,7 +495,7 @@ function buildReportHTML(d){
   +(nC>0
      ? '<div class="verdict vbad">🛑 '+nC+' confirmed issue'+(nC>1?'s':'')+' — proven exploitable ('+nL+' lead'+(nL!==1?'s':'')+' to review)</div>'
      : '<div class="verdict vgood">✓ No confirmed issues — the app held up ('+nL+' low-confidence lead'+(nL!==1?'s':'')+')</div>')
-  +'<table class="stats"><tr>'+stat(nC,'Confirmed')+stat(nL,'Leads (P3)')+stat(sc.tests_run??'—','Tests')+stat((sc.duration_sec??'—')+'s','Duration')+stat(cstr,'LLM cost')+stat(sc.end_to_end?'yes':'no','End-to-end')+'</tr></table>'
+  +'<table class="stats"><tr>'+stat(nC,'Confirmed · deterministic')+stat(nL,'Leads · may vary')+stat(sc.tests_run??'—','Tests')+stat((sc.duration_sec??'—')+'s','Duration')+stat(cstr,'LLM cost')+stat(sc.end_to_end?'yes':'no','End-to-end')+'</tr></table>'
   +'<div class="lay">Caught by: '+layers+'</div>'
   +(claims.length?'<div class="sct">Confirmed — proven exploitable</div>'+claims.map(fRow).join(''):'')
   +((d.leads||[]).length?'<div class="sct">Leads — flagged, not confirmed</div>'+(d.leads).map(fRow).join(''):'')
