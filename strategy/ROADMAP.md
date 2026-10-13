@@ -32,13 +32,16 @@ without breaking anything. No number, no merge.
 Goal: make quality provable and repeatable before adding surface.
 
 - [ ] **Merge PR #1** — land the service layer + the 7 fixes.
-- [ ] **Golden regression target** — move the seeded vulnerable Flask app into
-      `evals/targets/` with a truth file in `evals/truth/`, so every future change
-      gets a live before/after automatically (this is the "did it improve?" answer
-      made permanent).
-- [ ] **One-command eval** — a `make eval` / script that (a) boots the golden
-      target, (b) runs quick + deep scans, (c) prints scorecard recall/FP, (d) runs
-      `evals/orchestrator_ab.py`. The merge gate.
+- [x] **Golden regression target** (done) — `evals/targets/vuln_jwt_app.py` + truth
+      `evals/truth/golden-jwt.json`. A permanent, deliberately-vulnerable fixture
+      (JWT signature not verified) the gate scans on every change.
+- [x] **One-command eval** (done) — `make eval` (`python -m evals.gate`): boots the
+      golden target, runs a deterministic quick scan, scores recall/FP vs truth,
+      runs the SECURE control (flaw fixed → probes silent, 0 FP), and the A/B
+      harness. Non-zero exit blocks merge. Effectively zero-LLM (empty repo → live
+      grounding). Current: GATE PASS (recall 100%, FP 0).
+      NEXT on the gate: add an optional `--deep` lane (credit-gated) for a full
+      scorecard before/after on items 3/5/6.
 - [ ] **Full live before/after via scorecard** on the golden target for the
       deep-mode items (3 setup-repair, 5 no-router fallback, 6 forged-token-replay) —
       official recall/FP numbers, closing the "deep items are only unit-proven" gap.

@@ -1,0 +1,10 @@
+{
+  "target": "QAX golden JWT target (evals/targets/vuln_jwt_app.py)",
+  "source": "purpose-built: JWT signature not verified → forged tokens accepted across the protected surface",
+  "note": "Ground truth for the eval gate (deterministic quick scan). Recall/FP are scored over CONFIRMED CLAIMS (P1/P2) only — P3 leads (e.g. missing security headers) are reported but not scored, so they do NOT belong here. A finding matches an entry when every keyword in 'match' is a substring of (title + evidence + target), case-insensitive. These are the deterministic (zero-LLM) P1 probe findings expected every run.",
+  "expected": [
+    {"id": "jwt-alg-none",            "match": ["alg=none"]},
+    {"id": "jwt-unverified-signature","match": ["signature not verified"]},
+    {"id": "forged-token-replay",     "match": ["forged jwt accepted"]}
+  ]
+}
