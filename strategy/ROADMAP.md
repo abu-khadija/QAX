@@ -1,79 +1,79 @@
-# QAX — Roadmap (solo founder, part-time)
+# QAX Roadmap — the plan we walk on
 
-> Effort = calendar time for ONE person working part-time (~10–15 hrs/week).
-> Every milestone has an explicit **kill criterion**. If you hit it, stop — that's the
-> point of writing them down before starting.
+Re-sequenced 2026-10-13 with the owner. Near-term goal chosen: **product/technical
+hardening first** (lock quality before expanding). IP/legal track: **deferred**.
+
+One mental model: **one platform, two capabilities** — *Scan & prove bugs* (the
+wedge) and *Generate test cases* (the on-ramp), both filing to the team's tracker.
+Buyers in order: owners → QA → dev. The deterministic probe layer is the trust
+guarantee (0 false positives); the LLM layer adds recall but is non-deterministic,
+so the Orchestrator stays deterministic around it.
+
+**Discipline (non-negotiable):** every change is measured before it merges — the
+golden target (below) + `evals/orchestrator_ab.py` must show it improved something
+without breaking anything. No number, no merge.
 
 ---
 
-## Milestone 0 — Legal / IP (do this FIRST, before any more code)
+## Where we are (2026-10-13)
 
-- **Goal:** know, in writing, that you own QAX and can commercialize it.
-- **Deliverables:** a lawyer's review of your employment/outsourcing contract (IP
-  assignment, moonlighting, non-compete); a clean-room statement of what was built on
-  personal time/equipment; removal of all employer-specific artifacts (`example*`, any
-  client context) into a separate private repo.
-- **Success metric:** written legal opinion that you own the IP (or a clear path to).
-- **Kill criterion:** **the employer owns it and won't release it → NO-GO. Stop here.**
-- **Effort:** 1–3 weeks (mostly waiting on a lawyer). **Cost: a consult fee. Cheapest
-  insurance you'll ever buy — a single YC/investor will kill the deal over this.**
+- Scanner: ~22 deterministic probes, 0-FP, validated on 3 external stacks + a seeded
+  target. All **7 orchestrator-weakness fixes done + measured** (3→5 live, evidence in
+  `strategy/ORCHESTRATOR_FIXES_EVIDENCE.md`). Suite 321 passed, 3 skipped.
+- Test generation: works (code/story/jira/pr → cases → Xray/Zephyr/Excel). On-ramp.
+- Filing to Jira/Xray: built, DRY_RUN default, waiting on real credentials.
+- UI: one-platform restructure done. CI PR-scan gate built. Pitch deck exists.
+- **PR #1 open** (abu-khadija/QAX#1) — needs review/merge.
 
-## Milestone 1 — External validation (prove it's not just-works-on-TaskFlow)
+---
 
-- **Goal:** evidence QAX finds real bugs on code it has never seen, graded by someone
-  who isn't you. **Define the numbers before running — no moving the goalposts.**
-- **Deliverables:** run QAX (deep scan) on **3+ diverse open-source API apps** with known
-  or seeded bugs; 2+ external QA/security engineers grade the output blind.
-- **Success metric (set NOW):**
-  - **Bug-detection:** QAX confirms **≥ 60%** of the seeded/known real bugs per repo.
-  - **Trust:** **false-positive rate < 15%** of reported bugs (a security tool that cries
-    wolf is dead — this matters more than detection).
-  - **Beats the baseline:** finds **≥ 2 real bugs per repo that a plain coding agent
-    (Claude Code / Cursor "write tests") misses** — otherwise QAX is a feature, not a
-    product.
-  - **Cost:** **< $2 per full scan** of a mid-size repo (with caching).
-- **Kill criterion:** can't beat the coding-agent baseline, OR false-positive rate stays
-  above ~25% → **PIVOT hard or NO-GO.**
-- **Effort:** 3–5 weeks. Needs an eval harness (ARCHITECTURE §3.2) built first.
+## Phase 1 — HARDEN (now, the chosen focus)
 
-## Milestone 2 — Sharpen the wedge (MVP of the PIVOT)
+Goal: make quality provable and repeatable before adding surface.
 
-- **Goal:** the narrowest product that's clearly differentiated — **"PR-time white-box
-  security+QA that proves the bug."**
-- **Deliverables:** `qax scan` on every GitHub PR → a report of **confirmed** (proven)
-  security/logic bugs with evidence + repro; the model-agnostic provider layer;
-  incremental per-PR model updates; the concurrency probe + frontend E2E to close the
-  last planted bugs.
-- **Success metric:** on a design partner's real PRs, QAX posts **≥ 1 confirmed real bug
-  the team agreed was worth fixing, with < 1 false alarm per 5 PRs.**
-- **Kill criterion:** design partners ignore the reports (no action taken) → the output
-  isn't trusted/valuable → rethink.
-- **Effort:** 6–10 weeks.
+- [ ] **Merge PR #1** — land the service layer + the 7 fixes.
+- [ ] **Golden regression target** — move the seeded vulnerable Flask app into
+      `evals/targets/` with a truth file in `evals/truth/`, so every future change
+      gets a live before/after automatically (this is the "did it improve?" answer
+      made permanent).
+- [ ] **One-command eval** — a `make eval` / script that (a) boots the golden
+      target, (b) runs quick + deep scans, (c) prints scorecard recall/FP, (d) runs
+      `evals/orchestrator_ab.py`. The merge gate.
+- [ ] **Full live before/after via scorecard** on the golden target for the
+      deep-mode items (3 setup-repair, 5 no-router fallback, 6 forged-token-replay) —
+      official recall/FP numbers, closing the "deep items are only unit-proven" gap.
+- [ ] **Verify the original pipeline's `execute` leg end-to-end** — the one leg not
+      yet proven E2E (code/story → cases → execute → bugs).
+- [ ] **Generation polish** (only if it hurts demo quality): slowness — fewer
+      cases / streaming / raise max_tokens.
 
-## Milestone 3 — First design partners + pricing hypothesis
+## Phase 2 — EVIDENCE + JIRA (after hardening)
 
-- **Goal:** 2–3 teams using it on real PRs, and a price someone will pay.
-- **Deliverables:** on-prem/self-host option (security buyers won't send code to your
-  cloud); Jira/CI integration; a usage-based or per-repo price.
-- **Pricing hypothesis [ASSUMPTION]:** land ~**$200–500/repo/month** for the
-  security+proof angle (higher than a test-gen tool because proven security bugs are
-  worth more than test cases). Validate against willingness-to-pay, don't assume.
-- **Success metric:** 2 teams who would be "very disappointed" to lose it (Sean Ellis
-  test) + at least 1 paying.
-- **Kill criterion:** interest but no one pays after 2 months → it's a vitamin, not a
-  painkiller.
-- **Effort:** ongoing, 8–12 weeks.
+- [ ] **Real Jira filing E2E** when the owner's trial creds arrive — bug→Jira (Bug),
+      test→Xray; set `.env` JIRA_EMAIL/JIRA_API_TOKEN/JIRA_BASE_URL/JIRA_CLOUD_ID,
+      lift DRY_RUN on an opt-in flag only.
+- [ ] **1–2 new OSS case studies** — vet first (boots cheaply + serves a spec, per
+      the vet checklist), quick scan broadly, one budgeted deep scan.
+- [ ] **Simplify "File to Jira/Xray" naming + add a tool picker** (owner-deferred UX).
+- [ ] **KB → probes** — pull the top-ranked probe candidates from the knowledge base.
 
-## Open-source vs closed [ASSUMPTION]
+## Phase 3 — PACKAGING / PITCH (later, when expanding)
 
-- **Open-source the engines, keep the moat closed.** OSS the probe toolkit + deterministic
-  templates (distribution, trust, inbound) — they're copyable anyway. Keep closed: the
-  failure-mode knowledge base (your craft), the learned per-customer system models, the
-  eval/benchmark, and the hosted trust layer. OSS is the funnel; the knowledge + data is
-  the business.
+- [ ] **SaaS tiering** — the coverage budget (`max_endpoints`/`max_router_files`) as
+      the free-vs-paid lever.
+- [ ] **Competition slide** (only when actively pitching).
+- [ ] Agent-team vision (Product-Owner/Acceptance agent) — Tier 3, far off.
 
-## The one-line sequence
+## Deferred track — IP / legal
 
-> **IP cleared → validated externally with pre-set numbers → narrow PR-time security
-> wedge → 2 paying design partners.** Any of the first two failing = stop. Don't build
-> Milestone 2+ until 0 and 1 pass.
+Time-sensitive because the owner is leaving the company, but **deferred by choice
+now**. Revisit before any external distribution or fundraising. See the IP status
+memory.
+
+---
+
+## New this session, folded into the plan
+- The seeded vulnerable Flask target + `scan_dump.py` harness → becomes the Phase-1
+  golden target.
+- The A/B harness + scorecard → become the automated merge gate.
+- Before/after evidence captured in `strategy/ORCHESTRATOR_FIXES_EVIDENCE.md`.
