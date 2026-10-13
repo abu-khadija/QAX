@@ -101,6 +101,31 @@ def _scan(base_url: str, *, deep: bool = False, prog=None):
     return res, rec
 
 
+def _pipeline_execute_check(base_url: str) -> tuple[str, bool, str]:
+    """
+    Verify the ORIGINAL pipeline's execute leg end to end (the other mode, not scan):
+    pre-built API test cases → QAXPipeline → APIRunner → results. Deterministic, no
+    LLM. One case must PASS (register→login→/me) and one must FAIL (/admin/users with
+    no token), proving the leg distinguishes pass from fail against a live app.
+    """
+    from core.pipeline import QAXPipeline
+
+    cred = {"email": "pipe_{{random}}@example.com", "password": "Secret123!"}
+    passing = {"test_case_id": "PIPE-PASS", "title": "register+login+me", "api_steps": [
+        {"step_number": 1, "method": "POST", "path": "/auth/register", "body": dict(cred), "expected_status": 201},
+        {"step_number": 2, "method": "POST", "path": "/auth/login", "body": dict(cred),
+         "expected_status": 200, "save": {"token": "access_token"}},
+        {"step_number": 3, "method": "GET", "path": "/me", "use_auth": "token", "expected_status": 200}]}
+    failing = {"test_case_id": "PIPE-FAIL", "title": "admin with no token", "api_steps": [
+        {"step_number": 1, "method": "GET", "path": "/admin/users", "expected_status": 200}]}  # really 401
+    os.environ["APP_BASE_URL"] = base_url
+    out = QAXPipeline(export="none", exec_mode="api", dry_run=True).run(test_cases=[passing, failing])
+    ex = out.get("execution") or {}
+    ok = ex.get("total") == 2 and ex.get("passed", 0) >= 1 and ex.get("failed", 0) >= 1
+    return ("original pipeline execute leg E2E (api)", ok,
+            f"total={ex.get('total')} passed={ex.get('passed')} failed={ex.get('failed')}")
+
+
 def _quick_and_ab() -> list[tuple[str, bool, str]]:
     checks: list[tuple[str, bool, str]] = []
 
@@ -109,6 +134,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     proc = _boot(port, secure=False)
     try:
         res, rec = _scan(f"http://127.0.0.1:{port}")
+        pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
     acc = rec.get("accuracy", {})
@@ -120,6 +146,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
                    f"false_positives={acc.get('false_positives')}"))
     checks.append(("forged-token-replay fired (item 6)", "forged-token-replay" in probes,
                    f"probes={sorted(p for p in probes if p)}"))
+    checks.append(pipe_check)   # original pipeline's execute leg, verified E2E
 
     # 2) Secure control — the SAME app with the flaw fixed must go silent (no FP).
     port = _free_port()

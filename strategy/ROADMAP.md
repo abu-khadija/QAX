@@ -53,8 +53,12 @@ Goal: make quality provable and repeatable before adding surface.
       functional generation yields few/zero valid tests from a bare endpoint spec —
       improve `_endpoints_as_spec` (examples/structure) so the LLM produces concrete
       api_steps. Folded into "generation polish" below.
-- [ ] **Verify the original pipeline's `execute` leg end-to-end** — the one leg not
-      yet proven E2E (code/story → cases → execute → bugs).
+- [x] **Verify the original pipeline's `execute` leg end-to-end** (done) — the gate
+      now runs `QAXPipeline(exec_mode="api").run(test_cases=...)` against the golden
+      target and asserts it distinguishes pass from fail (total=2, passed=1,
+      failed=1), deterministically, every run. Note: the pipeline targets the host
+      via `APP_BASE_URL` (no explicit base_url param) — a small ergonomics gap, not a
+      correctness one.
 - [ ] **Generation polish** (only if it hurts demo quality): slowness — fewer
       cases / streaming / raise max_tokens.
 
