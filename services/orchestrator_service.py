@@ -692,8 +692,12 @@ class OrchestratorService:
                 gen = gs.generate(f"endpoints://{key}", options=GenerationOptions(
                     content=self._endpoints_as_spec(key, eps), test_type="api",
                     module=key, repo_context=ctx, use_cache=False))
-                out.extend(gen.test_cases)
-                covered.append(key)
+                if gen.test_cases:
+                    out.extend(gen.test_cases)
+                    covered.append(key)   # record coverage only when tests were produced
+                else:
+                    logger.info("endpoint-group generation produced no tests for %s (%s)",
+                                key, getattr(gen, "error", "") or "empty")
             except Exception as exc:
                 logger.warning("endpoint-group generation failed for %s: %s", key, exc)
         return out, covered

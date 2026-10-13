@@ -108,23 +108,30 @@ class ClaudeClient:
             )
 
         # Try new project-based path first, fall back to legacy path
+        system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
         context_path = CONFIG_DIR / "projects" / self.project / "context.md"
-        if not context_path.exists():
+        if context_path.exists():
+            project_context = context_path.read_text(encoding="utf-8")
+        else:
             legacy_path = CONFIG_DIR / "example-context.md"
             if legacy_path.exists():
                 logger.warning(
                     "Project context not found at %s — using legacy path %s",
                     context_path, legacy_path
                 )
-                context_path = legacy_path
+                project_context = legacy_path.read_text(encoding="utf-8")
+            elif not self.project:
+                # No project configured at all (e.g. a generic scan or a virtual
+                # endpoints:// source). QAX is GENERIC — degrade to an empty project
+                # context instead of crashing, so generation still works.
+                logger.warning(
+                    "No project context configured — generating with an empty project context")
+                project_context = ""
             else:
+                # A NAMED project whose context is missing is a real misconfiguration.
                 raise FileNotFoundError(
                     f"Project context file not found at: {context_path}"
                 )
-
-        # Read both files
-        system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-        project_context = context_path.read_text(encoding="utf-8")
 
         # Replace the placeholder with actual project context
         final_prompt = system_prompt.replace("[PROJECT_CONTEXT]", project_context)

@@ -40,11 +40,19 @@ Goal: make quality provable and repeatable before adding surface.
       runs the SECURE control (flaw fixed → probes silent, 0 FP), and the A/B
       harness. Non-zero exit blocks merge. Effectively zero-LLM (empty repo → live
       grounding). Current: GATE PASS (recall 100%, FP 0).
-      NEXT on the gate: add an optional `--deep` lane (credit-gated) for a full
-      scorecard before/after on items 3/5/6.
-- [ ] **Full live before/after via scorecard** on the golden target for the
-      deep-mode items (3 setup-repair, 5 no-router fallback, 6 forged-token-replay) —
-      official recall/FP numbers, closing the "deep items are only unit-proven" gap.
+- [x] **Deep lane via scorecard** (done) — `make eval-deep` (`python -m evals.gate
+      --deep`, credit-gated): budgeted deep scan on the golden target with an official
+      deep scorecard (last run: recall 100% 3/3, FP 0%, ~$0.13, 7 LLM calls,
+      end-to-end yes) and deep-feature engagement checks. Item 6 (forged-token-replay
+      in deep) is hard-gated; items 3 (setup repair) + 5 (fallback) engage
+      deterministically and are hard-gated on ENGAGEMENT, with their LLM-dependent
+      yield reported (item 5 produced 0 functional tests from the bare toy spec this
+      run — see tuning note below). Also fixed: generation no longer crashes on a
+      missing project context (empty project → empty context, QAX is GENERIC).
+      KNOWN TUNING ITEM: the no-router fallback engages but the per-endpoint
+      functional generation yields few/zero valid tests from a bare endpoint spec —
+      improve `_endpoints_as_spec` (examples/structure) so the LLM produces concrete
+      api_steps. Folded into "generation polish" below.
 - [ ] **Verify the original pipeline's `execute` leg end-to-end** — the one leg not
       yet proven E2E (code/story → cases → execute → bugs).
 - [ ] **Generation polish** (only if it hurts demo quality): slowness — fewer

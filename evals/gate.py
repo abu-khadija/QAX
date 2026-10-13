@@ -2,23 +2,29 @@
 evals/gate.py — the merge gate: measure every change before it lands.
 =====================================================================
 The discipline the roadmap locks in: a change doesn't merge unless it can be shown
-to improve something without breaking anything. This runs that check end to end,
-deterministically, in one command:
+to improve something without breaking anything. This runs that check end to end:
 
-    python3 -m evals.gate          # quick-scan gate + A/B harness (zero-LLM path)
+    python3 -m evals.gate            # FREE deterministic gate (quick scan + A/B)
+    python3 -m evals.gate --deep     # + a credit-gated deep lane (real $/run)
 
-It boots the golden vulnerable target (evals/targets/vuln_jwt_app.py), runs a
-deterministic QUICK scan against it, scores the confirmed findings against the
-ground truth (evals/truth/golden-jwt.json), then runs the SECURE control (the same
-app with the flaw fixed) to prove the probes go silent — no false positives — and
-finally runs the orchestration A/B harness. It exits non-zero if any guarantee
-regresses, so CI / a pre-merge hook can gate on it.
+Quick lane (default, zero-LLM): boots the golden vulnerable target
+(evals/targets/vuln_jwt_app.py), runs a deterministic QUICK scan, scores the
+confirmed findings against ground truth (evals/truth/golden-jwt.json), runs the
+SECURE control (the flaw fixed → probes must go silent, no false positives), and
+the orchestration A/B harness. Exits non-zero if any guarantee regresses.
+
+Deep lane (--deep, needs an API key): runs a budgeted DEEP scan on the target to
+prove the deep-mode features actually engage — item 5 (no-router fallback
+generates from the endpoint surface), item 6 (forged-token-replay fires in deep),
+round 2 runs — and prints an official deep scorecard (recall/FP/$/run). It reports
+whether item 3 (setup repair) engaged this run (LLM-dependent, so reported not gated).
 
 Needs the exec venv (Flask): run under ./.venv-exec/bin/python.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import socket
 import subprocess
@@ -59,8 +65,17 @@ def _boot(port: int, *, secure: bool) -> subprocess.Popen:
     raise RuntimeError("golden target did not come up")
 
 
-def _scan(base_url: str):
-    """Deterministic quick scan against the live target (empty repo → no source LLM pass)."""
+class _Cap:
+    """Minimal progress sink that records the orchestrator's info lines."""
+    def __init__(self):
+        self.lines: list[str] = []
+
+    def emit(self, stage, level, msg, **k):
+        self.lines.append(str(msg))
+
+
+def _scan(base_url: str, *, deep: bool = False, prog=None):
+    """Scan the live target. Quick = deterministic/zero-LLM; deep = credit-gated."""
     import json
 
     from services.context import QAXContext
@@ -68,39 +83,49 @@ def _scan(base_url: str):
     from services.scorecard import score_run
 
     truth = json.load(open(TRUTH))
-    empty = tempfile.mkdtemp(prefix="qax_gate_")
+    empty = tempfile.mkdtemp(prefix="qax_gate_")          # no source → exercises live grounding + fallback
+    usage = None
+    if deep:
+        from services import usage as _usage
+        _usage.track()
+        _usage.reset()
     t0 = time.time()
+    kw = dict(max_router_files=1, max_endpoints=6) if deep else {}
     res = OrchestratorService(QAXContext.from_env()).run(
-        empty, base_url, deep=False, use_cache=False)
-    rec = score_run(res, repo="golden-jwt", url=base_url, mode="quick",
-                    duration_sec=time.time() - t0, truth=truth)
+        empty, base_url, deep=deep, use_cache=False, progress=prog, **kw)
+    if deep:
+        from services import usage as _usage
+        usage = _usage.snapshot()
+    rec = score_run(res, repo="golden-jwt", url=base_url, mode="deep" if deep else "quick",
+                    duration_sec=time.time() - t0, usage=usage, truth=truth)
     return res, rec
 
 
-def main() -> int:
+def _quick_and_ab() -> list[tuple[str, bool, str]]:
     checks: list[tuple[str, bool, str]] = []
 
     # 1) Vulnerable run — probes must catch the whole documented surface, 0 FP.
-    proc = _boot(_free_port_val := _free_port(), secure=False)
+    port = _free_port()
+    proc = _boot(port, secure=False)
     try:
-        res, rec = _scan(f"http://127.0.0.1:{_free_port_val}")
+        res, rec = _scan(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
     acc = rec.get("accuracy", {})
-    recall = acc.get("recall_pct")
-    fps = acc.get("false_positives")
     probes = {b.get("probe") for b in res.confirmed}
-    checks.append(("quick-scan recall == 100%", recall == 100.0,
-                   f"recall={recall}% caught {acc.get('caught')}/{acc.get('documented')} "
+    checks.append(("quick-scan recall == 100%", acc.get("recall_pct") == 100.0,
+                   f"recall={acc.get('recall_pct')}% caught {acc.get('caught')}/{acc.get('documented')} "
                    f"missed={acc.get('missed')}"))
-    checks.append(("quick-scan false positives == 0", fps == 0, f"false_positives={fps}"))
-    checks.append(("forged-token-replay fired (item 6 regression)",
-                   "forged-token-replay" in probes, f"probes={sorted(p for p in probes if p)}"))
+    checks.append(("quick-scan false positives == 0", acc.get("false_positives") == 0,
+                   f"false_positives={acc.get('false_positives')}"))
+    checks.append(("forged-token-replay fired (item 6)", "forged-token-replay" in probes,
+                   f"probes={sorted(p for p in probes if p)}"))
 
     # 2) Secure control — the SAME app with the flaw fixed must go silent (no FP).
-    proc = _boot(sec_port := _free_port(), secure=True)
+    port = _free_port()
+    proc = _boot(port, secure=True)
     try:
-        sres, _ = _scan(f"http://127.0.0.1:{sec_port}")
+        sres, _ = _scan(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
     auth_bugs = [b for b in sres.confirmed
@@ -117,14 +142,68 @@ def main() -> int:
     checks.append(("A/B cost down", c["after"] < c["before"], f"{c['before']}->{c['after']}"))
     checks.append(("A/B false positives flat", fp["after"] == fp["before"] == 0,
                    f"{fp['before']}->{fp['after']}"))
+    return checks
 
-    # ── verdict ──
-    print("\nQAX merge gate\n" + "=" * 60)
+
+def _deep_lane() -> list[tuple[str, bool, str]]:
+    from services.context import QAXContext
+    from services.scorecard import render
+
+    if not getattr(QAXContext.from_env(), "anthropic_key", None):
+        print("\n[deep lane skipped] no ANTHROPIC_API_KEY — the deep lane needs credits.\n")
+        return []
+
+    port = _free_port()
+    proc = _boot(port, secure=False)
+    prog = _Cap()
+    try:
+        res, rec = _scan(f"http://127.0.0.1:{port}", deep=True, prog=prog)
+    finally:
+        proc.terminate()
+
+    cov = res.coverage or {}
+    # item 5's DETERMINISTIC guarantee is that the fallback PATH engages when there
+    # are no router files (the code-level fix). How many valid tests the LLM then
+    # produces from a bare endpoint spec is non-deterministic — reported, not gated.
+    fallback_engaged = any("endpoint surface" in ln for ln in prog.lines)
+    fallback_produced = [k.split(":", 2)[-1] for k in cov if k.startswith("functional:endpoints:")]
+    probes = {b.get("probe") for b in res.confirmed}
+    repaired = any("setup-repaired" in ln.lower() for ln in prog.lines)
+
+    print("\n--- deep scorecard (official, credit-gated) ---")
+    print(render(rec))
+    print(f"    rounds: {res.rounds}")
+    print(f"    item 3 (setup repair) engaged this run : "
+          f"{'yes' if repaired else 'no'}  (LLM-dependent — reported, not gated)")
+    print(f"    item 5 fallback produced tests for      : "
+          f"{fallback_produced or 'none this run'}  (LLM-dependent — reported, not gated)")
+
+    checks = [
+        ("deep completed end-to-end", bool(res.confirmed is not None), f"confirmed={len(res.confirmed)}"),
+        ("item 5: no-router fallback engaged", fallback_engaged,
+         f"engaged={fallback_engaged}; produced-test groups={fallback_produced or []}"),
+        ("item 6: forged-token-replay fired in deep", "forged-token-replay" in probes,
+         f"probes={sorted(p for p in probes if p)}"),
+    ]
+    return checks
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="QAX merge gate")
+    ap.add_argument("--deep", action="store_true",
+                    help="also run the credit-gated deep lane (real $/run)")
+    args = ap.parse_args()
+
+    checks = _quick_and_ab()
+    if args.deep:
+        checks += _deep_lane()
+
+    print("\nQAX merge gate\n" + "=" * 68)
     ok = True
     for name, passed, detail in checks:
-        print(f"  [{'PASS' if passed else 'FAIL'}] {name:48} {detail}")
+        print(f"  [{'PASS' if passed else 'FAIL'}] {name:46} {detail}")
         ok = ok and passed
-    print("=" * 60)
+    print("=" * 68)
     print("GATE: PASS ✅  — safe to merge\n" if ok else "GATE: FAIL ❌  — do not merge\n")
     return 0 if ok else 1
 
