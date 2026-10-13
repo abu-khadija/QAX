@@ -6,7 +6,7 @@
 - Type: [Web App / Mobile App / API / Desktop]
 - Language: [C# / JavaScript / Python / Java / other]
 - Framework: [ASP.NET MVC / React / Django / Spring / other]
-- Domain: [e.g. ExampleOrg, CRM, ERP, Finance, Healthcare]
+- Domain: [e.g. CRM, ERP, Finance, Healthcare]
 
 ## Key Modules
 <!-- List the main modules/areas of your application -->

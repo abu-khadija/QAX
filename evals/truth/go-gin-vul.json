@@ -1,0 +1,20 @@
+{
+  "target": "go-gin-vul (Go/Gin deliberately-vulnerable range)",
+  "source": "https://github.com/godzeo/go-gin-vul — /api/vul/* are vulnerable, /api/safe/* are the fixed controls",
+  "note": "Ground truth for recall. Each documented vuln is an /api/vul/* endpoint. A confirmed finding matches when every keyword in 'match' is a substring of (title+evidence+target), case-insensitive. The /api/safe/* twins must NOT be flagged (any claim matching no entry counts as a false positive).",
+  "expected": [
+    {"id": "sqli-login",     "class": "sql-injection",      "endpoint": "/api/vul/sql/login", "match": ["sql injection", "/api/vul/sql/login"]},
+    {"id": "sqli-byid",      "class": "sql-injection",      "endpoint": "/api/vul/sqli/byid", "match": ["sql injection", "/api/vul/sqli/byid"]},
+    {"id": "cmd-injection-1","class": "command-injection",  "endpoint": "/api/vul/cmd1",      "match": ["command injection"]},
+    {"id": "cmd-injection-2","class": "command-injection",  "endpoint": "/api/vul/cmd2",      "match": ["command injection"]},
+    {"id": "ssrf",           "class": "ssrf",               "endpoint": "/api/vul/ssrf",      "match": ["ssrf"]},
+    {"id": "file-read",      "class": "path-traversal",     "endpoint": "/api/vul/read",      "match": ["path traversal"]},
+    {"id": "dir-file",       "class": "path-traversal",     "endpoint": "/api/vul/dir",       "match": ["path traversal"]},
+    {"id": "zip-slip",       "class": "zip-slip",           "endpoint": "/api/vul/unzip",     "match": ["zip"]},
+    {"id": "open-redirect",  "class": "open-redirect",      "endpoint": "/api/vul/redirect",  "match": ["open redirect"]},
+    {"id": "cors-1",         "class": "cors",               "endpoint": "/api/vul/cors1",     "match": ["cors"]},
+    {"id": "cors-2",         "class": "cors",               "endpoint": "/api/vul/cors2",     "match": ["cors"]},
+    {"id": "reflected-xss",  "class": "xss",                "endpoint": "/api/vul/xss",       "match": ["xss", "/api/vul/xss"]},
+    {"id": "stored-xss",     "class": "stored-xss",         "endpoint": "/api/vul/addcomments","match": ["xss", "/api/vul/addcomments"]}
+  ]
+}

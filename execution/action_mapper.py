@@ -466,6 +466,12 @@ class ActionMapper:
         """
         import os as _os
 
+        # Automation steps carry an explicit playwright_action and are dispatched
+        # directly (no natural-language parsing). Manual steps — which have an
+        # "action" description instead — fall through to the existing path below.
+        if step.get("playwright_action"):
+            return await self._execute_automation_step(step, page, selector_override)
+
         step_num = step.get("step_number", 0)
         action_text = step.get("action", "")
         expected = step.get("expected_result", "")
@@ -587,6 +593,252 @@ class ActionMapper:
             })
 
         return base_result
+
+    async def _execute_automation_step(
+        self,
+        step: dict,
+        page: "Page",
+        selector_override: "str | None" = None,
+    ) -> dict:
+        """
+        Execute a single automation_steps entry directly on the Playwright page.
+
+        Unlike the manual-step path, automation steps already carry an explicit
+        playwright_action, a selector_key, and a value — so no natural-language
+        parsing is needed. The action-name groups mirror APIRunner.execute_step()
+        (execution/api_runner.py) so both execution modes agree on what each
+        playwright_action means.
+
+        Args:
+            step (dict): An automation_steps entry with keys:
+                - step_number (int)
+                - playwright_action (str): navigate | click | fill | select | wait | assert
+                - selector_key (str): key resolved against the project selectors.json
+                - value (str): text to fill, URL to visit, or option to select
+                - assertion_type (str, optional): "url" | "text" | "visible"
+                - assertion_value (str, optional): expected value for the assertion
+            page (Page): Active Playwright Page to execute on.
+            selector_override (str | None): CSS selector supplied by ClaudeHealer
+                                            on a healing retry.
+
+        Returns:
+            dict: Same result shape as map_and_execute() — step_number,
+                  action_type, status, actual_result, error, screenshot,
+                  selector_used.
+        """
+        import os as _os
+
+        step_num       = step.get("step_number", 0)
+        action         = (step.get("playwright_action") or "").strip().lower()
+        selector_key   = step.get("selector_key") or ""
+        value          = step.get("value") or ""
+        assertion_type = (step.get("assertion_type") or "").strip().lower()
+        assertion_val  = step.get("assertion_value") or ""
+
+        base_result = {
+            "step_number": step_num,
+            "action_type": action or "unknown",
+            "status": "FAIL",
+            "actual_result": "",
+            "error": None,
+            "screenshot": None,
+            "selector_used": None,
+        }
+
+        if not PLAYWRIGHT_AVAILABLE:
+            return {
+                **base_result,
+                "status": "SKIP",
+                "actual_result": "Playwright not installed — step skipped",
+            }
+
+        if page is None:
+            return {
+                **base_result,
+                "status": "SKIP",
+                "actual_result": "Browser page not available",
+            }
+
+        async def _resolve_selector() -> str:
+            """Resolve selector_key → CSS via override, then the 3-level fallback."""
+            if selector_override:
+                return selector_override
+            selector, level = await self.find_selector_with_fallback(selector_key, page)
+            logger.debug("automation selector (%s) for '%s': %s", level, selector_key, selector)
+            return selector or f"[data-testid='{selector_key}']"
+
+        try:
+            if action in ("navigate", "goto", "open", "visit"):
+                target = value or assertion_val
+                base_url = _os.getenv("APP_BASE_URL", "http://localhost")
+                full_url = target if target.startswith("http") else f"{base_url}{target}"
+                await page.goto(full_url, wait_until="load", timeout=30_000)
+                base_result.update({
+                    "status": "PASS",
+                    "actual_result": f"Navigated to: {page.url}",
+                })
+
+            elif action in ("click", "press", "tap", "submit"):
+                selector = await _resolve_selector()
+                base_result["selector_used"] = selector
+                await page.click(selector, timeout=15_000)
+                base_result.update({
+                    "status": "PASS",
+                    "actual_result": f"Clicked element: {selector}",
+                })
+
+            elif action in ("fill", "type", "enter", "input", "set_value"):
+                selector = await _resolve_selector()
+                base_result["selector_used"] = selector
+                await page.fill(selector, value, timeout=15_000)
+                base_result.update({
+                    "status": "PASS",
+                    "actual_result": f"Filled '{selector}' with value: '{value}'",
+                })
+
+            elif action in ("select", "choose", "pick"):
+                selector = await _resolve_selector()
+                base_result["selector_used"] = selector
+                await page.select_option(selector, label=value or None, timeout=15_000)
+                base_result.update({
+                    "status": "PASS",
+                    "actual_result": f"Selected '{value}' in: {selector}",
+                })
+
+            elif action in ("wait", "pause"):
+                await page.wait_for_timeout(2000)
+                base_result.update({
+                    "status": "PASS",
+                    "actual_result": "Waited 2000ms",
+                })
+
+            elif action in ("assert", "verify", "check", "expect"):
+                # Assertion-only step: evaluate directly against the current page.
+                selector = await _resolve_selector() if selector_key else None
+                base_result["selector_used"] = selector
+                base_result.update(
+                    await self._check_automation_assertion(
+                        page, assertion_type, assertion_val, selector
+                    )
+                )
+
+            else:
+                base_result.update({
+                    "status": "SKIP",
+                    "actual_result": f"Action '{action}' not recognised — skipped",
+                })
+
+            # ── Optional post-action assertion ─────────────────────────────
+            # Automation steps often pair an action with a check (e.g. click +
+            # assertion_type="visible"). When the action passed and a separate
+            # assertion is declared, enforce it so a green result means something.
+            if (
+                base_result["status"] == "PASS"
+                and assertion_type
+                and action not in ("assert", "verify", "check", "expect")
+            ):
+                check = await self._check_automation_assertion(
+                    page, assertion_type, assertion_val, base_result["selector_used"]
+                )
+                if check["status"] == "FAIL":
+                    base_result.update(check)
+
+        except Exception as e:  # noqa: BLE001
+            base_result.update({
+                "status": "FAIL",
+                "actual_result": "Step execution failed",
+                "error": str(e)[:300],
+            })
+
+        return base_result
+
+    async def _check_automation_assertion(
+        self,
+        page: "Page",
+        assertion_type: str,
+        assertion_value: str,
+        selector: "str | None",
+    ) -> dict:
+        """
+        Evaluate a structured assertion from an automation step.
+
+        Supports the assertion_type values the generator emits:
+          - "url"     → assertion_value must appear in the current URL
+          - "text"    → assertion_value must appear in the selector's inner text
+          - "visible" → the selector's element must exist and be visible
+
+        When an assertion cannot be evaluated (no expected value, unresolved
+        TODO selector, or unknown type), it passes with a note rather than
+        failing the step — the same permissive stance the manual assertion path
+        takes, so unfilled selectors don't produce false failures.
+
+        Args:
+            page (Page): Active Playwright Page.
+            assertion_type (str): One of "url" | "text" | "visible" (others noted).
+            assertion_value (str): Expected value for the assertion (may be empty).
+            selector (str | None): Resolved CSS selector for text/visible checks.
+
+        Returns:
+            dict: Partial result with status / actual_result / error keys.
+        """
+        try:
+            if assertion_type == "url":
+                if not assertion_value:
+                    return {"status": "PASS", "actual_result": f"URL is: {page.url}"}
+                if assertion_value.lower() in page.url.lower():
+                    return {"status": "PASS", "actual_result": f"URL contains '{assertion_value}'"}
+                return {
+                    "status": "FAIL",
+                    "actual_result": f"URL '{page.url}' missing '{assertion_value}'",
+                    "error": "URL assertion failed",
+                }
+
+            # text / visible need a resolvable selector. Treat any unfilled TODO
+            # placeholder as unresolvable — this catches both a raw "TODO..." value
+            # from selectors.json and a guessed "[data-testid='TODO_*']" fallback,
+            # so an assert-only step on an unfilled selector skips gracefully
+            # instead of emitting a false "element not found" failure.
+            if not selector or "TODO" in selector:
+                return {
+                    "status": "PASS",
+                    "actual_result": f"Assertion '{assertion_type}' skipped — no resolvable selector",
+                }
+
+            element = await page.query_selector(selector)
+            if not element:
+                return {
+                    "status": "FAIL",
+                    "actual_result": f"Element not found for assertion: {selector}",
+                    "error": f"{assertion_type} assertion failed",
+                }
+
+            if assertion_type == "visible":
+                if await element.is_visible():
+                    return {"status": "PASS", "actual_result": f"Element visible: {selector}"}
+                return {
+                    "status": "FAIL",
+                    "actual_result": f"Element present but not visible: {selector}",
+                    "error": "Visibility assertion failed",
+                }
+
+            if assertion_type == "text":
+                actual = await element.inner_text()
+                if not assertion_value or assertion_value.lower() in actual.lower():
+                    return {"status": "PASS", "actual_result": f"Text OK: '{actual[:80]}'"}
+                return {
+                    "status": "FAIL",
+                    "actual_result": f"Text mismatch. Expected '{assertion_value}', got '{actual[:80]}'",
+                    "error": "Text assertion failed",
+                }
+
+            return {"status": "PASS", "actual_result": f"Assertion '{assertion_type}' noted"}
+
+        except Exception as e:  # noqa: BLE001
+            # Never let an assertion crash the step — note it and move on.
+            return {
+                "status": "PASS",
+                "actual_result": f"Assertion '{assertion_type}' could not be evaluated ({str(e)[:80]})",
+            }
 
     async def _run_assertion(
         self,

@@ -53,6 +53,47 @@ def load_schema() -> dict:
     return schema
 
 
+_API_SCHEMA_CACHE: dict | None = None
+
+
+def _is_api_case(tc: dict) -> bool:
+    """True when a test case is an API-mode case (drives HTTP api_steps)."""
+    steps = tc.get("api_steps")
+    return isinstance(steps, list) and len(steps) > 0
+
+
+def api_schema() -> dict:
+    """
+    The schema for API-mode test cases, derived from the base schema.
+
+    API test cases carry `api_steps` (HTTP) instead of the Playwright
+    `manual_steps`/`automation_steps` pair the base schema mandates. Without this,
+    every generated API test fails validation ("[] should be non-empty") and the
+    functional-generation leg silently yields zero cases. This copy requires a
+    non-empty `api_steps`, drops the two UI-step arrays from `required`, and relaxes
+    their minItems so an API case may omit or leave them empty. The base (UI) schema
+    is untouched.
+    """
+    global _API_SCHEMA_CACHE
+    if _API_SCHEMA_CACHE is None:
+        import copy
+        s = copy.deepcopy(load_schema())
+        items = s.get("items", {})
+        req = [r for r in items.get("required", [])
+               if r not in ("manual_steps", "automation_steps")]
+        if "api_steps" not in req:
+            req.append("api_steps")
+        items["required"] = req
+        props = items.get("properties", {})
+        for f in ("manual_steps", "automation_steps"):
+            if f in props:
+                props[f]["minItems"] = 0
+        if "api_steps" in props:
+            props["api_steps"]["minItems"] = 1
+        _API_SCHEMA_CACHE = s
+    return _API_SCHEMA_CACHE
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Single Test Case Validation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,8 +210,11 @@ def validate_batch(test_cases: list[dict],
 
     for tc in test_cases:
         # ── Try to validate against schema ────────────────────────────────────
+        # API-mode cases (carrying api_steps) are validated against the API schema,
+        # which requires api_steps and does not mandate the Playwright UI step pair.
         try:
-            jsonschema.validate(instance=[tc], schema=schema)
+            jsonschema.validate(instance=[tc],
+                                schema=api_schema() if _is_api_case(tc) else schema)
 
             # ── Deduplicate IDs within this batch ─────────────────────────────
             tc_id = tc.get("test_case_id", "")
@@ -300,6 +344,18 @@ def fix_common_issues(tc: dict) -> dict:
     for field in ("title", "description", "review_note", "generated_from_file"):
         if isinstance(fixed.get(field), str):
             fixed[field] = fixed[field].strip()
+
+    # ── Fix 7b: Empty/missing preconditions → a sensible default ──────────────
+    # The schema requires a non-empty preconditions array; the model sometimes
+    # emits [] (especially for self-contained API tests that register their own
+    # state). Default it rather than discard an otherwise-valid case. A string is
+    # wrapped into a single-item list.
+    _PRE_DEFAULT = "No special preconditions."   # ≥ the schema's 5-char minimum
+    pre = fixed.get("preconditions")
+    if isinstance(pre, str):
+        fixed["preconditions"] = [pre.strip()] if len(pre.strip()) >= 5 else [_PRE_DEFAULT]
+    elif not isinstance(pre, list) or len(pre) == 0:
+        fixed["preconditions"] = [_PRE_DEFAULT]
 
     # ── Fix 7: Empty assertion_type in automation_steps → default to 'visible' ─
     # Claude sometimes generates assertion_type: "" for non-assert steps.

@@ -342,6 +342,51 @@ def run_qax_command(
         return 1, err
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Service-layer progress bridge
+# ══════════════════════════════════════════════════════════════════════════════
+
+from services.progress import ProgressReporter as _ServiceProgressReporter
+
+
+class _UIProgressReporter(_ServiceProgressReporter):
+    """
+    Bridge the GenerationService's progress events onto the Analyze tab's step
+    checklist. This replaces the old approach of scraping stdout lines from a
+    subprocess — the service now drives the UI directly with structured events.
+    """
+
+    # Service event step -> UI step keys to mark done when it fires.
+    _STEP_MAP = {
+        "pre_check": ("risk", "cache"),
+        "cache":     ("cache",),
+        "generate":  ("risk", "cache", "claude"),
+        "validate":  ("risk", "cache", "claude", "valid"),
+    }
+
+    def __init__(self, steps: dict, placeholder, render) -> None:
+        """
+        Args:
+            steps: The Analyze tab's _steps dict (mutated in place).
+            placeholder: An st.empty() placeholder to re-render into.
+            render: A function(steps) -> HTML string.
+        """
+        super().__init__()
+        self._steps = steps
+        self._placeholder = placeholder
+        self._render = render
+
+    def _handle(self, event) -> None:
+        """Mark the mapped steps done and re-render the checklist."""
+        for key in self._STEP_MAP.get(event.step, ()):
+            if key in self._steps:
+                self._steps[key]["done"] = True
+        try:
+            self._placeholder.markdown(self._render(self._steps), unsafe_allow_html=True)
+        except Exception:
+            pass
+
+
 @st.cache_data(ttl=30)
 def get_projects() -> list[str]:
     """
@@ -600,6 +645,12 @@ with st.sidebar:
 
     # ── Project selector ───────────────────────────────────────────────────
     projects = get_projects()
+    # Apply a project created elsewhere (e.g. the wizard's "New project") so it
+    # becomes the active selection. Must run BEFORE the selectbox is created —
+    # Streamlit forbids modifying a widget's key after it is instantiated.
+    _pending_project = st.session_state.pop("_pending_project", None)
+    if _pending_project and _pending_project in projects:
+        st.session_state["active_project"] = _pending_project
     default_project = os.getenv("DEFAULT_PROJECT", "example")
     default_idx = projects.index(default_project) if default_project in projects else 0
     st.selectbox(
@@ -653,10 +704,873 @@ with st.sidebar:
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ANALYZE WIZARD — Project → Source → Configure → Generate → Export
+# ══════════════════════════════════════════════════════════════════════════════
+
+_WIZARD_STEPS = ["Project", "Source", "Understand", "Generate", "Export", "Execute", "Bug reports"]
+
+# Display label → input adapter name + field hints
+_INPUT_TYPES = {
+    "Folder / repo": {"adapter": "folder", "field": "text",
+                      "label": "Folder path",
+                      "placeholder": "src/  (a project folder on disk)"},
+    "GitHub PR":     {"adapter": "pr", "field": "text",
+                      "label": "Pull request",
+                      "placeholder": "owner/repo#123 or a PR URL"},
+    "Single file":   {"adapter": "file", "field": "file",
+                      "label": "File path",
+                      "placeholder": "src/Controller.cs"},
+    "Jira ticket":   {"adapter": "jira", "field": "text",
+                      "label": "Ticket key",
+                      "placeholder": "PROJ-123"},
+    "User story":    {"adapter": "story", "field": "textarea",
+                      "label": "Story / requirement",
+                      "placeholder": "As a user I want to...\nAcceptance criteria:\n- ..."},
+}
+
+
+def _wiz_go(step: int) -> None:
+    """Move the wizard to a step and rerun."""
+    st.session_state["wiz_step"] = step
+    st.rerun()
+
+
+def _wizard_stepper(current: int) -> None:
+    """Render the 5-step progress header."""
+    parts = ['<div style="display:flex;align-items:flex-start;justify-content:space-between;'
+             'margin:2px 0 22px;gap:4px">']
+    for i, name in enumerate(_WIZARD_STEPS, 1):
+        if i < current:
+            circle, mark = "background:#7c3aed;color:#fff", "✓"
+        elif i == current:
+            circle, mark = "background:#7c3aed;color:#fff;box-shadow:0 0 0 3px rgba(124,58,237,.25)", str(i)
+        else:
+            circle, mark = "background:#1f2937;color:#6b7280;border:1px solid #374151", str(i)
+        lbl = "#f1f5f9" if i == current else ("#9ca3af" if i < current else "#6b7280")
+        parts.append(
+            f'<div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:6px">'
+            f'<div style="width:30px;height:30px;border-radius:50%;display:flex;align-items:center;'
+            f'justify-content:center;font-size:13px;font-weight:700;{circle}">{mark}</div>'
+            f'<span style="font-size:12px;color:{lbl}">{name}</span></div>'
+        )
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
+def _wiz_new_steps() -> dict:
+    """Fresh step-checklist dict for a generation run."""
+    return {
+        "risk":   {"label": "Risk & context", "done": False},
+        "cache":  {"label": "Cache lookup",   "done": False},
+        "claude": {"label": "Calling Claude", "done": False},
+        "valid":  {"label": "Validating",     "done": False},
+    }
+
+
+def _wiz_render_steps(steps: dict) -> str:
+    """Render the generation step checklist as HTML."""
+    html = ['<div style="padding:4px 0 10px">']
+    for s in steps.values():
+        mark = "✓" if s["done"] else "○"
+        col = "#4ade80" if s["done"] else "#6b7280"
+        html.append(f'<div style="color:{col};font-size:13px;padding:3px 0">{mark}&nbsp; {s["label"]}</div>')
+    html.append("</div>")
+    return "".join(html)
+
+
+def _wiz_nav(step: int, *, back_to=None, next_to=None, next_label="Next →",
+            next_disabled=False, next_warn=None) -> None:
+    """Render Back / Next navigation for a wizard step."""
+    st.divider()
+    b1, _, b2 = st.columns([1, 2, 1])
+    if back_to is not None:
+        with b1:
+            if st.button("← Back", use_container_width=True, key=f"wiz_back_{step}"):
+                _wiz_go(back_to)
+    if next_to is not None:
+        with b2:
+            if st.button(next_label, type="primary", use_container_width=True,
+                         key=f"wiz_next_{step}", disabled=next_disabled):
+                if next_warn:
+                    st.warning(next_warn)
+                else:
+                    _wiz_go(next_to)
+
+
+def _wiz_step_project() -> None:
+    """Step 1 — confirm the active project or create a new one."""
+    st.subheader("Step 1 · Project")
+    project = st.session_state.get("active_project", "")
+    st.markdown(f"Working on project: **{project or '(default)'}**")
+    st.caption("Switch projects from the sidebar on the left, or create a new one below.")
+
+    with st.popover("➕ New project"):
+        new_name = st.text_input("New project name", key="wiz_new_project",
+                                 placeholder="acme-checkout")
+        if st.button("Create", key="wiz_create_project"):
+            name = (new_name or "").strip().lower()
+            if not name:
+                st.warning("Enter a name.")
+            else:
+                rc, out = run_qax_command(["init-project", "--name", name])
+                if rc == 0:
+                    get_projects.clear()
+                    # Switch to the new project on the next run (applied in the sidebar)
+                    st.session_state["_pending_project"] = name
+                    st.toast(f"Created '{name}' — switching to it", icon="✅")
+                    st.rerun()
+                else:
+                    st.error(out[-300:])
+
+    st.divider()
+    _, _, col = st.columns([1, 2, 1])
+    with col:
+        if st.button("Next: Source →", type="primary", use_container_width=True, key="wiz_next_1"):
+            _wiz_go(2)
+
+
+def _wiz_step_source(project: str) -> None:
+    """Step 2 — choose the input type and provide the source."""
+    st.subheader("Step 2 · Source")
+    st.caption("Where should QAX read the code or requirement from?")
+
+    labels = list(_INPUT_TYPES.keys())
+    # Streamlit clears widget state when a step isn't rendered, so restore prior
+    # choices from stable (non-widget) keys before rendering the widgets.
+    st.session_state.setdefault("wiz_input_type", st.session_state.get("src_type", labels[0]))
+    st.session_state.setdefault("wiz_source_val", st.session_state.get("src_val", ""))
+
+    choice = st.radio("Input type", labels, horizontal=True, key="wiz_input_type")
+    meta = _INPUT_TYPES[choice]
+
+    if meta["field"] == "textarea":
+        st.text_area(meta["label"], placeholder=meta["placeholder"], height=120,
+                     key="wiz_source_val")
+    else:
+        st.text_input(meta["label"], placeholder=meta["placeholder"], key="wiz_source_val")
+        if meta["field"] == "file":
+            up = st.file_uploader("…or upload a file",
+                                  type=["cs", "py", "js", "ts", "java", "kt", "rb", "go"],
+                                  key="wiz_upload")
+            if up:
+                suffix = Path(up.name).suffix
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix,
+                                                 dir=str(QAX_ROOT / "output")) as tmp:
+                    tmp.write(up.getbuffer())
+                    st.session_state["wiz_uploaded_tmp"] = tmp.name
+                st.success(f"Uploaded: {up.name}")
+
+    # Persist to stable keys that survive navigation between steps
+    st.session_state["src_type"] = choice
+    st.session_state["src_val"] = st.session_state.get("wiz_source_val", "") or ""
+
+    has_source = bool(st.session_state["src_val"] or
+                      (meta["field"] == "file" and st.session_state.get("wiz_uploaded_tmp")))
+    _wiz_nav(2, back_to=1, next_to=3, next_label="Next: Understand →",
+             next_warn=None if has_source else "Provide a source first.")
+
+
+def _wiz_options_expander() -> None:
+    """Generation options — shown inside the Generate step."""
+    with st.expander("⚙️ Options"):
+        st.session_state.setdefault("wiz_test_type", st.session_state.get("cfg_test_type", "auto"))
+        st.session_state.setdefault("wiz_ext", st.session_state.get("cfg_ext", ".py"))
+        st.session_state.setdefault("wiz_git", st.session_state.get("cfg_git", False))
+        st.session_state.setdefault("wiz_bugs", st.session_state.get("cfg_bugs", False))
+        st.session_state.setdefault("wiz_auto", st.session_state.get("cfg_auto", False))
+        st.session_state.setdefault("wiz_story", st.session_state.get("cfg_story", ""))
+        st.session_state.setdefault("wiz_dry", st.session_state.get("cfg_dry", True))
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.selectbox("Test type",
+                         ["auto", "regression", "feature", "smoke", "uat", "api", "e2e"],
+                         key="wiz_test_type")
+            st.text_input("Folder file extension", key="wiz_ext",
+                          help="Only used when the source is a folder.")
+        with c2:
+            st.checkbox("Git history", key="wiz_git")
+            st.checkbox("Bug patterns", key="wiz_bugs")
+            st.checkbox("Auto-accept ≥ 8.5", key="wiz_auto")
+        st.text_area("Extra context / user story (optional)", key="wiz_story", height=70)
+        st.toggle("DRY RUN — don't push to Jira/Xray", key="wiz_dry")
+
+        for _w, _c in [("wiz_test_type", "cfg_test_type"), ("wiz_ext", "cfg_ext"),
+                       ("wiz_git", "cfg_git"), ("wiz_bugs", "cfg_bugs"),
+                       ("wiz_auto", "cfg_auto"), ("wiz_story", "cfg_story"),
+                       ("wiz_dry", "cfg_dry")]:
+            st.session_state[_c] = st.session_state.get(_w)
+
+
+def _wiz_coming_soon(step: int, title: str, desc: str, *,
+                     back_to: int, next_to: int | None = None,
+                     next_label: str = "Skip →") -> None:
+    """Render a placeholder for a step that isn't built yet."""
+    st.subheader(title)
+    st.info(f"🚧 {desc}\n\nComing soon — not built yet.")
+    st.divider()
+    b1, _, b2 = st.columns([1, 2, 1])
+    with b1:
+        if st.button("← Back", use_container_width=True, key=f"wiz_back_{step}"):
+            _wiz_go(back_to)
+    if next_to is not None:
+        with b2:
+            if st.button(next_label, use_container_width=True, key=f"wiz_next_{step}"):
+                _wiz_go(next_to)
+
+
+def _run_wizard_comprehension(project: str, adapter: str, source: str, ext: str | None) -> None:
+    """Run RepoComprehensionService and store the app map in session."""
+    from services.comprehension_service import RepoComprehensionService
+    from services.context import QAXContext
+
+    ctx = QAXContext.from_env(project=project)
+    with st.spinner("Understanding the source…"):
+        try:
+            result = RepoComprehensionService(ctx).comprehend(
+                source, input_type=adapter, ext=ext)
+        except Exception as exc:
+            st.error(f"Comprehension error: {exc}")
+            return
+
+    if result.error:
+        st.warning(result.error)
+        st.session_state["comprehension"] = None
+        st.session_state["repo_context"] = None
+    else:
+        st.session_state["comprehension"] = result
+        st.session_state["repo_context"] = result.as_context()
+        st.toast("App map ready", icon="🧠")
+
+
+def _wiz_render_comprehension(comp) -> None:
+    """Render the comprehension map."""
+    if comp.overview:
+        st.markdown(f"**Overview:** {comp.overview}")
+    c1, c2 = st.columns(2)
+    with c1:
+        if comp.main_flows:
+            st.markdown("**Main flows**")
+            for f in comp.main_flows:
+                st.markdown(f"- {f}")
+    with c2:
+        if comp.risk_areas:
+            st.markdown("**Risk areas**")
+            for r in comp.risk_areas:
+                st.markdown(f"- {r}")
+    if comp.entry_points:
+        with st.expander("Entry points"):
+            for e in comp.entry_points:
+                st.markdown(f"- {e}")
+    if comp.files:
+        with st.expander(f"Files ({comp.file_count})"):
+            for f in comp.files:
+                st.markdown(f"- `{f.get('path', '?')}` — {f.get('role', '')}")
+
+
+def _wiz_step_understand(project: str) -> None:
+    """Step 3 — deep comprehension of the source before generation."""
+    st.subheader("Step 3 · Understand")
+    st.caption("QAX reads the whole source and maps the app before generating — "
+               "so the tests go deeper. Optional, but recommended.")
+
+    choice = st.session_state.get("src_type", list(_INPUT_TYPES)[0])
+    meta = _INPUT_TYPES.get(choice, {})
+    adapter = meta.get("adapter", "file")
+    source = (st.session_state.get("wiz_uploaded_tmp")
+              if meta.get("field") == "file" and st.session_state.get("wiz_uploaded_tmp")
+              else st.session_state.get("src_val", ""))
+    ext = st.session_state.get("cfg_ext") or None
+
+    if st.button("🧠 Understand the source", type="primary", key="wiz_understand_run"):
+        if not source:
+            st.warning("No source — go back to step 2.")
+        else:
+            _run_wizard_comprehension(project, adapter, source, ext)
+
+    comp = st.session_state.get("comprehension")
+    if comp:
+        _wiz_render_comprehension(comp)
+
+    with st.expander("🌐 Tour the live app (optional — needs the app running + Playwright)"):
+        st.caption("QAX drives a browser over the running app to learn its real screens "
+                   "and selectors — so UI tests are grounded in reality and actually runnable.")
+        st.session_state.setdefault("tour_url", "http://localhost:5173")
+        st.text_input("App URL", key="tour_url")
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            st.text_input("Login email (optional)", key="tour_email")
+        with tc2:
+            st.text_input("Login password (optional)", key="tour_pass", type="password")
+        if st.button("🌐 Tour the live app", key="wiz_tour_run"):
+            _login = None
+            if st.session_state.get("tour_email"):
+                _login = {"email": st.session_state.get("tour_email", ""),
+                          "password": st.session_state.get("tour_pass", "")}
+            _run_wizard_tour(st.session_state.get("tour_url", ""), _login)
+        tour = st.session_state.get("tour_result")
+        if tour and not tour.error:
+            st.success(f"Toured {tour.screen_count} screen(s), {tour.element_count} real "
+                       f"element(s), {len(tour.console_errors)} console error(s). "
+                       f"Generation will use these real selectors.")
+            for s in tour.screens:
+                st.caption(f"↳ {s.get('url', '')} — {len(s.get('elements', []))} elements")
+
+    st.divider()
+    b1, _, b2 = st.columns([1, 2, 1])
+    with b1:
+        if st.button("← Back", use_container_width=True, key="wiz_back_3"):
+            _wiz_go(2)
+    with b2:
+        _lbl = "Next: Generate →" if comp else "Skip to Generate →"
+        if st.button(_lbl, use_container_width=True, key="wiz_next_3"):
+            _wiz_go(4)
+
+
+def _run_wizard_tour(base_url: str, login: dict | None) -> None:
+    """Tour the live app and merge its real UI surface into the generation context."""
+    from services.context import QAXContext
+    from services.tour_service import TourService
+
+    if not base_url:
+        st.warning("Enter the app URL first.")
+        return
+    ctx = QAXContext.from_env()
+    with st.spinner(f"Touring {base_url} (driving a real browser)…"):
+        tour = TourService(ctx).tour(base_url, login=login)
+    st.session_state["tour_result"] = tour
+    if tour.error:
+        st.warning(tour.error)
+        return
+    # Merge comprehension + observed surface so generation uses the real selectors.
+    parts = []
+    comp = st.session_state.get("comprehension")
+    if comp:
+        parts.append(comp.as_context())
+    parts.append(tour.as_context())
+    st.session_state["repo_context"] = "\n\n".join(p for p in parts if p)
+    st.toast(f"Toured {tour.screen_count} screen(s), {tour.element_count} element(s)",
+             icon="🌐")
+
+
+def _run_wizard_execution(results: list[dict], base_url: str, mode: str) -> None:
+    """Execute the generated tests against a live URL and store the result."""
+    from services.context import QAXContext
+    from services.execution_service import ExecutionService
+
+    ctx = QAXContext.from_env(dry_run=st.session_state.get("cfg_dry", True))
+    with st.spinner(f"Running {len(results)} test(s) against {base_url}…"):
+        try:
+            result = ExecutionService(ctx).execute(
+                results, mode=mode, base_url=base_url, stop_on_fail=False)
+        except Exception as exc:
+            st.error(f"Execution error: {exc}")
+            return
+
+    st.session_state["execution_result"] = result
+    if result.error:
+        st.warning(result.error)
+    else:
+        st.toast(f"Ran {result.total} — {result.passed} passed, {result.failed} failed",
+                 icon="▶️")
+
+
+def _wiz_render_execution(result) -> None:
+    """Render execution metrics and per-test results."""
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total", result.total)
+    m2.metric("Passed", result.passed)
+    m3.metric("Failed", result.failed)
+    m4.metric("Pass rate", f"{result.pass_rate:.0f}%")
+    st.divider()
+    for r in result.results:
+        status = r.get("status", "?")
+        icon = {"PASS": "✅", "FAIL": "❌", "ERROR": "⚠️", "SKIP": "➖"}.get(status, "•")
+        tc_id = r.get("test_case_id", r.get("id", "?"))
+        title = str(r.get("title", ""))[:55]
+        st.markdown(f"{icon} **[{status}]** {tc_id} — {title}")
+        if status in ("FAIL", "ERROR"):
+            for step in r.get("steps", []):
+                if step.get("status") in ("FAIL", "ERROR"):
+                    st.caption(f"↳ step {step.get('step_number', '?')}: "
+                               f"{str(step.get('error', ''))[:110]}")
+            if r.get("error"):
+                st.caption(f"↳ {str(r['error'])[:130]}")
+
+
+def _wiz_step_execute() -> None:
+    """Step 6 — run the generated tests against a live app."""
+    st.subheader("Step 6 · Execute (E2E)")
+    results = st.session_state.get("analyze_results") or []
+    if not results:
+        st.info("Generate test cases first (step 4).")
+        st.divider()
+        if st.button("← Back", use_container_width=True, key="wiz_back_6"):
+            _wiz_go(5)
+        return
+
+    st.caption(f"{len(results)} test case(s) ready to run against a live app.")
+    st.session_state.setdefault("wiz_base_url", "http://localhost:8000")
+    st.session_state.setdefault("wiz_exec_mode", "api")
+    st.text_input("Live app URL", key="wiz_base_url",
+                  help="The running app to test against (e.g. a staging URL or localhost).")
+    st.radio("Mode", ["api", "ui"], key="wiz_exec_mode", horizontal=True,
+             help="api = hit HTTP endpoints directly (no browser) · "
+                  "ui = Playwright browser (needs Python 3.11/3.12).")
+
+    if st.button("▶️ Run tests", type="primary", key="wiz_exec_run"):
+        _run_wizard_execution(results, st.session_state.get("wiz_base_url", ""),
+                              st.session_state.get("wiz_exec_mode", "api"))
+
+    ex = st.session_state.get("execution_result")
+    if ex:
+        _wiz_render_execution(ex)
+
+    st.divider()
+    b1, _, b2 = st.columns([1, 2, 1])
+    with b1:
+        if st.button("← Back", use_container_width=True, key="wiz_back_6"):
+            _wiz_go(5)
+    with b2:
+        if st.button("Next: Bug reports →", use_container_width=True,
+                     key="wiz_next_6", disabled=not ex):
+            _wiz_go(7)
+
+
+def _run_wizard_bugreport(execution) -> None:
+    """Build a standalone HTML report from the execution result."""
+    from services.context import QAXContext
+    from services.reporting_service import ReportingService
+
+    ctx = QAXContext.from_env()
+    with st.spinner("Building the report…"):
+        rep = ReportingService(ctx).report(execution)
+    if rep.error:
+        st.warning(rep.error)
+    elif rep.html_path:
+        st.session_state["report_path"] = rep.html_path
+        st.toast("Report ready", icon="📄")
+
+
+def _run_wizard_critic() -> None:
+    """Run the Critic over the execution result — separate real bugs from broken tests."""
+    from services.context import QAXContext
+    from services.critic_service import CriticService
+
+    ex = st.session_state.get("execution_result")
+    results = st.session_state.get("analyze_results") or []
+    if not ex:
+        return
+    ctx = QAXContext.from_env()
+    try:
+        with st.spinner("Investigating failures (verify, don't trust)…"):
+            crit = CriticService(ctx).review(ex, results)
+    except Exception as exc:
+        st.error(f"Critic error: {exc}")
+        return
+    st.session_state["critic_result"] = crit
+    st.session_state["investigation_result"] = None   # stale once the Critic re-runs
+    if crit.error:
+        st.warning(crit.error)
+    else:
+        st.toast(crit.summary(), icon="🕵️")
+
+
+def _run_wizard_investigator() -> None:
+    """Reproduce each suspected bug on the live app — confirm or downgrade it."""
+    from services.context import QAXContext
+    from services.investigator_service import InvestigatorService
+
+    crit = st.session_state.get("critic_result")
+    results = st.session_state.get("analyze_results") or []
+    base_url = st.session_state.get("wiz_base_url") or ""
+    if not crit:
+        return
+    ctx = QAXContext.from_env()
+    try:
+        with st.spinner("Reproducing on the live app (verify before you file)…"):
+            inv = InvestigatorService(ctx).investigate(crit, results, base_url=base_url)
+    except Exception as exc:
+        st.error(f"Investigator error: {exc}")
+        return
+    st.session_state["investigation_result"] = inv
+    st.session_state["bug_report"] = None   # stale once the investigation re-runs
+    if inv.error:
+        st.warning(inv.error)
+    else:
+        st.toast(inv.summary(), icon="✅")
+
+
+def _run_wizard_reporter() -> None:
+    """Group the confirmed bugs by root cause and write professional reports."""
+    from services.context import QAXContext
+    from services.reporter_service import ReporterService
+
+    inv = st.session_state.get("investigation_result")
+    if not inv:
+        return
+    ctx = QAXContext.from_env()
+    try:
+        with st.spinner("Writing the bug report (grouping by root cause)…"):
+            rep = ReporterService(ctx).report(inv)
+    except Exception as exc:
+        st.error(f"Reporter error: {exc}")
+        return
+    st.session_state["bug_report"] = rep
+    if rep.error:
+        st.warning(rep.error)
+    else:
+        st.toast(rep.summary(), icon="📄")
+
+
+def _wiz_step_bugreports() -> None:
+    """Step 7 — investigate failures, then report only the real bugs."""
+    st.subheader("Step 7 · Bug reports")
+    ex = st.session_state.get("execution_result")
+    if not ex:
+        st.info("Run the tests first (step 6).")
+    else:
+        failed = [r for r in ex.results if r.get("status") in ("FAIL", "ERROR")]
+        st.caption(f"{ex.failed} failing / {ex.total} test(s) — "
+                   f"{len(failed)} to investigate.")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🕵️ Investigate failures", type="primary",
+                         key="wiz_critic_run", disabled=not failed,
+                         help="The Critic checks each failure: real app bug, or the "
+                              "test's own fault? Only real bugs should be reported."):
+                _run_wizard_critic()
+        with c2:
+            if st.button("📄 Build bug report", key="wiz_report_run",
+                         disabled=not failed):
+                _run_wizard_bugreport(ex)
+
+        crit = st.session_state.get("critic_result")
+        if crit and not crit.error:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("🐞 Real bugs", len(crit.real_bugs))
+            m2.metric("🔧 Broken tests", len(crit.broken_tests))
+            m3.metric("❓ Uncertain", len(crit.uncertain))
+            st.divider()
+
+            inv = st.session_state.get("investigation_result")
+            if crit.real_bugs:
+                st.markdown("#### 🐞 Suspected bugs")
+                if not inv:
+                    st.caption("The Critic flagged these from the tests. Verify each on "
+                               "the live app before trusting it.")
+                    if st.button("✅ Verify on the live app", key="wiz_investigate_run",
+                                 help="The Investigator reproduces each suspected bug against "
+                                      "the running app and drops false alarms."):
+                        _run_wizard_investigator()
+                for v in crit.real_bugs:
+                    st.markdown(f"**{str(v.title)[:70]}**")
+                    st.caption(f"↳ why: {str(v.reason)[:180]}")
+
+            if inv and not inv.error:
+                st.divider()
+                v1, v2, v3 = st.columns(3)
+                v1.metric("✅ Confirmed", len(inv.confirmed))
+                v2.metric("🚫 False alarms", len(inv.not_reproduced))
+                v3.metric("❓ Inconclusive", len(inv.inconclusive))
+                if inv.note:
+                    st.caption(inv.note)
+                if inv.confirmed:
+                    st.markdown("#### ✅ Confirmed bugs — reproduced on the live app")
+                    for v in inv.confirmed:
+                        st.markdown(f"**{str(v.title)[:70]}**")
+                        st.caption(f"↳ {str(v.reason)[:180]}")
+                        if v.evidence:
+                            st.caption(f"↳ evidence: {str(v.evidence)[:160]}")
+                    rep = st.session_state.get("bug_report")
+                    if not rep:
+                        if st.button("📄 Write bug report (group by root cause)",
+                                     type="primary", key="wiz_reporter_run",
+                                     help="Fold the confirmed bugs into one report per "
+                                          "root cause, with severity, evidence and impact."):
+                            _run_wizard_reporter()
+                    elif not rep.error:
+                        st.success(rep.summary())
+                        for e in rep.entries:
+                            with st.expander(f"[{e.severity}] {str(e.title)[:80]}"):
+                                st.markdown(e.to_markdown())
+                        st.download_button(
+                            "⬇️ Download bug report (Markdown)",
+                            data=rep.to_markdown(), file_name="qax_bug_report.md",
+                            mime="text/markdown", use_container_width=True)
+                if inv.not_reproduced:
+                    with st.expander(f"🚫 {len(inv.not_reproduced)} false alarm(s) — "
+                                     f"did not hold up on the live app"):
+                        for v in inv.not_reproduced:
+                            st.markdown(f"**{str(v.title)[:70]}**")
+                            st.caption(f"↳ {str(v.reason)[:180]}")
+                if inv.inconclusive:
+                    with st.expander(f"❓ {len(inv.inconclusive)} inconclusive"):
+                        for v in inv.inconclusive:
+                            st.caption(f"{str(v.title)[:70]} — {str(v.reason)[:120]}")
+
+            if crit.broken_tests:
+                with st.expander(f"🔧 {len(crit.broken_tests)} broken test(s) — "
+                                 f"not app bugs (the test's own fault)"):
+                    for v in crit.broken_tests:
+                        st.markdown(f"**{str(v.title)[:70]}**")
+                        st.caption(f"↳ {str(v.reason)[:180]}")
+            if crit.uncertain:
+                with st.expander(f"❓ {len(crit.uncertain)} uncertain"):
+                    for v in crit.uncertain:
+                        st.caption(f"{str(v.title)[:70]} — {str(v.reason)[:120]}")
+        else:
+            # Not yet investigated — show raw failures.
+            for r in failed:
+                st.markdown(f"**⚠️ {r.get('test_case_id', '?')} — "
+                            f"{str(r.get('title', ''))[:60]}**")
+                for step in r.get("steps", []):
+                    if step.get("status") in ("FAIL", "ERROR"):
+                        st.caption(f"↳ step {step.get('step_number', '?')}: "
+                                   f"{str(step.get('error', ''))[:130]}")
+                if r.get("error"):
+                    st.caption(f"↳ {str(r['error'])[:150]}")
+
+        path = st.session_state.get("report_path")
+        if path and Path(path).exists():
+            try:
+                st.download_button("⬇️ Download HTML report",
+                                   data=Path(path).read_text(encoding="utf-8"),
+                                   file_name="qax_report.html", mime="text/html",
+                                   use_container_width=True)
+            except Exception:
+                st.caption(f"Report saved: {path}")
+
+    st.divider()
+    b1, _, b2 = st.columns([1, 2, 1])
+    with b1:
+        if st.button("← Back", use_container_width=True, key="wiz_back_7"):
+            _wiz_go(6)
+    with b2:
+        if st.button("↺ Start over", use_container_width=True, key="wiz_restart2"):
+            for _k in ("analyze_results", "wiz_uploaded_tmp", "comprehension",
+                       "repo_context", "execution_result", "report_path",
+                       "critic_result", "investigation_result", "tour_result",
+                       "bug_report"):
+                st.session_state[_k] = None
+            _wiz_go(1)
+
+
+def _run_wizard_generation(project: str, adapter: str, source: str, ext: str | None) -> None:
+    """Call GenerationService.generate_from_source and store results in session."""
+    from services.context import QAXContext
+    from services.generation_service import GenerationOptions, GenerationService
+
+    _tt = st.session_state.get("cfg_test_type", "auto")
+    opts = GenerationOptions(
+        user_story=st.session_state.get("cfg_story") or None,
+        test_type=_tt if _tt and _tt != "auto" else None,
+        include_git=st.session_state.get("cfg_git", False),
+        include_bugs=st.session_state.get("cfg_bugs", False),
+        auto_accept=st.session_state.get("cfg_auto", False),
+        repo_context=st.session_state.get("repo_context") or None,
+    )
+    ctx = QAXContext.from_env(project=project, dry_run=st.session_state.get("cfg_dry", True))
+
+    steps = _wiz_new_steps()
+    ph = st.empty()
+    ph.markdown(_wiz_render_steps(steps), unsafe_allow_html=True)
+    reporter = _UIProgressReporter(steps, ph, _wiz_render_steps)
+
+    try:
+        result = GenerationService(ctx).generate_from_source(
+            source, input_type=adapter, options=opts, ext=ext, progress=reporter)
+    except Exception as exc:
+        st.error(f"Generation error: {exc}")
+        return
+
+    for s in steps.values():
+        s["done"] = True
+    ph.markdown(_wiz_render_steps(steps), unsafe_allow_html=True)
+
+    results = result.test_cases
+    st.session_state["analyze_results"] = results
+    if result.error and not results:
+        st.toast("No test cases — see message", icon="⚠️")
+        st.warning(result.error)
+    elif results:
+        st.session_state["onboarded"] = True
+        st.toast(f"✅ Generated {len(results)} test case(s)", icon="🤖")
+        try:
+            _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            _out = QAX_ROOT / "output" / f"test_cases_{_ts}.json"
+            _out.parent.mkdir(parents=True, exist_ok=True)
+            _out.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+            load_all_test_cases.clear()
+        except Exception:
+            pass
+    else:
+        st.toast("No valid test cases produced", icon="⚠️")
+
+
+def _wiz_render_results(results: list[dict], dry_run: bool) -> None:
+    """Render metric cards + per-test-case cards with accept/reject/push."""
+    avg_conf = (sum(t.get("confidence_score", 0) for t in results) / len(results)) if results else 0
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Valid", len(results))
+    m2.metric("Avg confidence", f"{avg_conf:.1f}/10")
+    m3.metric("Modules", len({t.get("module", "") for t in results}))
+    st.divider()
+
+    for i, tc in enumerate(results):
+        title = tc.get("title", "Untitled")
+        tc_id = tc.get("test_case_id", f"TC-{i + 1:04d}")
+        module = tc.get("module", "N/A")
+        tt = tc.get("test_type", "functional")
+        score = float(tc.get("confidence_score", 0))
+        needs_rv = tc.get("needs_review", False)
+        _cls = "tc-high" if score >= 8 else ("tc-medium" if score >= 6 else "tc-low")
+        st.markdown(
+            f'<div class="qax-card {_cls}">'
+            f'<div class="qax-card-title">{tc_id} — {title}</div>'
+            f'<div style="margin-bottom:6px">{badge(module, "purple")}{badge(tt, "teal")}'
+            f'{badge(f"{score}/10", score_badge_class(score))}'
+            + (f'{badge("⚠ Review", "amber")}' if needs_rv else "")
+            + f'</div>{confidence_bar(score)}</div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander(f"View steps — {tc_id}"):
+            for step in tc.get("manual_steps", []):
+                st.markdown(f"**{step.get('step_number', '?')}.** {step.get('action', '')}")
+                if step.get("expected_result"):
+                    st.caption(f"Expected: {step['expected_result']}")
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            if st.button("✓ Accept", key=f"wacc_{i}", use_container_width=True):
+                try:
+                    from core.feedback_store import FeedbackStore
+                    FeedbackStore().record_decision(tc, action="accepted")
+                    st.toast(f"Accepted {tc_id}", icon="✅")
+                    get_feedback_stats.clear()
+                except Exception as e:
+                    st.toast(f"Could not record: {e}", icon="❌")
+        with a2:
+            if st.button("✗ Reject", key=f"wrej_{i}", use_container_width=True):
+                try:
+                    from core.feedback_store import FeedbackStore
+                    FeedbackStore().record_decision(tc, action="rejected")
+                    st.toast(f"Rejected {tc_id}", icon="❌")
+                    get_feedback_stats.clear()
+                except Exception as e:
+                    st.toast(f"Could not record: {e}", icon="❌")
+        with a3:
+            if st.button("↑ Push to Xray", key=f"wpush_{i}", use_container_width=True,
+                         disabled=dry_run,
+                         help="Turn off DRY RUN in step 3 to push"):
+                try:
+                    from core.xray_client import XrayClient
+                    res = XrayClient().push_batch([tc])
+                    pushed = res.get("summary", {}).get("pushed_count", 0)
+                    st.toast(f"Pushed {pushed} to Xray", icon="⬆️")
+                except Exception as e:
+                    st.toast(f"Push failed: {e}", icon="❌")
+        st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
+
+
+def _wiz_step_generate(project: str) -> None:
+    """Step 4 — generate and review."""
+    st.subheader("Step 4 · Generate & review")
+    choice = st.session_state.get("src_type", list(_INPUT_TYPES)[0])
+    meta = _INPUT_TYPES.get(choice, {})
+    adapter = meta.get("adapter", "file")
+    source = (st.session_state.get("wiz_uploaded_tmp")
+              if meta.get("field") == "file" and st.session_state.get("wiz_uploaded_tmp")
+              else st.session_state.get("src_val", ""))
+    ext = st.session_state.get("cfg_ext") or None
+
+    _map = "  ·  🧠 using app map" if st.session_state.get("repo_context") else ""
+    st.caption(f"Source: {choice} · project: {project or '(default)'}{_map}")
+    _wiz_options_expander()
+    if st.button("🤖 Generate test cases", type="primary", key="wiz_run"):
+        if not source:
+            st.warning("No source — go back to step 2.")
+        else:
+            _run_wizard_generation(project, adapter, source, ext)
+
+    results = st.session_state.get("analyze_results") or []
+    if results:
+        _wiz_render_results(results, st.session_state.get("cfg_dry", True))
+
+    _wiz_nav(4, back_to=3, next_to=5, next_label="Next: Export →",
+             next_disabled=not results)
+
+
+def _run_wizard_export(results: list[dict], target: str, project: str, dry: bool) -> None:
+    """Export via ExportService and toast the outcome."""
+    from services.context import QAXContext
+    from services.export_service import ExportService
+
+    ctx = QAXContext.from_env(project=project, dry_run=dry)
+    res = ExportService(ctx).export(results, target=target)
+    if res.success:
+        st.toast(f"Exported {res.exported_count} → {target}", icon="✅")
+        if res.references:
+            st.success("Saved: " + ", ".join(str(r) for r in res.references[:3]))
+    else:
+        st.error(res.error or "Export failed")
+
+
+def _wiz_step_export() -> None:
+    """Step 5 — export the results."""
+    st.subheader("Step 5 · Export")
+    results = st.session_state.get("analyze_results") or []
+    if not results:
+        st.info("Nothing to export yet — generate in step 4 first.")
+    else:
+        dry = st.session_state.get("cfg_dry", True)
+        project = st.session_state.get("active_project", "")
+        st.caption(f"{len(results)} test case(s) ready. "
+                   + ("DRY RUN is on — Jira/Xray will simulate." if dry else "DRY RUN is off."))
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            if st.button("Jira / Xray", use_container_width=True, key="wiz_exp_xray"):
+                _run_wizard_export(results, "xray", project, dry)
+        with c2:
+            if st.button("Excel", use_container_width=True, key="wiz_exp_excel"):
+                _run_wizard_export(results, "excel", project, dry)
+        with c3:
+            if st.button("CSV", use_container_width=True, key="wiz_exp_csv"):
+                _run_wizard_export(results, "csv", project, dry)
+        with c4:
+            st.download_button("Markdown", data=build_markdown_export(results),
+                               file_name="test_cases.md", mime="text/markdown",
+                               use_container_width=True)
+
+    _wiz_nav(5, back_to=4, next_to=6, next_label="Next: Execute →")
+
+
+def render_analyze_wizard(project: str) -> None:
+    """Render the whole Analyze wizard for the given active project."""
+    step = st.session_state.setdefault("wiz_step", 1)
+    _wizard_stepper(step)
+    if step == 1:
+        _wiz_step_project()
+    elif step == 2:
+        _wiz_step_source(project)
+    elif step == 3:
+        _wiz_step_understand(project)
+    elif step == 4:
+        _wiz_step_generate(project)
+    elif step == 5:
+        _wiz_step_export()
+    elif step == 6:
+        _wiz_step_execute()
+    else:
+        _wiz_step_bugreports()
+
+
 _ap = st.session_state.get("active_project", os.getenv("DEFAULT_PROJECT", "example")).upper()
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab5, tab3, tab4 = st.tabs([
     f"🔍 Analyze · {_ap}",
     f"▶ Run · {_ap}",
+    "🛡️ Deep Scan",
     "📊 Dashboard",
     "⚙️ Settings",
 ])
@@ -669,378 +1583,12 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     project = st.session_state.get("active_project", os.getenv("DEFAULT_PROJECT", "example"))
 
-    # Detect project change and clear stale results
+    # Reset wizard results when the active project changes
     if st.session_state.get("last_project") != project:
         st.session_state["analyze_results"] = None
         st.session_state["last_project"] = project
 
-    # ── Onboarding banner — shown only when no results exist ─────────────
-    if not st.session_state.get("onboarded") and not load_all_test_cases():
-        st.markdown(
-            '<div class="onboarding-banner">'
-            '<div style="font-size:2.4rem;margin-bottom:10px">🤖</div>'
-            '<div style="font-size:1.25rem;font-weight:800;color:#f1f5f9;margin-bottom:8px">'
-            'Welcome to QAX — AI QA Engineer'
-            '</div>'
-            '<div style="font-size:0.88rem;color:#9ca3af;max-width:500px;margin:0 auto 16px">'
-            'Point QAX at any source file and get production-ready test cases in seconds.'
-            '</div>'
-            '<div style="display:flex;justify-content:center;flex-wrap:wrap">'
-            '<span class="onboarding-step">📁 Step 1 · Pick a source file</span>'
-            '<span class="onboarding-step">🤖 Step 2 · Click Generate</span>'
-            '<span class="onboarding-step">✅ Step 3 · Accept &amp; push to Jira</span>'
-            '</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-    left, right = st.columns([4, 6])
-
-    # ── LEFT: inputs ───────────────────────────────────────────────────────
-    with left:
-        st.subheader("Source")
-
-        input_method = st.radio(
-            "Input method",
-            ["File path", "Upload file"],
-            horizontal=True,
-            key="analyze_input_method",
-        )
-
-        file_path_input = ""
-        uploaded_tmp: str | None = None
-
-        if input_method == "File path":
-            _known_ext = {"example3": ".ts", "example2": ".cs"}
-            _ext = _known_ext.get(project, ".cs")
-            file_path_input = st.text_input(
-                "File path",
-                placeholder=f"C:/project/Controller{_ext}",
-                key="analyze_file_path",
-            )
-        else:
-            uploaded = st.file_uploader(
-                "Upload source file",
-                type=["cs", "py", "js", "ts", "java", "kt", "rb", "go"],
-                key="analyze_uploader",
-            )
-            if uploaded:
-                suffix = Path(uploaded.name).suffix
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=suffix, dir=str(QAX_ROOT / "output")
-                ) as tmp:
-                    tmp.write(uploaded.getbuffer())
-                    uploaded_tmp = tmp.name
-                st.success(f"Uploaded: {uploaded.name}")
-
-        user_story = st.text_area(
-            "User Story (optional)",
-            placeholder=(
-                "As a user I want to...\n"
-                "Acceptance criteria:\n- ..."
-            ),
-            height=80,
-            key="analyze_story",
-        )
-
-        with st.expander("⚙️ Options"):
-            oc1, oc2 = st.columns(2)
-            with oc1:
-                include_git  = st.checkbox("Git history",    key="opt_git")
-                include_deps = st.checkbox("Dependencies",   key="opt_deps")
-                include_bugs = st.checkbox("Bug patterns",   key="opt_bugs")
-            with oc2:
-                auto_accept  = st.checkbox("Auto-accept ≥8.5", key="opt_auto")
-                natural_out  = st.checkbox("Natural output",   key="opt_natural")
-                chunk_size   = st.select_slider(
-                    "Chunk size",
-                    options=[100, 150, 200, 250, 300, 400, 500],
-                    value=300,
-                    key="opt_chunk",
-                )
-            test_type = st.selectbox(
-                "Test type",
-                ["auto", "regression", "feature", "smoke", "uat"],
-                key="opt_testtype",
-            )
-
-        dry_run_analyze = st.toggle(
-            "DRY RUN",
-            value=True,
-            help="No changes pushed to Jira/Xray",
-            key="analyze_dryrun",
-        )
-
-        generate_btn = st.button(
-            "🔍 Generate Test Cases",
-            type="primary",
-            use_container_width=True,
-            key="analyze_generate",
-        )
-
-    # ── RIGHT: results ─────────────────────────────────────────────────────
-    with right:
-        if generate_btn:
-            effective_path = uploaded_tmp or file_path_input
-            if not effective_path:
-                st.error("Please provide a file path or upload a file.")
-            else:
-                # ── Build command args ─────────────────────────────────────
-                args = [
-                    "analyze",
-                    "--file", effective_path,
-                    "--project", project,
-                    "--chunk-size", str(chunk_size),
-                ]
-                if dry_run_analyze:
-                    args.append("--dry-run")
-                if include_git:
-                    args.append("--include-git")
-                if include_deps:
-                    args.append("--include-deps")
-                if include_bugs and st.session_state.get("analyze_module"):
-                    args += ["--include-bugs", "--module", st.session_state.analyze_module]
-                if auto_accept:
-                    args.append("--auto-accept")
-                if natural_out:
-                    args.append("--natural")
-                if user_story:
-                    args += ["--story", user_story]
-                if test_type != "auto":
-                    args += ["--test-type", test_type]
-
-                # ── Step-by-step progress + streaming terminal ─────────────
-                st.markdown("**Progress**")
-                _steps: dict[str, dict] = {
-                    "risk":   {"label": "Risk assessment",   "done": False, "icon": "🔍"},
-                    "cache":  {"label": "Cache lookup",      "done": False, "icon": "⚡"},
-                    "claude": {"label": "Sending to Claude", "done": False, "icon": "🤖"},
-                    "valid":  {"label": "Validating output", "done": False, "icon": "✅"},
-                }
-
-                def _steps_html(steps: dict) -> str:
-                    """Render step-by-step progress as HTML."""
-                    html = '<div style="padding:4px 0 10px">'
-                    for s in steps.values():
-                        cls = "step-done" if s["done"] else "step-pending"
-                        mark = "✓" if s["done"] else "○"
-                        html += (
-                            f'<div class="progress-step {cls}">'
-                            f'<span style="width:16px;display:inline-block">{mark}</span>'
-                            f'{s["icon"]} {s["label"]}'
-                            f'</div>'
-                        )
-                    html += '</div>'
-                    return html
-
-                prog_placeholder = st.empty()
-                prog_placeholder.markdown(_steps_html(_steps), unsafe_allow_html=True)
-                st.markdown("**Output**")
-                terminal_placeholder = st.empty()
-
-                try:
-                    # Stream subprocess line-by-line, updating progress steps
-                    _cmd = [sys.executable, str(QAX_ROOT / "main.py")] + args
-                    _proc = subprocess.Popen(
-                        _cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                        cwd=str(QAX_ROOT),
-                    )
-                    _lines: list[str] = []
-                    for _line in _proc.stdout:  # type: ignore[union-attr]
-                        _lines.append(_line)
-                        # Parse progress signals
-                        _ll = _line.lower()
-                        if not _steps["risk"]["done"]   and ("risk:" in _ll or "risk level" in _ll):
-                            _steps["risk"]["done"] = True
-                        if not _steps["cache"]["done"]  and "cache hit" in _ll:
-                            _steps["cache"]["done"] = True
-                        if not _steps["claude"]["done"] and ("sending to claude" in _ll or "claude" in _ll and "send" in _ll):
-                            _steps["claude"]["done"] = True
-                        if not _steps["valid"]["done"]  and ("schema pass" in _ll or "valid (" in _ll):
-                            _steps["valid"]["done"] = True
-                        prog_placeholder.markdown(_steps_html(_steps), unsafe_allow_html=True)
-                        terminal_placeholder.markdown(
-                            f'<div class="terminal">{"".join(_lines[-60:])}</div>',
-                            unsafe_allow_html=True,
-                        )
-                    _proc.wait()
-                    rc     = _proc.returncode
-                    output = "".join(_lines)
-                    # Mark all steps done on success
-                    if rc == 0:
-                        for _s in _steps.values():
-                            _s["done"] = True
-                        prog_placeholder.markdown(_steps_html(_steps), unsafe_allow_html=True)
-
-                    # ── Load results ───────────────────────────────────────
-                    load_all_test_cases.clear()
-                    results = load_latest_test_cases()
-                    st.session_state["analyze_results"] = results
-                    st.session_state["analyze_output"]  = output
-                    st.session_state["analyze_rc"]      = rc
-                    if rc == 0 and results:
-                        st.session_state["onboarded"] = True
-                        st.toast(f"✅ Generated {len(results)} test case(s)", icon="🤖")
-                    elif rc != 0:
-                        st.toast("Generation failed — check output for details", icon="❌")
-                except Exception as _exc:
-                    rc, output = 1, str(_exc)
-                    st.session_state["analyze_rc"] = rc
-                    st.error(f"Command error: {_exc}")
-                finally:
-                    if uploaded_tmp and os.path.exists(uploaded_tmp):
-                        try:
-                            os.unlink(uploaded_tmp)
-                        except OSError:
-                            pass
-
-        # ── Show results ───────────────────────────────────────────────────
-        results: list[dict] = st.session_state.get("analyze_results", [])
-
-        if not results and not generate_btn:
-            st.markdown(
-                '<div class="empty-state">'
-                '<div style="font-size:2.5rem;margin-bottom:12px">🔍</div>'
-                '<div style="font-size:1rem;font-weight:600;color:#9ca3af">Run analysis to see results here</div>'
-                '<div style="font-size:0.82rem;margin-top:8px">Choose a file and click Generate Test Cases</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-        elif results:
-            # ── Metric cards ───────────────────────────────────────────────
-            auto_acc_count = sum(1 for t in results if t.get("auto_accepted"))
-            avg_conf = (
-                sum(t.get("confidence_score", 0) for t in results) / len(results)
-                if results else 0
-            )
-            mc1, mc2, mc3, mc4 = st.columns(4)
-            mc1.metric("Generated",      len(results))
-            mc2.metric("Valid",          len(results))
-            mc3.metric("Auto-accepted",  auto_acc_count)
-            mc4.metric("Avg Confidence", f"{avg_conf:.1f}/10")
-
-            st.divider()
-
-            # ── Test case cards ────────────────────────────────────────────
-            for i, tc in enumerate(results):
-                title    = tc.get("title", "Untitled")
-                tc_id    = tc.get("test_case_id", f"TC-{i+1:04d}")
-                module   = tc.get("module",       "N/A")
-                tt       = tc.get("test_type",    "functional")
-                risk     = tc.get("risk_level",   "medium")
-                score    = float(tc.get("confidence_score", 0))
-                needs_rv = tc.get("needs_review", False)
-                note     = tc.get("review_note",  "")
-
-                # Determine card border class by confidence score
-                _tc_cls = "tc-high" if score >= 8 else ("tc-medium" if score >= 6 else "tc-low")
-
-                # Card header
-                st.markdown(
-                    f'<div class="qax-card {_tc_cls}">'
-                    f'<div class="qax-card-title">{tc_id} — {title}</div>'
-                    f'<div style="margin-bottom:6px">'
-                    f'{badge(module, "purple")}'
-                    f'{badge(tt, "teal")}'
-                    f'{badge(risk.upper(), risk_badge_class(risk))}'
-                    f'{badge(f"{score}/10", score_badge_class(score))}'
-                    + (f'{badge("⚠ Review", "amber")}' if needs_rv else "")
-                    + f'</div>'
-                    f'{confidence_bar(score)}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-                # Expandable steps
-                with st.expander(f"View steps — {tc_id}"):
-                    manual = tc.get("manual_steps", [])
-                    if manual:
-                        st.markdown("**Manual Steps**")
-                        for step in manual:
-                            sn = step.get("step_number", "?")
-                            act = step.get("action", "")
-                            exp = step.get("expected_result", "")
-                            st.markdown(f"**{sn}.** {act}")
-                            if exp:
-                                st.caption(f"Expected: {exp}")
-                    auto_steps = tc.get("automation_steps", [])
-                    if auto_steps:
-                        st.markdown("**Automation Steps**")
-                        for step in auto_steps:
-                            sn  = step.get("step_number", "?")
-                            act = step.get("playwright_action", "")
-                            sel = step.get("selector_key", "")
-                            st.markdown(f"**{sn}.** `{act}` → `{sel}`")
-                    if needs_rv and note:
-                        st.warning(f"Review note: {note}")
-
-                # Action row — styled buttons via wrapper divs
-                ac1, ac2, ac3 = st.columns([1, 1, 1])
-                with ac1:
-                    st.markdown('<div class="btn-accept-wrap">', unsafe_allow_html=True)
-                    if st.button("✓ Accept", key=f"acc_{i}", use_container_width=True):
-                        try:
-                            from core.feedback_store import FeedbackStore
-                            FeedbackStore().record_decision(tc, action="accepted")
-                            st.toast(f"✓ Accepted: {tc_id}", icon="✅")
-                            get_feedback_stats.clear()
-                        except Exception as e:
-                            st.toast(f"Could not record: {e}", icon="❌")
-                    st.markdown('</div>', unsafe_allow_html=True)
-                with ac2:
-                    st.markdown('<div class="btn-reject-wrap">', unsafe_allow_html=True)
-                    if st.button("✗ Reject", key=f"rej_{i}", use_container_width=True):
-                        try:
-                            from core.feedback_store import FeedbackStore
-                            FeedbackStore().record_decision(tc, action="rejected")
-                            st.toast(f"✗ Rejected: {tc_id}", icon="❌")
-                            get_feedback_stats.clear()
-                        except Exception as e:
-                            st.toast(f"Could not record: {e}", icon="❌")
-                    st.markdown('</div>', unsafe_allow_html=True)
-                with ac3:
-                    push_disabled = dry_run_analyze
-                    st.markdown('<div class="btn-push-wrap">', unsafe_allow_html=True)
-                    if st.button(
-                        "↑ Push to Xray",
-                        key=f"push_{i}",
-                        use_container_width=True,
-                        disabled=push_disabled,
-                        help="Turn off DRY RUN to enable push" if push_disabled else f"Push {tc_id} to Xray",
-                    ):
-                        try:
-                            from core.xray_client import XrayClient
-                            xray = XrayClient()
-                            res  = xray.push_batch([tc])
-                            pushed = res.get("summary", {}).get("pushed_count", 0)
-                            st.toast(f"⬆️ Pushed {pushed} test case(s) to Xray", icon="⬆️")
-                        except Exception as e:
-                            st.toast(f"Push failed: {e}", icon="❌")
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
-
-            st.divider()
-
-            # ── Export row ─────────────────────────────────────────────────
-            ex1, ex2 = st.columns(2)
-            with ex1:
-                md_text = build_markdown_export(results)
-                st.download_button(
-                    "📄 Export as Markdown",
-                    data=md_text,
-                    file_name="test_cases.md",
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
-            with ex2:
-                if st.button("📋 Copy all IDs", use_container_width=True):
-                    ids = [tc.get("test_case_id", "") for tc in results if tc.get("test_case_id")]
-                    st.code(", ".join(ids))
+    render_analyze_wizard(project)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1205,6 +1753,101 @@ with tab2:
                     f"- **{tc.get('test_case_id','')}** {tc.get('title','')[:60]} "
                     f"({tc.get('confidence_score',0)}/10)"
                 )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB — DEEP SCAN (the full autonomous agent team / Orchestrator)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _run_deep_scan(repo: str, url: str, max_router_files: int, deep: bool = True) -> None:
+    """Run the Orchestrator over a repo + live app and store the result."""
+    from services.context import QAXContext
+    from services.orchestrator_service import OrchestratorService
+
+    ctx = QAXContext.from_env(project=st.session_state.get("active_project", ""))
+    _msg = ("Deep scan — model → detect → probe → generate → attack → execute → verify"
+            if deep else "Quick scan — model → probes → deterministic coverage → verify")
+    try:
+        with st.spinner(f"{_msg}. This takes a bit…"):
+            result = OrchestratorService(ctx).run(
+                repo, url, deep=deep, max_router_files=max_router_files)
+    except Exception as exc:
+        st.error(f"Scan error: {exc}")
+        return
+    st.session_state["deep_scan_result"] = result
+    if result.error:
+        st.warning(result.error)
+    else:
+        st.toast(result.summary(), icon="🛡️")
+
+
+with tab5:
+    st.subheader("🛡️ Deep Scan — the whole QA team, autonomously")
+    st.caption("Point QAX at a repository and its running app. It models the whole system, "
+               "hunts for bugs with the failure-mode knowledge base, attacks them (red-team), "
+               "and PROVES the exploits it can (JWT forgery, crashes) — then verifies every "
+               "finding on the live app so it only reports real bugs.")
+
+    st.session_state.setdefault("scan_repo", os.getcwd())
+    st.session_state.setdefault("scan_url", "http://localhost:8000")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.text_input("Repository path", key="scan_repo",
+                      help="Root of the codebase to scan.")
+    with c2:
+        st.text_input("Running app URL", key="scan_url",
+                      help="The live app to execute and probe against.")
+    sc1, sc2 = st.columns([2, 1])
+    with sc1:
+        st.slider("Router files to cover", 1, 10, 4, key="scan_max_files",
+                  help="How many endpoint files to generate functional tests from (deep scan).")
+    with sc2:
+        st.checkbox("⚡ Quick scan", key="scan_quick",
+                    help="Skip the costly LLM passes — run the active probes and the deterministic "
+                         "security/validation coverage only. Near-free; still proves JWT forgery, "
+                         "crashes, auth, IDOR and validation.")
+
+    _scan_conn = get_connection_status()
+    if not _scan_conn["claude"]:
+        st.warning("Claude API key not configured — Deep Scan needs it. Add ANTHROPIC_API_KEY in .env.")
+
+    _quick = st.session_state.get("scan_quick", False)
+    if st.button(("⚡ Run quick scan" if _quick else "🛡️ Run deep scan"),
+                 type="primary", key="deep_scan_run", disabled=not _scan_conn["claude"]):
+        _repo = st.session_state.get("scan_repo", "").strip()
+        if not _repo or not Path(_repo).exists():
+            st.error("Enter a valid repository path.")
+        elif not st.session_state.get("scan_url", "").strip():
+            st.error("Enter the running app URL.")
+        else:
+            _run_deep_scan(_repo, st.session_state["scan_url"].strip(),
+                           st.session_state.get("scan_max_files", 4), deep=not _quick)
+
+    _scan = st.session_state.get("deep_scan_result")
+    if _scan and not _scan.error:
+        st.divider()
+        m1, m2, m3 = st.columns(3)
+        m1.metric("🐞 Confirmed bugs", len(_scan.confirmed))
+        m2.metric("Tests run", _scan.tests_run)
+        m3.metric("Suspects considered", _scan.suspects)
+
+        if _scan.coverage:
+            st.markdown("#### Coverage goals")
+            for goal, status in _scan.coverage.items():
+                icon = {"generation": "✅", "template": "✅", "uncovered": "⚠️"}.get(status, "•")
+                note = " (gap filled by QAX)" if status == "template" else ""
+                st.caption(f"{icon} {goal} — {status}{note}")
+
+        if _scan.confirmed:
+            st.markdown("#### 🐞 Confirmed bugs — proven on the live app")
+            for b in _scan.confirmed:
+                sev = f"**[{b.get('severity')}]** " if b.get("severity") else ""
+                src = b.get("source", "")
+                st.markdown(f"{sev}{str(b.get('title',''))[:80]}  · _{src}_")
+                if b.get("evidence"):
+                    st.caption(f"↳ {str(b['evidence'])[:200]}")
+        else:
+            st.success("No confirmed bugs — the app held up to the scan.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

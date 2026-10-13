@@ -151,7 +151,16 @@ class TestExecutor:
             )
 
         # ── Guard: validate steps ──────────────────────────────────────────
-        steps = test_case.get("steps", [])
+        # Generated tests carry automation_steps (playwright_action / selector_key
+        # / value) built for browser execution. Prefer those; fall back to
+        # manual_steps, then the legacy "steps" key for older files. The Jira
+        # push keeps reading manual_steps separately — this does not touch it.
+        steps = (
+            test_case.get("automation_steps")
+            or test_case.get("manual_steps")
+            or test_case.get("steps")
+            or []
+        )
         if not steps:
             return self._error_result(
                 tc_id, title, start_ts,

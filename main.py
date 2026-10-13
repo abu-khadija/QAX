@@ -1779,7 +1779,7 @@ def run_pipeline_command() -> None:
     # ── Export ─────────────────────────────────────────────────────────────────
     parser.add_argument(
         "--export",
-        choices=["xray", "zephyr", "excel", "none"],
+        choices=["xray", "zephyr", "excel", "csv", "none"],
         default="none",
         help="Output adapter to use (default: none — keep in memory only).",
     )
@@ -2446,6 +2446,171 @@ def _find_test_case_in_output(tc_id: str) -> dict | None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SCAN COMMAND — the full autonomous agent team (Orchestrator)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_scan_command() -> None:
+    """
+    Handle the 'scan' subcommand — a deep, autonomous security + QA scan.
+
+    Runs the whole agent team over a repository against a live app in one call:
+    whole-system model → detectors → active probes → generation + red-team →
+    coverage loop → execute → critic → investigator. Prints the confirmed bugs
+    (from the Investigator and the probes) and the coverage it guaranteed.
+
+    Called when sys.argv[1] == "scan".
+    """
+    parser = argparse.ArgumentParser(
+        prog="qax scan",
+        description="Deep autonomous scan: model the whole app, hunt and PROVE bugs.")
+    parser.add_argument("--repo", default=None,
+                        help="Path to the repository to scan. Optional — omit for a UI-only / "
+                             "no-source target; QAX then scans the live app only (grounding + "
+                             "probes + --tour).")
+    parser.add_argument("--url", required=True,
+                        help="Base URL of the running app (e.g. http://localhost:8000).")
+    parser.add_argument("--project", default=None, help="QAX project name (optional).")
+    parser.add_argument("--max-router-files", type=int, default=4,
+                        help="Hard ceiling on router files for functional generation.")
+    parser.add_argument("--max-endpoints", type=int, default=40,
+                        help="Functional-generation budget in endpoints (routers chosen "
+                             "highest-risk-first until spent, bounded by --max-router-files).")
+    parser.add_argument("--quick", action="store_true",
+                        help="Quick scan — skip the LLM-heavy passes (knowledge, functional "
+                             "generation, red-team). Uses probes + deterministic coverage only; "
+                             "near-free, still proves JWT forgery/crashes and the security classes.")
+    parser.add_argument("--refresh", action="store_true",
+                        help="Ignore the cached app model and rebuild it.")
+    parser.add_argument("--out", default=None, help="Write the full result to this JSON file.")
+    parser.add_argument("--truth", default=None,
+                        help="Ground-truth JSON for the target (recall + false-positive scoring).")
+    parser.add_argument("--token", default=None,
+                        help="A valid auth token for apps QAX can't self-register into "
+                             "(external IdP, offline-signed JWT, API key). Enables auth-gated probes.")
+    parser.add_argument("--token-b", default=None,
+                        help="A second user's token, for IDOR/BOLA (userB reaching userA's data).")
+    parser.add_argument("--auth-header", default="Authorization",
+                        help="Header name for the token (default: Authorization).")
+    parser.add_argument("--auth-scheme", default="Bearer",
+                        help="Scheme prefix for the token (default: Bearer; use '' for a raw value / API key).")
+    parser.add_argument("--tour", action="store_true",
+                        help="Also tour the live UI in a real browser and fold what it sees "
+                             "(uncaught JS errors, failed API calls) into the findings. Needs "
+                             "Playwright — run this scan under the exec venv (.venv-exec, Python 3.12).")
+    parser.add_argument("--visual-baseline", default=None,
+                        help="Directory of baseline screenshots for visual regression (with --tour). "
+                             "First run seeds it; later runs flag screens whose rendering changed.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="No external side effects (exports); the scan still runs.")
+    args = parser.parse_args(sys.argv[2:])
+
+    from services import scorecard as _scorecard
+    from services import usage as _usage
+    from services.context import QAXContext
+    from services.orchestrator_service import OrchestratorService
+    from services.progress import PrintProgressReporter
+
+    if args.repo:
+        if not Path(args.repo).exists():
+            print(f"\n  Repo path not found: {args.repo}\n")
+            sys.exit(1)
+        repo_path = args.repo
+    else:
+        # No repo — UI-only / live-app-only scan. Use an empty dir so the model
+        # degrades cleanly to live-app grounding + probes + tour.
+        import tempfile
+        repo_path = tempfile.mkdtemp(prefix="qax_nosrc_")
+
+    try:
+        ctx = QAXContext.from_env(project=args.project or "", dry_run=args.dry_run)
+        ctx.require_anthropic_key()
+    except Exception as exc:
+        print(f"\n  {exc}\n")
+        sys.exit(1)
+
+    mode = "quick" if args.quick else "deep"
+    print(f"\n  QAX {mode} scan — repo: {args.repo or '(none — live app only)'}  ·  app: {args.url}\n")
+
+    # Instrument this run: count every LLM call (for $/run) and time it.
+    _usage.track()
+    _usage.reset()
+    _auth = None
+    if args.token or args.token_b:
+        _auth = {"token": args.token, "token_b": args.token_b,
+                 "header": args.auth_header, "scheme": args.auth_scheme}
+        print(f"  (using a supplied auth token via '{args.auth_header}')\n")
+    _t0 = time.time()
+    result = OrchestratorService(ctx).run(
+        repo_path, args.url,
+        deep=not args.quick,
+        max_router_files=args.max_router_files,
+        max_endpoints=args.max_endpoints,
+        use_cache=not args.refresh,
+        auth=_auth,
+        tour=args.tour,
+        visual_baseline=args.visual_baseline,
+        progress=PrintProgressReporter())
+    _elapsed = time.time() - _t0
+
+    if result.error:
+        print(f"\n  Scan failed: {result.error}\n")
+        sys.exit(1)
+
+    print("\n" + "─" * 66)
+    print(f"  RESULT — {result.summary()}")
+    print("─" * 66)
+
+    if result.coverage:
+        print("\n  Coverage goals:")
+        for goal, status in result.coverage.items():
+            mark = {"generation": "✓ covered", "template": "✓ covered (gap filled by QAX)",
+                    "uncovered": "✗ uncovered"}.get(status, status)
+            print(f"    · {goal} — {mark}")
+
+    if result.confirmed:
+        _claims = [b for b in result.confirmed
+                   if str(b.get("severity", "")).upper() in ("P1", "P2")]
+        _leads = [b for b in result.confirmed if b not in _claims]
+        print(f"\n  🐞 Confirmed (P1/P2): {len(_claims)}   ·   leads (P3): {len(_leads)}")
+        for b in _claims + _leads:
+            sev = f"[{b.get('severity') or 'P?'}] "
+            src = b.get("source", "")
+            print(f"    {sev}{b.get('title', '')}  ({src})")
+            if b.get("evidence"):
+                print(f"        {str(b['evidence'])[:150]}")
+    else:
+        print("\n  No findings — the app held up to the scan.")
+    print()
+
+    # Scorecard — the honest, trackable number for this run.
+    _truth = None
+    if args.truth:
+        try:
+            _truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Could not read --truth file: %s", exc)
+    try:
+        _rec = _scorecard.score_run(
+            result, repo=(args.repo or args.url), url=args.url, mode=mode,
+            duration_sec=_elapsed, usage=_usage.snapshot(), truth=_truth)
+        _path = _scorecard.write_run(_rec)
+        print(_scorecard.render(_rec))
+        if _path:
+            print(f"     saved: {_path}")
+        print()
+    except Exception as exc:
+        logger.warning("scorecard failed (scan result is unaffected): %s", exc)
+
+    if args.out:
+        try:
+            Path(args.out).write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False),
+                                      encoding="utf-8")
+            print(f"  Full result written to {args.out}\n")
+        except Exception as exc:
+            logger.warning("Could not write --out file: %s", exc)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2483,13 +2648,14 @@ def main() -> None:
         "cache":            run_cache_command,
         "ui":               run_ui_command,
         "pipeline":         run_pipeline_command,
+        "scan":             run_scan_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

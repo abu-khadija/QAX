@@ -45,6 +45,10 @@ output/screenshots/
 output/reports/
 output/sessions/
 output/feedback.db
+output/tour/
+output/tour_baseline/
+output/test_cases_*.json
+output/test_cases_export_*.csv
 
 # ── IDE / editor ──────────────────────────────────────────────────────
 .vscode/
@@ -61,3 +65,7 @@ Thumbs.db
 
 # ── Unrelated nested project (has its own git repo) ───────────────────
 career-ops/
+output/scorecard/
+.venv-exec/
+.venv/
+output/cache/

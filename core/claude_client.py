@@ -26,7 +26,10 @@ SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.md"
 CLAUDE_MODEL_HEAVY = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 CLAUDE_MODEL_LIGHT = os.getenv("CLAUDE_MODEL_LIGHT", "claude-haiku-4-5-20251001")
 MODEL_ID = CLAUDE_MODEL_HEAVY   # kept for backward compat in retry/check-connection
-MAX_TOKENS = 4000
+# Output token ceiling. 4000 was too low for deep/critical coverage (5+ detailed
+# test cases with manual + automation steps), causing mid-array truncation. 8000
+# gives comfortable headroom; override with CLAUDE_MAX_TOKENS if needed.
+MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "8000"))
 
 
 class ClaudeClient:
@@ -105,23 +108,30 @@ class ClaudeClient:
             )
 
         # Try new project-based path first, fall back to legacy path
+        system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
         context_path = CONFIG_DIR / "projects" / self.project / "context.md"
-        if not context_path.exists():
+        if context_path.exists():
+            project_context = context_path.read_text(encoding="utf-8")
+        else:
             legacy_path = CONFIG_DIR / "example-context.md"
             if legacy_path.exists():
                 logger.warning(
                     "Project context not found at %s — using legacy path %s",
                     context_path, legacy_path
                 )
-                context_path = legacy_path
+                project_context = legacy_path.read_text(encoding="utf-8")
+            elif not self.project:
+                # No project configured at all (e.g. a generic scan or a virtual
+                # endpoints:// source). QAX is GENERIC — degrade to an empty project
+                # context instead of crashing, so generation still works.
+                logger.warning(
+                    "No project context configured — generating with an empty project context")
+                project_context = ""
             else:
+                # A NAMED project whose context is missing is a real misconfiguration.
                 raise FileNotFoundError(
                     f"Project context file not found at: {context_path}"
                 )
-
-        # Read both files
-        system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-        project_context = context_path.read_text(encoding="utf-8")
 
         # Replace the placeholder with actual project context
         final_prompt = system_prompt.replace("[PROJECT_CONTEXT]", project_context)
@@ -177,6 +187,7 @@ class ClaudeClient:
         risk_assessment: dict | None = None,
         test_type: str | None = None,
         model_override: str | None = None,
+        repo_context: str | None = None,
     ) -> list[dict]:
         """
         Send source code to Claude for test case generation.
@@ -271,6 +282,7 @@ class ClaudeClient:
             risk_assessment=risk_assessment,
             test_type=test_type,
             skill_context=skill_context,
+            repo_context=repo_context,
         )
 
         logger.info("Sending %s to Claude for analysis...", file_path)
@@ -333,6 +345,16 @@ class ClaudeClient:
             #   B) Claude echoed the prefill:  raw starts with [  → use as-is
             #   C) Claude added preamble text: raw starts with text → don't prepend,
             #      let _parse_response fallback find the actual "[" in the text
+            # Detect truncation early: when the model hits the output ceiling the
+            # JSON array is cut off mid-object, so downstream parsing must salvage
+            # only the complete test cases rather than trust the whole blob.
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                logger.warning(
+                    "Claude response for %s hit max_tokens (%d) — output may be "
+                    "truncated; salvaging complete test cases only",
+                    file_path, MAX_TOKENS,
+                )
+
             raw_text = response.content[0].text
             stripped = raw_text.lstrip()
             if stripped.startswith("["):
@@ -389,6 +411,7 @@ class ClaudeClient:
         risk_assessment: dict | None = None,
         test_type: str | None = None,
         skill_context: str | None = None,
+        repo_context: str | None = None,
     ) -> str:
         """
         Construct the user message that will be sent to Claude alongside the system prompt.
@@ -491,22 +514,89 @@ class ClaudeClient:
                 f"{skill_context.strip()}\n"
             )
 
+        # ── App context section (whole-source comprehension) ──────────────────
+        repo_context_section = ""
+        if repo_context and repo_context.strip():
+            repo_context_section = (
+                "\n**APP CONTEXT (whole-source understanding — use it to focus "
+                "the tests on real flows and risks):**\n"
+                f"{repo_context.strip()}\n"
+            )
+
+        # ── API steps instruction (real, executable HTTP) ─────────────────────
+        # When testing an API/endpoint file, ask for executable api_steps so the
+        # runner can hit the live endpoints — not just UI-shaped automation_steps.
+        api_steps_instruction = ""
+        if test_type in ("api", "e2e", "security", "integration", "negative", "boundary"):
+            api_steps_instruction = (
+                "\n\nThis file exposes HTTP endpoints. For EACH test case, also include an "
+                "\"api_steps\" array of REAL, EXECUTABLE HTTP requests so the test can run "
+                "against the live API. Example:\n"
+                "  \"api_steps\": [\n"
+                "    {\"step_number\": 1, \"method\": \"POST\", \"path\": \"/auth/register\", "
+                "\"body\": {\"email\": \"user_{{random}}@test.com\", \"password\": \"Secret123!\"}, "
+                "\"expected_status\": 201},\n"
+                "    {\"step_number\": 2, \"method\": \"POST\", \"path\": \"/auth/login\", "
+                "\"body\": {\"email\": \"user_{{random}}@test.com\", \"password\": \"Secret123!\"}, "
+                "\"expected_status\": 200, \"save\": {\"token\": \"access_token\"}},\n"
+                "    {\"step_number\": 3, \"method\": \"GET\", \"path\": \"/auth/me\", "
+                "\"expected_status\": 200, \"use_auth\": true}\n"
+                "  ]\n"
+                "Rules for api_steps:\n"
+                "- SELF-CONTAINED: each test sets up ALL its own prerequisites. If an endpoint "
+                "needs auth, the FIRST steps must register a fresh user (email \"user_{{random}}@test.com\") "
+                "and then log in — never start with login for a user you did not just register, and never "
+                "assume any user, record, or session already exists.\n"
+                "- Use the EXACT endpoint paths, HTTP methods, and request/response field names from the code.\n"
+                "- expected_status must be the real status the endpoint returns for THIS scenario "
+                "(e.g. 201 create, 200 ok, 400 validation, 401 unauthorized, 404 not found, 422 unprocessable).\n"
+                "- To reuse a value from a response (e.g. an auth token), add \"save\": "
+                "{\"token\": \"<response_field>\"} on the step that returns it, then \"use_auth\": true "
+                "on later steps that need it.\n"
+                "- For values that must be unique per run (e.g. a new user email), use {{random}} "
+                "as a placeholder — the SAME {{random}} resolves to the same value within a test case.\n"
+                "- ASSERT THE RESPONSE BODY, not just the status. Add \"expect_json\" to a read step "
+                "to check values INSIDE the response — a dot-path mapped to its expected value, with "
+                "a trailing .length for a collection size, e.g. "
+                "{\"total\": 5, \"total_pages\": 3, \"items.length\": 5}.\n"
+                "  * Computed values: when an endpoint returns a count, total, page count, or any "
+                "derived number, SET UP a known state (e.g. create exactly 5 items) and assert the "
+                "computed result you calculate yourself (e.g. with page_size 2, total_pages must be "
+                "ceil(5/2)=3). Pick a count that is NOT a multiple of the page size so an off-by "
+                "computation is exposed.\n"
+                "  * Persistence: after a create/update, add a GET step that re-fetches the resource "
+                "and use expect_json to assert the value actually persisted.\n"
+                "- Keep api_steps minimal and derived only from the code."
+            )
+
+        try:
+            from core.istqb_knowledge import prompt_block as _istqb_prompt_block
+            istqb_section = "\n" + _istqb_prompt_block() + "\n"
+        except Exception:
+            istqb_section = ""
+
         prompt = f"""Analyze the following source code file and generate comprehensive test cases.
 
 **File Path:** {file_path}
 **Module Context:** {module_context}
-{user_story_section}{risk_section_b2}{test_type_section}{bug_patterns_section}{skill_context_section}
+{repo_context_section}{user_story_section}{risk_section_b2}{test_type_section}{bug_patterns_section}{skill_context_section}
 **Source Code:**
 ```
 {code}
 ```
 {deps_section}
-Generate test cases covering:
+Cover EVERY operation this code exposes (each endpoint / function / branch) — not just the first one. For each, generate the relevant cases from:
 1. Happy path (successful execution)
-2. Validation failures (missing/invalid inputs)
-3. Permission/role boundary checks
-4. Edge cases and boundary conditions
-5. Error handling paths{bug_patterns_instruction}{user_story_instruction}
+2. Validation failures (missing / invalid / out-of-range / malformed input)
+3. **Authorization & ownership boundaries** — if data or actions are scoped to a user or role, test that another user/role is rejected (e.g. accessing/modifying/deleting someone else's resource → expect 403/404). This is the highest-value class — include it whenever the code scopes access.
+4. State-transition and data-integrity cases (invalid transitions, uniqueness, cascade effects)
+5. Error-handling paths (auth failure, not-found, conflict, dependency failure){bug_patterns_instruction}{user_story_instruction}{api_steps_instruction}
+{istqb_section}
+Coverage doctrine (apply in addition to the above):
+- OBSERVED UI SURFACE: if the context above lists real screens and selectors from a live tour, generate UI tests grounded in those screens and set every automation_steps[].selector_key to the EXACT real selector shown (e.g. [data-testid="..."]) — never a TODO_ placeholder for an element that appears in the surface. Only tour-observed screens/elements are real; do not invent others.
+- Persistence: after a create/update, re-fetch the resource and verify the value actually survived a reload — a "saved"/200 response that loses the value is a real bug.
+- Absence & reversal: assert that forbidden things are NOT offered/present, and pair each mutating action with its inverse (create/delete, hold/restore).
+- ORACLE: every expected result comes from the operation's contract/convention or the user story — NOT from whatever this (possibly buggy) code returns. If a create returns 200, still expect 201 and surface the mismatch as a candidate bug. When the true result is genuinely uncertain, set needs_review=true and phrase the expected result as "verify as-configured / document as-found" instead of inventing a value.
 
 - Set needs_review=true for any UI element you cannot confirm from this code.
 - Set generated_from_file to exactly: {file_path}
@@ -525,17 +615,28 @@ Do NOT use markdown. Do NOT explain. Just the JSON array."""
         """
         Parse Claude's text response into a list of test case dictionaries.
 
-        When called after assistant prefill, response_text already has the
-        leading "[" prepended by analyze_code() before this method is called.
-        Handles edge cases where Claude still manages to wrap in markdown or
-        include trailing text.
+        Robust against three real-world failure modes seen in production:
+          1. Preamble text or markdown fences around the JSON.
+          2. Truncation when the model hits max_tokens mid-array — the outer
+             array never closes, so naive "scan back from the last ]" bracket
+             matching would grab an inner ``manual_steps`` array and return step
+             objects instead of test cases.
+          3. An incomplete trailing object after truncation.
+
+        Every candidate list is passed through :meth:`_accept_test_cases`, which
+        only accepts lists whose elements actually look like test cases — this is
+        what stops a stray array of steps from being mistaken for the result. A
+        final salvage pass (:meth:`_salvage_objects`) extracts every complete
+        top-level object and keeps the test-case-shaped ones, recovering cleanly
+        from truncation.
 
         Args:
-            response_text (str): The raw text response from Claude, with "[" prepended
-                                 if assistant prefill was used.
+            response_text (str): The raw text response from Claude, with "["
+                                 prepended if assistant prefill was used.
 
         Returns:
-            list[dict] | None: Parsed list of test cases, or None if parsing fails.
+            list[dict] | None: Parsed test cases, or None when nothing parseable
+                               was found (which triggers the correction retry).
         """
         if not response_text or not response_text.strip():
             logger.warning("Empty response from Claude")
@@ -547,76 +648,209 @@ Do NOT use markdown. Do NOT explain. Just the JSON array."""
         try:
             result = json.loads(cleaned)
             if isinstance(result, list):
-                logger.debug("Successfully parsed JSON directly (%d test cases)", len(result))
-                return result
+                accepted = self._accept_test_cases(result)
+                if accepted is not None:
+                    logger.debug("Parsed JSON directly (%d test case(s))", len(accepted))
+                    return accepted
             elif isinstance(result, dict):
                 # Some models return {"test_cases": [...]} — unwrap it
                 for key in ("test_cases", "tests", "results", "data"):
-                    if key in result and isinstance(result[key], list):
-                        logger.debug("Unwrapped JSON from key '%s'", key)
-                        return result[key]
+                    if isinstance(result.get(key), list):
+                        accepted = self._accept_test_cases(result[key])
+                        if accepted is not None:
+                            logger.debug("Unwrapped JSON from key '%s'", key)
+                            return accepted
         except json.JSONDecodeError:
             pass
 
-        # ── Attempt 2: Strip markdown code fences and retry ───────────────────
-        # Handles responses like: ```json\n[...]\n```
+        # ── Attempt 2: Strip markdown code fences (prefill-aware) ─────────────
+        # Handles ```json ... ``` blocks, including the prefill case where the
+        # opening "[" was consumed by the assistant seed.
         code_block_pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
-        matches = re.findall(code_block_pattern, cleaned)
-        for match in matches:
-            try:
-                result = json.loads(match.strip())
-                if isinstance(result, list):
-                    logger.debug("Parsed JSON from markdown code block")
-                    return result
-            except json.JSONDecodeError:
-                continue
-
-        # ── Attempt 2b: Prefill-aware code fence reconstruction ───────────────
-        # When assistant prefill consumed "[", the code fence content starts
-        # with "{" (the opening bracket is missing). Try prepending "[".
-        for match in matches:
+        for match in re.findall(code_block_pattern, cleaned):
             content = match.strip()
             if not content:
                 continue
-            # Try "[" + content  (prefill consumed the opening "[")
-            if not content.startswith("["):
-                for candidate in (f"[{content}", f"[{content}]"):
-                    try:
-                        result = json.loads(candidate)
-                        if isinstance(result, list):
-                            logger.debug("Parsed JSON via prefill-aware code fence reconstruction")
-                            return result
-                    except json.JSONDecodeError:
-                        continue
-
-        # ── Attempt 3: Find array boundaries manually ─────────────────────────
-        # Handles responses with explanatory text before/after the JSON.
-        # Search backwards from the last "]" to find the matching "[".
-        end_idx = cleaned.rfind("]")
-        if end_idx != -1:
-            # Walk backwards to find the "[" that opens the outermost array
-            depth = 0
-            start_idx = -1
-            for i in range(end_idx, -1, -1):
-                if cleaned[i] == "]":
-                    depth += 1
-                elif cleaned[i] == "[":
-                    depth -= 1
-                    if depth == 0:
-                        start_idx = i
-                        break
-            if start_idx != -1:
-                json_slice = cleaned[start_idx:end_idx + 1]
+            for candidate in (content, f"[{content}", f"[{content}]"):
                 try:
-                    result = json.loads(json_slice)
-                    if isinstance(result, list):
-                        logger.debug("Parsed JSON by matching array boundaries")
-                        return result
+                    result = json.loads(candidate)
                 except json.JSONDecodeError:
-                    pass
+                    continue
+                if isinstance(result, list):
+                    accepted = self._accept_test_cases(result)
+                    if accepted is not None:
+                        logger.debug("Parsed JSON from markdown code block")
+                        return accepted
+
+        # ── Attempt 3: Extract the OUTERMOST array ────────────────────────────
+        # Scan FORWARD from the first "[" to its matching "]" (string-aware).
+        # Scanning forward finds the test-case array; the old scan-backward
+        # approach could latch onto an inner steps array on truncated output.
+        outer = self._extract_outer_array(cleaned)
+        if outer is not None:
+            try:
+                result = json.loads(outer)
+                if isinstance(result, list):
+                    accepted = self._accept_test_cases(result)
+                    if accepted is not None:
+                        logger.debug("Parsed JSON by outer-array extraction")
+                        return accepted
+            except json.JSONDecodeError:
+                pass
+
+        # ── Attempt 4: Salvage every complete top-level object ────────────────
+        # Recovers from truncation: keeps each complete test-case object and
+        # silently drops an incomplete trailing one.
+        salvaged = self._salvage_objects(cleaned)
+        if salvaged:
+            logger.warning(
+                "Recovered %d test case(s) via salvage — response was likely "
+                "truncated or malformed", len(salvaged),
+            )
+            return salvaged
 
         logger.warning("All JSON parsing attempts failed — first 300 chars: %s", cleaned[:300])
         return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Parsing Helpers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _looks_like_test_case(obj: object) -> bool:
+        """
+        Heuristic: does this object look like a test case rather than a step?
+
+        A test case carries identifying/structural fields (test_case_id, title,
+        manual_steps, automation_steps). A bare step object has step_number +
+        action and none of those, so it is explicitly rejected. This is the
+        guard that stops an inner steps array from being returned as the result.
+
+        Args:
+            obj: Any parsed JSON value.
+
+        Returns:
+            bool: True if obj is a test-case-shaped dict.
+        """
+        if not isinstance(obj, dict):
+            return False
+        if "step_number" in obj and "action" in obj and "title" not in obj:
+            return False
+        return any(
+            k in obj
+            for k in ("test_case_id", "title", "manual_steps", "automation_steps")
+        )
+
+    @classmethod
+    def _accept_test_cases(cls, result: list) -> list[dict] | None:
+        """
+        Accept a parsed list only if it genuinely holds test cases.
+
+        Args:
+            result (list): A parsed JSON array.
+
+        Returns:
+            list[dict] | None: The test-case-shaped elements (strays dropped),
+                               or None if the list is empty or not a test-case
+                               list (e.g. an array of steps).
+        """
+        if not isinstance(result, list) or not result:
+            return None
+        test_cases = [o for o in result if cls._looks_like_test_case(o)]
+        return test_cases or None
+
+    @staticmethod
+    def _extract_outer_array(text: str) -> str | None:
+        """
+        Return the substring of the first balanced top-level ``[...]`` array.
+
+        Scans forward from the first "[" tracking bracket depth while ignoring
+        brackets inside JSON strings.
+
+        Args:
+            text (str): The cleaned response text.
+
+        Returns:
+            str | None: The array substring, or None if no balanced outer array
+                        is found (e.g. the array was truncated before closing).
+        """
+        start = text.find("[")
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        return None
+
+    @classmethod
+    def _salvage_objects(cls, text: str) -> list[dict]:
+        """
+        Extract every complete top-level ``{...}`` object and keep the
+        test-case-shaped ones.
+
+        Brace depth is tracked string-aware, so objects nested inside a test
+        case (manual_steps entries, test_data) are not extracted on their own.
+        A truncated final object fails json.loads and is skipped — the graceful
+        degradation we want when the model runs out of output tokens mid-array.
+
+        Args:
+            text (str): The cleaned response text.
+
+        Returns:
+            list[dict]: Complete, test-case-shaped objects (possibly empty).
+        """
+        objects: list[dict] = []
+        depth = 0
+        start = -1
+        in_str = False
+        escape = False
+        for i, ch in enumerate(text):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start != -1:
+                        try:
+                            obj = json.loads(text[start:i + 1])
+                        except json.JSONDecodeError:
+                            obj = None
+                        if cls._looks_like_test_case(obj):
+                            objects.append(obj)
+                        start = -1
+        return objects
 
     # ─────────────────────────────────────────────────────────────────────────
     # Retry with Correction Prompt

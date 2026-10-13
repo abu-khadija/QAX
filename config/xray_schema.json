@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "EXAMPLE QA Test Case",
-  "description": "Schema for AI-generated test cases targeting the ExampleApp ExampleOrg platform. Enforced before every Xray push.",
+  "description": "Schema for AI-generated test cases targeting the the target web application. Enforced before every Xray push.",
   "type": "array",
   "items": {
     "type": "object",
@@ -44,21 +44,8 @@
 
       "module": {
         "type": "string",
-        "description": "The EXAMPLE module this test case belongs to. Must match a known module.",
-        "enum": [
-          "Orders",
-          "Investigator",
-          "Reports",
-          "RiskAssessor",
-          "Analytics",
-          "Schedules",
-          "Customers",
-          "ViewReport",
-          "Administration",
-          "Search",
-          "Dashboard",
-          "General"
-        ]
+        "minLength": 1,
+        "description": "The module or feature area this test case belongs to (free-form, e.g. 'Auth', 'Checkout', 'Orders'). QAX is generic — module names are not restricted to any one project."
       },
 
       "test_type": {
@@ -220,6 +207,25 @@
               "description": "Expected value for the assertion. Example: 'Checklist saved successfully'.",
               "default": ""
             }
+          }
+        }
+      },
+      "api_steps": {
+        "type": "array",
+        "description": "OPTIONAL — executable HTTP steps for API testing. When present, the API runner runs these as real HTTP requests and asserts the status code.",
+        "items": {
+          "type": "object",
+          "required": ["step_number", "method", "path"],
+          "additionalProperties": true,
+          "properties": {
+            "step_number": { "type": "integer", "minimum": 1 },
+            "method": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"] },
+            "path": { "type": "string", "description": "Endpoint path, e.g. /auth/login. May contain {{var}} placeholders." },
+            "body": { "description": "Optional JSON request body. May contain {{var}} placeholders." },
+            "expected_status": { "type": "integer", "description": "Expected HTTP status code." },
+            "save": { "type": "object", "description": "Map of variable name to response JSON key to capture, e.g. {\"token\": \"access_token\"}." },
+            "use_auth": { "type": "boolean", "description": "Send the saved token as an Authorization: Bearer header." },
+            "expect_json": { "type": "object", "description": "Assertions on values INSIDE the response body. Maps a dot-path to its expected value; a trailing .length gives a collection size. Example: {\"total\": 5, \"total_pages\": 3, \"items.length\": 5}." }
           }
         }
       }

@@ -1,0 +1,11 @@
+{
+  "target": "vfapi (naryal2580/vfapi) — vulnerable FastAPI, OWASP API Top 10",
+  "source": "https://github.com/naryal2580/vfapi — vulnerabilities read from main.py",
+  "note": "Ground truth for recall/FP. All injection sinks are in QUERY params or request BODIES (not path params), and one is NoSQL — a deliberate test of whether QAX's path-param-only sqli_probe (and absent NoSQL probe) catch them.",
+  "expected": [
+    {"id": "sqli-select-query",  "match": ["sql injection", "/select"]},
+    {"id": "sqli-put-user-body", "match": ["sql injection", "/user"]},
+    {"id": "sqli-delete-user-address", "match": ["sql injection", "delete", "/user"]},
+    {"id": "nosql-find", "match": ["nosql", "/find"]}
+  ]
+}

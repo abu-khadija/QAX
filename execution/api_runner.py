@@ -36,6 +36,10 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Sentinel: a response-body path that resolved to nothing (distinct from a real
+# value of None), used by the expect_json body assertions.
+_MISSING = object()
+
 
 class APIRunner:
     """
@@ -343,6 +347,197 @@ class APIRunner:
             "duration_ms":   0,
         }
 
+    # ── API step execution (real HTTP) ──────────────────────────────────────────
+
+    @staticmethod
+    def _render(obj, variables: dict):
+        """
+        Substitute {{name}} placeholders in strings (recursively in dicts/lists).
+
+        {{random}} and any saved variable (e.g. {{token}}) are replaced from the
+        variables dict; unknown placeholders are left untouched.
+
+        Args:
+            obj: A string, dict, list, or scalar to render.
+            variables (dict): Placeholder values.
+
+        Returns:
+            The rendered object of the same shape.
+        """
+        import re
+
+        if isinstance(obj, str):
+            # A sole placeholder ("{{my_id}}") returns the RAW value (int/etc.), so a
+            # body/assertion value keeps its type — needed to compare an int id.
+            sole = re.fullmatch(r"\{\{(\w+)\}\}", obj)
+            if sole and variables.get(sole.group(1)) is not None:
+                return variables[sole.group(1)]
+
+            def _sub(m):
+                val = variables.get(m.group(1))
+                return str(val) if val is not None else m.group(0)
+            return re.sub(r"\{\{(\w+)\}\}", _sub, obj)
+        if isinstance(obj, dict):
+            return {k: APIRunner._render(v, variables) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [APIRunner._render(v, variables) for v in obj]
+        return obj
+
+    def execute_api_step(self, step: dict, variables: dict) -> dict:
+        """
+        Execute one api_step as a real HTTP request and assert its status.
+
+        api_step shape:
+            {step_number, method, path, body?, expected_status,
+             save? {var: response_key}, use_auth?}
+
+        Placeholders {{random}} / {{var}} in path and body are rendered from
+        ``variables``; ``save`` extracts response JSON fields into ``variables``
+        (e.g. an access token) for later steps; ``use_auth`` sends the saved
+        token as a Bearer header.
+
+        Args:
+            step (dict): The api_step definition.
+            variables (dict): Mutable per-test-case variable store.
+
+        Returns:
+            dict: Step result (step_number, action, status, actual_result,
+                  error, response_code, duration_ms).
+        """
+        method   = (step.get("method") or "GET").upper()
+        path     = self._render(step.get("path", ""), variables)
+        body     = self._render(step.get("body"), variables)
+        expected = step.get("expected_status")
+        save     = step.get("save") or {}
+
+        result = {
+            "step_number":   step.get("step_number", 0),
+            "action":        f"{method} {path}",
+            "status":        "PASS",
+            "actual_result": "",
+            "error":         None,
+            "response_code": None,
+            "duration_ms":   0,
+        }
+
+        if not self.session:
+            return self._step_error(step, "APIRunner not set up — call setup() first")
+
+        headers = {}
+        # use_auth: true → the default "token"; use_auth: "token_b" → that named
+        # token. Named tokens let one test hold two users at once (userA vs userB)
+        # so ownership / IDOR attacks are executable.
+        auth = step.get("use_auth")
+        if auth:
+            token_var = auth if isinstance(auth, str) else "token"
+            tok = variables.get(token_var)
+            if tok:
+                headers["Authorization"] = f"Bearer {tok}"
+
+        t0 = time.time()
+        try:
+            resp = self.session.request(
+                method, self._resolve_url(path),
+                json=body if isinstance(body, (dict, list)) else None,
+                headers=headers, timeout=self.timeout,
+            )
+            result["response_code"] = resp.status_code
+            result["actual_result"] = f"{method} {path} → {resp.status_code}"
+
+            if expected is not None and not self._status_matches(expected, resp.status_code):
+                result["status"] = "FAIL"
+                result["error"]  = (f"Expected status {expected}, got "
+                                    f"{resp.status_code} — {resp.text[:150]}")
+            else:
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = None
+                if save and isinstance(data, dict):
+                    for var_name, resp_key in save.items():
+                        if resp_key in data:
+                            variables[var_name] = data[resp_key]
+                # Assert values INSIDE the response body (not just the status) —
+                # this is what catches computed/persistence bugs the status hides.
+                # Rendered through variables so a control experiment can assert e.g.
+                # a record's owner equals the ATTACKER's own id ({{my_id}}).
+                if step.get("expect_json"):
+                    self._assert_body(result, data, self._render(step["expect_json"], variables))
+        except Exception as exc:
+            result["status"] = "FAIL"
+            result["error"]  = str(exc)
+
+        result["duration_ms"] = int((time.time() - t0) * 1000)
+        return result
+
+    @staticmethod
+    def _status_matches(expected, actual: int) -> bool:
+        """
+        Whether the actual status satisfies the expectation. `expected` may be a
+        single code or a LIST of acceptable codes — needed for security tests where
+        the secure response can be any of several (403 OR 404 for a blocked resource).
+        """
+        try:
+            if isinstance(expected, (list, tuple, set)):
+                return actual in {int(x) for x in expected}
+            return actual == int(expected)
+        except (TypeError, ValueError):
+            return True
+
+    @staticmethod
+    def _assert_body(result: dict, data, expect: dict) -> None:
+        """
+        Assert expected values inside a JSON response body.
+
+        `expect` maps a dot-path to an expected value; the path walks dict keys
+        and list indices, and a trailing `.length` (or `.#`) yields a collection's
+        length — e.g. {"total": 5, "total_pages": 3, "items.length": 5}. The first
+        mismatch or missing path flips the step to FAIL with a precise message.
+
+        Args:
+            result (dict): The step result to mutate on failure.
+            data: The parsed JSON response (or None if the body was not JSON).
+            expect (dict): path → expected value assertions.
+        """
+        if not isinstance(expect, dict):
+            return
+        if data is None:
+            result["status"] = "FAIL"
+            result["error"] = "Expected a JSON response body to assert on, got none"
+            return
+        for path, exp_val in expect.items():
+            got = APIRunner._resolve_path(data, path)
+            if got is _MISSING:
+                result["status"] = "FAIL"
+                result["error"] = f"Body assertion: path '{path}' not found in response"
+                return
+            if got != exp_val:
+                result["status"] = "FAIL"
+                result["error"] = (f"Body assertion failed: {path} expected "
+                                   f"{exp_val!r}, got {got!r}")
+                return
+
+    @staticmethod
+    def _resolve_path(data, path):
+        """Walk a dot-path into a JSON value; `.length`/`.#` gives a length."""
+        cur = data
+        for part in str(path).split("."):
+            if part in ("length", "#"):
+                return len(cur) if hasattr(cur, "__len__") else _MISSING
+            if isinstance(cur, list):
+                try:
+                    cur = cur[int(part)]
+                except (ValueError, IndexError):
+                    return _MISSING
+            elif isinstance(cur, dict):
+                if part in cur:
+                    cur = cur[part]
+                else:
+                    return _MISSING
+            else:
+                return _MISSING
+        return cur
+
     # ── Test case / batch execution ────────────────────────────────────────────
 
     def execute_test_case(self, test_case: dict) -> dict:
@@ -367,23 +562,37 @@ class APIRunner:
                 - bug_reported  (bool)
                 - bug_key       (str | None)
         """
-        steps = test_case.get("automation_steps") or test_case.get("manual_steps") or []
-        if not steps:
-            logger.warning(
-                "QAX APIRunner: test case %s has no steps — marking SKIP",
-                test_case.get("test_case_id", "?"),
-            )
+        import uuid
 
+        api_steps = test_case.get("api_steps") or []
         t0           = time.time()
         step_results = []
         overall      = "PASS"
 
-        for step in steps:
-            r = self.execute_step(step)
-            step_results.append(r)
-            if r["status"] == "FAIL":
-                overall = "FAIL"
-                break  # stop on first failure
+        if api_steps:
+            # Real HTTP execution, with a per-test-case variable store so steps
+            # can chain (e.g. save a token on login, reuse it on the next call).
+            variables = {"random": uuid.uuid4().hex[:8]}
+            for step in api_steps:
+                r = self.execute_api_step(step, variables)
+                step_results.append(r)
+                if r["status"] == "FAIL":
+                    overall = "FAIL"
+                    break
+        else:
+            # No API steps → the UI-shaped automation_steps can't be executed
+            # meaningfully over HTTP. Mark SKIP rather than a hollow PASS.
+            steps = test_case.get("automation_steps") or test_case.get("manual_steps") or []
+            if not steps:
+                overall = "SKIP"
+            else:
+                overall = "SKIP"
+                step_results.append({
+                    "step_number": 0, "action": "api_steps",
+                    "status": "SKIP", "actual_result": "",
+                    "error": "No api_steps to execute (test is UI-shaped)",
+                    "response_code": None, "duration_ms": 0,
+                })
 
         return {
             "test_case_id":     test_case.get("test_case_id", ""),
@@ -392,6 +601,7 @@ class APIRunner:
             "mode":             "api",
             "duration_seconds": round(time.time() - t0, 2),
             "steps_results":    step_results,
+            "steps":            step_results,
             "bug_reported":     False,
             "bug_key":          None,
         }
