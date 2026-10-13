@@ -23,7 +23,78 @@ without breaking anything. No number, no merge.
 - Test generation: works (code/story/jira/pr → cases → Xray/Zephyr/Excel). On-ramp.
 - Filing to Jira/Xray: built, DRY_RUN default, waiting on real credentials.
 - UI: one-platform restructure done. CI PR-scan gate built. Pitch deck exists.
-- **PR #1 open** (abu-khadija/QAX#1) — needs review/merge.
+- **PR #1 merged to main** (2026-10-13, merge commit 95322b2).
+
+---
+
+## ACTIVE WORKLIST — blind-spot backlog, ranked by risk
+
+The owner's call (2026-10-13): QAX already beats the competition on some axes
+(prove-not-flag, 0-FP, deterministic, generate+file in one tool) — now close every
+axis where it is behind. These are the honest blind spots from the standing
+assessment, ordered highest-risk-first. **March through them one at a time, top to
+bottom; a task is done only when its "done when" holds and the gate stays green.**
+Overlapping Phase-2/3 items are absorbed here.
+
+- [ ] **B1 — LLM non-determinism is visible to the buyer.** Risk: the deep scan's
+      confirmed count varied run-to-run (8/11/12); a buyer who runs twice and sees
+      different results loses trust — this attacks our core differentiator.
+      Task: separate the two layers in every output — a **CONFIRMED (deterministic,
+      0-FP)** section that is byte-stable across runs, and a clearly-labelled
+      **LEADS (AI, may vary)** section; make the deterministic core reproducible and
+      add a gate check that two quick scans of the golden target yield identical
+      confirmed sets. Done when: two consecutive scans show an identical CONFIRMED
+      block, and the UI/report/scorecard label the AI layer as non-deterministic.
+
+- [ ] **B2 — silent gaps in the pipeline.** Risk: the API-validation bug sat hidden
+      ~8 months and zeroed all API generation; there are likely more silent no-ops.
+      Task: add a per-leg "did this stage actually produce output?" assertion across
+      the pipeline (generation, each export adapter, api/ui execution, each confirm
+      source) and a gate check that fails when a leg silently yields nothing on the
+      golden target. Done when: every pipeline leg has an output-contract check and
+      the gate exercises each one.
+
+- [ ] **B3 — coverage breadth vs DAST.** Risk: ~22 probes vs thousands of rules; we
+      miss whole classes incumbents catch. Task: rank the missing high-value classes
+      (from the KB→probes backlog) and add them deterministically, 0-FP, one per
+      step, each with a seeded fixture in the golden target + a truth entry. Done
+      when: the golden target covers the agreed priority classes and recall is
+      tracked per class. (Absorbs the KB→probes work.)
+
+- [ ] **B4 — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
+      is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,
+      real OSS apps we did NOT pick for being vulnerable; publish honest scorecards
+      (recall/FP/$/run) even when the result is "0 found, 0 FP". Done when:
+      `strategy/` holds ≥2 real-app case studies with scorecards. (Absorbs Phase-2
+      case studies.)
+
+- [ ] **B5 — targets without an OpenAPI spec degrade.** Risk: many real apps have no
+      spec; grounding falls back to partial code-inference. Task: a no-spec
+      endpoint-discovery fallback (crawl served links / probe common REST patterns /
+      verify each code-derived path is live before probing). Done when: a spec-less
+      target on the gate is still enumerated and probed.
+
+- [ ] **B6 — Jira/Xray filing never proven live.** Risk: "files to Jira" is DRY_RUN
+      only. Task: with the owner's trial creds, file a real Bug + a real Xray Test
+      end-to-end, then restore DRY_RUN. Done when: one real issue + one real test
+      exist in a trial project, with screenshots in `strategy/`. (Absorbs Phase-2
+      Jira.)
+
+- [ ] **B7 — business-logic bugs unproven.** Risk: the hardest, highest-value class;
+      QAX only proves OWASP/injection/auth today. Task: pick one concrete logic-bug
+      pattern (e.g. negative-quantity / price-tamper / workflow-skip), build a
+      deterministic probe + a seeded fixture, and prove it. Done when: QAX confirms a
+      seeded business-logic bug, 0 FP, and it is in the gate.
+
+- [ ] **B8 — thin moat (strategic, not a code task).** Risk: the deterministic
+      probes are replicable by a funded incumbent. Task (GTM): lean the whole
+      message on the one thing they structurally won't copy fast — "**proven, zero
+      false positives**" — and build the brand/speed around it; revisit when
+      pitching. Done when: positioning + deck lead with proof-not-noise and the
+      case studies (B4) back it.
+
+- Deferred (owner's choice, still existential): **B9 — IP / legal / solo-founder
+      risk.** See the deferred track below and the IP status memory.
 
 ---
 
