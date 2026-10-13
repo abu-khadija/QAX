@@ -76,6 +76,7 @@ class GenerationOptions:
     auto_accept: bool = False
     content: str | None = None
     repo_context: str | None = None
+    model: str | None = None   # override the auto-selected model (e.g. a faster one)
 
 
 class GenerationService:
@@ -428,6 +429,7 @@ class GenerationService:
             line_count=line_count,
             use_cache=opts.use_cache,
             repo_context=opts.repo_context,
+            model_override=opts.model,
         )
 
         used_model = pre.get("recommended_model", "") or (

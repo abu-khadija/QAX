@@ -68,8 +68,15 @@ Goal: make quality provable and repeatable before adding surface.
       the UI-step mandate; `fix_common_issues` defaults empty/short `preconditions`.
       After: generation yields 13–14 valid cases reliably (was 0); the deep-gate
       fallback now produces tests (`groups=['auth']`). +4 validator tests.
-- [ ] **Generation polish — slowness** (remaining, lower priority, only if it hurts
-      demo quality): fewer cases / streaming / raise max_tokens.
+- [~] **Generation polish — slowness** (investigated; deferred, not worth the
+      quality risk now): measured ~80s for one functional generation (13 cases).
+      Root cause is OUTPUT SIZE, not the model — each case carries three step arrays
+      (manual_steps + automation_steps + api_steps), ~tripling tokens for API tests
+      that only need api_steps. Switching to the light model (Haiku) cut time to 57s
+      but produced 0 valid cases (too weak for the schema) — reverted. The right fix
+      is to make API-mode generation emit api_steps ONLY (skip the UI dual-steps),
+      which needs a prompt change with a quality check — scoped follow-up. Added
+      harmless plumbing: `GenerationOptions.model` → `analyze_code(model_override=)`.
 
 ## Phase 2 — EVIDENCE + JIRA (after hardening)
 
