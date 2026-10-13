@@ -119,6 +119,14 @@ class ProbeService:
         except Exception as exc:
             logger.error("jwt_flaws probe failed: %s", exc)
 
+        # Forged-token replay: once a token is forgeable, sweep EVERY other protected
+        # endpoint with a forged token (a flaw proven on one endpoint unlocks them all).
+        try:
+            from execution.probes import forged_token_replay_probe
+            findings.extend(forged_token_replay_probe(model, base_url, session=shared, auth=auth))
+        except Exception as exc:
+            logger.error("forged_token_replay probe failed: %s", exc)
+
         # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
             findings.extend(sqli_probe(model, base_url, session=shared, auth=read_auth))

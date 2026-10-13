@@ -22,6 +22,14 @@ _MAP = {
         "fix": "Verify the signature and expiry, and PIN the algorithm — jwt.decode(token, "
                "key, algorithms=['HS256']); never allow 'none'. Use a vetted JWT library.",
     },
+    "forged-token-replay": {
+        "why": "Because the JWT signature is not verified, a forged token is accepted on "
+               "every protected endpoint — one forgery grants access across the whole "
+               "authenticated surface, not just where it was first proven.",
+        "fix": "Fix the root cause once, centrally: verify the signature and expiry and pin "
+               "the algorithm in the auth middleware so EVERY route enforces it — "
+               "jwt.decode(token, key, algorithms=['HS256']); never allow 'none'.",
+    },
     "sqli": {
         "why": "User input reaches a raw SQL query, allowing data theft, auth bypass, or "
                "data destruction.",
