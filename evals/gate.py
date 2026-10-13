@@ -147,6 +147,8 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     checks.append(("B1: deterministic CONFIRMED block reproducible (2 scans identical)",
                    k1 == k2 and len(k1) > 0,
                    f"{len(k1)} confirmed, identical={k1 == k2}, {len(res.leads_ai)} AI lead(s) excluded"))
+    checks.append(("B2: no silent pipeline gaps (quick)", not res.silent_legs(),
+                   f"silent={res.silent_legs() or 'none'}; legs={res.legs}"))
     checks.append(("quick-scan recall == 100%", acc.get("recall_pct") == 100.0,
                    f"recall={acc.get('recall_pct')}% caught {acc.get('caught')}/{acc.get('documented')} "
                    f"missed={acc.get('missed')}"))
@@ -219,6 +221,8 @@ def _deep_lane() -> list[tuple[str, bool, str]]:
          f"engaged={fallback_engaged}; produced-test groups={fallback_produced or []}"),
         ("item 6: forged-token-replay fired in deep", "forged-token-replay" in probes,
          f"probes={sorted(p for p in probes if p)}"),
+        ("B2: no silent pipeline gaps (deep)", not res.silent_legs(),
+         f"silent={res.silent_legs() or 'none'}; functional_generated={res.legs.get('functional_generated')}"),
     ]
     return checks
 

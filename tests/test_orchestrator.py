@@ -486,3 +486,26 @@ def test_deterministic_block_is_order_stable():
     k1 = [OrchestratorResult._confirmed_key(b) for b in r1.confirmed_deterministic]
     k2 = [OrchestratorResult._confirmed_key(b) for b in r2.confirmed_deterministic]
     assert k1 == k2                                 # canonical order → reproducible block
+
+
+# ── B2: silent-pipeline-gap contract ───────────────────────────────────────────
+
+def test_silent_legs_flags_attempted_generation_that_produced_nothing():
+    from services.results import OrchestratorResult
+    r = OrchestratorResult(legs={"functional_attempted": True, "functional_generated": 0,
+                                 "templates_injected": 3, "tests_executed": 3})
+    assert any("functional-generation" in s for s in r.silent_legs())
+
+
+def test_silent_legs_quiet_when_generation_not_attempted():
+    from services.results import OrchestratorResult
+    r = OrchestratorResult(legs={"functional_attempted": False, "functional_generated": 0,
+                                 "templates_injected": 3, "tests_executed": 3})
+    assert r.silent_legs() == []            # quick scan: generation legitimately not attempted
+
+
+def test_silent_legs_flags_built_but_unexecuted_tests():
+    from services.results import OrchestratorResult
+    r = OrchestratorResult(legs={"functional_attempted": False, "functional_generated": 0,
+                                 "templates_injected": 4, "tests_executed": 0})
+    assert any("execution" in s for s in r.silent_legs())

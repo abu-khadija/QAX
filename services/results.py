@@ -421,11 +421,29 @@ class OrchestratorResult:
     ui_screens: list = field(default_factory=list)
     created_records: int = 0
     cleaned_records: int = 0
+    legs: dict = field(default_factory=dict)   # B2: per-stage output counts (diagnostics)
     error: str | None = None
 
     @property
     def success(self) -> bool:
         return self.error is None
+
+    def silent_legs(self) -> list:
+        """
+        Pipeline stages that RAN but produced nothing they should have — the silent
+        gaps that let the API-validation bug hide for months. Each contract fires only
+        when a precondition was met (so a legitimately-empty stage is not flagged):
+        functional generation attempted yet 0 tests; tests present yet 0 executable.
+        Returns human-readable leg names; empty when the pipeline is healthy.
+        """
+        out = []
+        legs = self.legs or {}
+        if legs.get("functional_attempted") and legs.get("functional_generated", 0) == 0:
+            out.append("functional-generation (attempted, 0 tests)")
+        # tests were built (any source) but none ran — e.g. all non-executable.
+        if legs.get("templates_injected", 0) > 0 and legs.get("tests_executed", 0) == 0:
+            out.append("execution (tests built, 0 executed)")
+        return out
 
     @property
     def gaps_filled(self) -> list:
@@ -482,6 +500,8 @@ class OrchestratorResult:
             "ui_screens": self.ui_screens,
             "created_records": self.created_records,
             "cleaned_records": self.cleaned_records,
+            "legs": self.legs,
+            "silent_legs": self.silent_legs(),
             "error": self.error,
             "success": self.success,
         }

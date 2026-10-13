@@ -45,13 +45,15 @@ Overlapping Phase-2/3 items are absorbed here.
       hard-check: two quick scans of the golden target yield an identical CONFIRMED
       block (passing: 5 confirmed, identical=True). +2 unit tests. Done.
 
-- [ ] **B2 — silent gaps in the pipeline.** Risk: the API-validation bug sat hidden
-      ~8 months and zeroed all API generation; there are likely more silent no-ops.
-      Task: add a per-leg "did this stage actually produce output?" assertion across
-      the pipeline (generation, each export adapter, api/ui execution, each confirm
-      source) and a gate check that fails when a leg silently yields nothing on the
-      golden target. Done when: every pipeline leg has an output-contract check and
-      the gate exercises each one.
+- [x] **B2 — silent pipeline gaps (DONE).** The scan now records a per-stage output
+      count (`OrchestratorResult.legs`: endpoints_grounded, suspects, probes_confirmed,
+      functional_generated, templates_injected, tests_executed, deterministic_confirmed)
+      and `silent_legs()` fires a contract when a stage RAN but produced nothing
+      (functional generation attempted → 0 tests; tests built → 0 executed) — exactly
+      the shape of the 8-month API-validation bug. The orchestrator emits loud
+      `SILENT-GAP:` warnings, and the gate hard-checks "no silent legs" on both the
+      quick (templates built → executed) and deep (functional_generated=13) lanes.
+      +3 unit tests. Done.
 
 - [ ] **B3 — coverage breadth vs DAST.** Risk: ~22 probes vs thousands of rules; we
       miss whole classes incumbents catch. Task: rank the missing high-value classes

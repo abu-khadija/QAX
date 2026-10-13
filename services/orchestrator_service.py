@@ -190,6 +190,8 @@ class OrchestratorService:
         chosen_routers: list[str] = []
         skipped_routers: list[str] = []
         endpoint_groups: list[str] = []
+        functional_count = 0        # B2: functional/fallback tests produced (not red-team)
+        functional_attempted = False
         if deep:
             prog.emit("orchestrate", "step", "generating tests")
             ranked = self._ranked_router_files(model, repo_path, detection=detection)
@@ -206,15 +208,19 @@ class OrchestratorService:
                 # or a live-only target). Generate functional tests straight from the
                 # endpoint surface, grouped by file/collection, so a no-router repo
                 # still gets generated coverage — not just probes.
+                functional_attempted = True
                 egen, endpoint_groups = self._generate_from_endpoints(
                     model, max_router_files, max_endpoints, prog)
                 tests.extend(egen)
+                functional_count += len(egen)
             for fpath in chosen_routers:
+                functional_attempted = True
                 try:
                     gen = GenerationService(self.context).generate(
                         fpath, options=GenerationOptions(
                             test_type="api", repo_context=model.as_context(), use_cache=False))
                     tests.extend(gen.test_cases)
+                    functional_count += len(gen.test_cases)
                 except Exception as exc:
                     logger.warning("orchestrator generation failed for %s: %s", fpath, exc)
             try:
@@ -222,6 +228,12 @@ class OrchestratorService:
                 tests.extend(rt.test_cases)
             except Exception as exc:
                 logger.warning("orchestrator red-team failed: %s", exc)
+            # B2: a generation leg that was attempted but produced nothing is exactly
+            # the silent gap that hid the API-validation bug for months — say it LOUD.
+            if functional_attempted and functional_count == 0:
+                prog.emit("orchestrate", "warn",
+                          "SILENT-GAP: functional generation ran but produced 0 tests — "
+                          "a stage is failing quietly (check validation / generation).")
         else:
             prog.emit("orchestrate", "info", "quick scan — probes + deterministic coverage only")
 
@@ -244,6 +256,10 @@ class OrchestratorService:
         #    when there are failures; wrapped so a missing key/credit degrades to
         #    the probe-proven bugs instead of crashing the scan.
         executable = [t for t in tests if t.get("api_steps")]
+        if tests and not executable:
+            prog.emit("orchestrate", "warn",
+                      "SILENT-GAP: tests were generated but none are executable "
+                      "(no api_steps) — nothing will run.")
         prog.emit("orchestrate", "step", f"executing {len(executable)} test(s)")
         execution = ExecutionService(self.context).execute(
             executable, mode="api", base_url=base_url)
@@ -330,12 +346,33 @@ class OrchestratorService:
                 except Exception as exc:
                     logger.warning("round 2 failed: %s", exc)
 
+        # B2: per-leg output contract — record what each stage actually produced, so a
+        # stage that silently yields nothing is visible (not hidden like the 8-month
+        # API-validation bug). `_attempted` flags let silent_legs() tell "legitimately
+        # empty" apart from "ran and produced nothing".
+        templates_injected = sum(1 for t in tests if t.get("attack") == "coverage-template")
+        probe_confirmed = sum(1 for b in confirmed if str(b.get("source", "")) == "probe")
+        legs = {
+            "endpoints_grounded": len(getattr(model, "endpoints", []) or []),
+            "suspects": len(getattr(detection, "findings", []) or []),
+            "probes_confirmed": probe_confirmed,
+            "functional_attempted": functional_attempted,
+            "functional_generated": functional_count,
+            "templates_injected": templates_injected,
+            "tests_executed": len(executable),
+            "deterministic_confirmed": sum(
+                1 for b in confirmed if str(b.get("source", "")) in ("probe", "coverage")),
+        }
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=rounds,
             tests_run=len(executable), suspects=len(detection.findings),
-            ui_screens=ui_screens,
+            ui_screens=ui_screens, legs=legs,
             created_records=getattr(probe_result, "created_records", 0),
             cleaned_records=getattr(probe_result, "cleaned_records", 0))
+        silent = result.silent_legs()
+        if silent:
+            prog.emit("orchestrate", "warn",
+                      "SILENT-GAP in: " + ", ".join(silent) + " — a stage produced nothing it should have.")
         prog.emit("orchestrate", "ok", result.summary())
         return result
 
