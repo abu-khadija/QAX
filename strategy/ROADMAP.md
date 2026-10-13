@@ -55,12 +55,18 @@ Overlapping Phase-2/3 items are absorbed here.
       quick (templates built → executed) and deep (functional_generated=13) lanes.
       +3 unit tests. Done.
 
-- [ ] **B3 — coverage breadth vs DAST.** Risk: ~22 probes vs thousands of rules; we
-      miss whole classes incumbents catch. Task: rank the missing high-value classes
-      (from the KB→probes backlog) and add them deterministically, 0-FP, one per
-      step, each with a seeded fixture in the golden target + a truth entry. Done
-      when: the golden target covers the agreed priority classes and recall is
-      tracked per class. (Absorbs the KB→probes work.)
+- [~] **B3 — coverage breadth vs DAST (IN PROGRESS, a continuing track).** Add the
+      missing high-value classes deterministically, 0-FP, one per step, each seeded in
+      the golden target + a truth entry. QAX now has 28 probes.
+      - [x] **BFLA — Broken Function-Level Authorization (OWASP API5).** New
+        `bfla_probe`: an ordinary freshly-registered user reaching a privileged,
+        admin-namespaced GET that rejects a no-token request = privilege escalation
+        (P1). Converts what was a flaky LLM lead ("non-admin reaches /admin") into a
+        deterministic finding. Seeded in the golden target (SECURE mode enforces the
+        role → quiet); truth entry added; gate recall now 4/4, secure control watches
+        bfla. +3 unit tests.
+      - [ ] NEXT candidates (ranked): SSTI, unrestricted file upload, host-header /
+        cache poisoning, XXE, GraphQL introspection/batching. One per step.
 
 - [ ] **B4 — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,

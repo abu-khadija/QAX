@@ -166,7 +166,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     finally:
         proc.terminate()
     auth_bugs = [b for b in sres.confirmed
-                 if b.get("probe") in ("jwt-flaws", "forged-token-replay", "forge-jwt")]
+                 if b.get("probe") in ("jwt-flaws", "forged-token-replay", "forge-jwt", "bfla")]
     checks.append(("secure control: auth probes silent (0)", len(auth_bugs) == 0,
                    f"auth findings on fixed app={len(auth_bugs)}"))
 

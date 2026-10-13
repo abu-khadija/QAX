@@ -127,6 +127,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("forged_token_replay probe failed: %s", exc)
 
+        # BFLA (OWASP API5) — an ordinary user reaching an admin-namespaced function.
+        try:
+            from execution.probes import bfla_probe
+            findings.extend(bfla_probe(model, base_url, session=shared, auth=auth))
+        except Exception as exc:
+            logger.error("bfla probe failed: %s", exc)
+
         # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
             findings.extend(sqli_probe(model, base_url, session=shared, auth=read_auth))

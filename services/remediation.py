@@ -22,6 +22,13 @@ _MAP = {
         "fix": "Verify the signature and expiry, and PIN the algorithm — jwt.decode(token, "
                "key, algorithms=['HS256']); never allow 'none'. Use a vetted JWT library.",
     },
+    "bfla": {
+        "why": "A privileged, admin-namespaced endpoint enforces no role/function check, "
+               "so any authenticated ordinary user can invoke admin functions (OWASP API5).",
+        "fix": "Enforce function-level authorization on every privileged route in one place "
+               "(middleware/decorator): check the caller's role/claim before the handler runs; "
+               "deny by default and allow only the intended roles.",
+    },
     "forged-token-replay": {
         "why": "Because the JWT signature is not verified, a forged token is accepted on "
                "every protected endpoint — one forgery grants access across the whole "

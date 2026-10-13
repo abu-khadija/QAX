@@ -1207,3 +1207,48 @@ def test_forged_token_replay_quiet_without_siblings():
     out = forged_token_replay_probe(_jwt_model(), "http://x",      # only /me exists → no siblings
                                     session=_ReplaySession("nosig"), auth={"token": _VALID_JWT})
     assert out == []
+
+
+# ── BFLA (OWASP API5): ordinary user reaching an admin-namespaced function ──────
+
+def _bfla_model():
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/admin/users", "auth_required": True},
+        {"method": "GET", "path": "/admin/public", "auth_required": True},  # actually public
+        {"method": "GET", "path": "/me", "auth_required": True}])
+
+
+class _BflaSession:
+    def __init__(self, mode):  # 'vuln' = no role check | 'secure' = role enforced
+        self.mode = mode
+
+    def get(self, url, headers=None, timeout=None):
+        tok = (headers or {}).get("Authorization", "")
+        if "/admin/users" in url:
+            if not tok:
+                return MagicMock(status_code=401, text="no")
+            return MagicMock(status_code=200 if self.mode == "vuln" else 403, text="x")
+        if "/admin/public" in url:
+            return MagicMock(status_code=200, text="public")   # not access-controlled
+        return MagicMock(status_code=200, text="ok")
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_bfla_detects_ordinary_user_reaching_admin():
+    from execution.probes import bfla_probe
+    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token": _VALID_JWT})
+    assert len(out) == 1 and out[0].probe == "bfla" and out[0].severity == "P1"
+    assert out[0].target == "/admin/users"
+
+
+def test_bfla_quiet_when_role_enforced():
+    from execution.probes import bfla_probe
+    assert bfla_probe(_bfla_model(), "http://x", session=_BflaSession("secure"), auth={"token": _VALID_JWT}) == []
+
+
+def test_bfla_ignores_public_admin_path():
+    from execution.probes import bfla_probe
+    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token": _VALID_JWT})
+    assert all(f.target != "/admin/public" for f in out)   # no-token 200 → not access-controlled

@@ -233,6 +233,74 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
     return out
 
 
+# Path segments that denote a PRIVILEGED / admin-only function (OWASP API5 BFLA).
+_PRIVILEGED_SEGS = ("admin", "administrator", "manage", "management", "internal",
+                    "sysadmin", "superuser", "console", "backoffice", "moderator")
+
+
+def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
+               auth: dict | None = None, limit: int = 15) -> list[ProbeFinding]:
+    """
+    Broken Function-Level Authorization — OWASP API5 (distinct from BOLA/object-level):
+    an ordinary user reaching a privileged, admin-namespaced FUNCTION. GET only, so it
+    never triggers a destructive admin action.
+
+    Zero-false-positive control, per endpoint: the endpoint is privileged by path
+    (an /admin|/manage|/internal… segment), it REJECTS a no-token request (so it IS
+    access-controlled, not public), yet it ACCEPTS a freshly-registered ORDINARY
+    user's token. A correct app enforces the role and returns 401/403 to that user →
+    the probe stays quiet.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    def code(url: str, headers: dict | None):
+        try:
+            return sess.get(url, headers=headers or {}, timeout=15).status_code
+        except Exception:
+            return None
+
+    def is2xx(c) -> bool:
+        return isinstance(c, int) and 200 <= c < 300
+
+    token = _resolve_token(sess, base, recipe, model,
+                           f"bfla_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+    if not token:
+        return out
+
+    seen: set = set()
+    targets: list[str] = []
+    for e in getattr(model, "endpoints", []):
+        if not (isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+                and "{" not in str(e.get("path", ""))):
+            continue
+        p = str(e.get("path", ""))
+        segs = [s.lower() for s in p.split("/") if s]
+        if p and p not in seen and any(seg in _PRIVILEGED_SEGS for seg in segs):
+            seen.add(p)
+            targets.append(p)
+
+    for p in targets[:limit]:
+        url = f"{base}{p}"
+        s_notoken = code(url, None)
+        if s_notoken not in (401, 403):
+            continue   # not access-controlled (public, or broken differently) — can't prove escalation
+        if is2xx(code(url, _auth_headers(token, auth))):
+            out.append(ProbeFinding(
+                probe="bfla",
+                title=f"Broken function-level authorization on GET {p}",
+                exploited=True, severity="P1",
+                evidence=(f"A freshly-registered ORDINARY user reached the privileged endpoint "
+                          f"GET {p} (HTTP 2xx; no token → {s_notoken}). The route is admin-namespaced "
+                          f"and access-controlled, but enforces no role/function check — any user can "
+                          f"call admin functions."),
+                target=p))
+    return out
+
+
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):

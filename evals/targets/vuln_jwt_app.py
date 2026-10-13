@@ -90,7 +90,13 @@ def me():
 @app.get("/admin/users")
 def admin_users():
     sub = _auth()
-    return (jsonify({"users": list(_USERS)}), 200) if sub else (jsonify({"error": "unauthorized"}), 401)
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    # VULNERABLE: no function-level role check — any authenticated user reaches this
+    # admin function (BFLA). SECURE mode enforces the admin role.
+    if SECURE and "admin" not in str(sub).lower():
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify({"users": list(_USERS)}), 200
 
 
 @app.get("/billing/invoices")
