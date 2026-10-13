@@ -389,3 +389,45 @@ class TestFixCommonIssues:
 
         assert "review_note" in fixed, "fix_common_issues should add missing review_note key"
         assert fixed["review_note"] == ""
+
+
+# ── API-mode test cases (api_steps) validate without the Playwright UI step pair ──
+
+def _api_base():
+    return {"title": "Login returns a token",
+            "description": "Register then login and fetch the current user",
+            "module": "auth", "test_type": "api", "priority": "high",
+            "preconditions": ["A clean database"], "confidence_score": 7,
+            "needs_review": False, "generated_from_file": "endpoints://auth",
+            "generated_at": "2026-10-13"}
+
+
+def test_api_case_with_api_steps_is_valid_without_ui_steps():
+    from core.validator import validate_batch
+    tc = {**_api_base(), "test_case_id": "TC-API-0001",
+          "manual_steps": [], "automation_steps": [],
+          "api_steps": [{"step_number": 1, "method": "POST", "path": "/auth/login"},
+                        {"step_number": 2, "method": "GET", "path": "/me"}]}
+    b = validate_batch([tc])
+    assert len(b["valid"]) == 1 and not b["invalid"]   # API mode no longer needs UI steps
+
+
+def test_api_case_can_omit_ui_step_arrays_entirely():
+    from core.validator import validate_batch
+    tc = {**_api_base(), "test_case_id": "TC-API-0002",
+          "api_steps": [{"step_number": 1, "method": "GET", "path": "/me"}]}
+    assert len(validate_batch([tc])["valid"]) == 1
+
+
+def test_ui_case_without_steps_still_rejected():
+    from core.validator import validate_batch
+    tc = {**_api_base(), "test_case_id": "TC-UI-0009",
+          "manual_steps": [], "automation_steps": []}          # no api_steps → UI schema applies
+    assert len(validate_batch([tc])["valid"]) == 0             # base (UI) schema untouched
+
+
+def test_fix_common_issues_defaults_empty_preconditions():
+    from core.validator import fix_common_issues
+    assert fix_common_issues({"preconditions": []})["preconditions"] == ["No special preconditions."]
+    assert fix_common_issues({"preconditions": "a clean db"})["preconditions"] == ["a clean db"]
+    assert fix_common_issues({})["preconditions"] == ["No special preconditions."]

@@ -59,8 +59,17 @@ Goal: make quality provable and repeatable before adding surface.
       failed=1), deterministically, every run. Note: the pipeline targets the host
       via `APP_BASE_URL` (no explicit base_url param) — a small ergonomics gap, not a
       correctness one.
-- [ ] **Generation polish** (only if it hurts demo quality): slowness — fewer
-      cases / streaming / raise max_tokens.
+- [x] **Generation polish — API-mode validation bug fixed** (done, high-impact):
+      the validator required Playwright UI steps (`manual_steps`+`automation_steps`,
+      ≥2 each) and a non-empty `preconditions`, so EVERY API-mode test case
+      (`api_steps`) was silently rejected — the whole functional-generation leg
+      (router + the no-router fallback) yielded ~0 valid API tests. Fixes: an
+      API-mode schema (`validator.api_schema`) that requires `api_steps` and drops
+      the UI-step mandate; `fix_common_issues` defaults empty/short `preconditions`.
+      After: generation yields 13–14 valid cases reliably (was 0); the deep-gate
+      fallback now produces tests (`groups=['auth']`). +4 validator tests.
+- [ ] **Generation polish — slowness** (remaining, lower priority, only if it hurts
+      demo quality): fewer cases / streaming / raise max_tokens.
 
 ## Phase 2 — EVIDENCE + JIRA (after hardening)
 

@@ -642,18 +642,58 @@ class OrchestratorService:
         return sorted(groups.items(), key=lambda kv: gscore(kv[1]), reverse=True)
 
     @staticmethod
-    def _endpoints_as_spec(key: str, eps: list) -> str:
-        """Render an endpoint group as a readable spec for GenerationService."""
+    def _example_value(field: str):
+        """A type-sensible example value for a request field, from its leaf name."""
+        leaf = str(field).lower().rsplit(".", 1)[-1]
+        if "email" in leaf:
+            return "user@example.com"
+        if any(k in leaf for k in ("password", "secret", "pwd")):
+            return "Secret123!"
+        if any(k in leaf for k in ("username", "login")) or leaf in ("user", "handle"):
+            return "testuser"
+        if any(k in leaf for k in ("url", "link", "uri", "image", "avatar", "photo")):
+            return "https://example.com/x.png"
+        import re as _re
+        if _re.search(r"(?:^|_)(age|count|num|number|qty|quantity|amount|price|id)(?:$|_)", leaf) \
+                or leaf == "id" or leaf.endswith("_id"):
+            return 1
+        return "test"
+
+    @classmethod
+    def _endpoints_as_spec(cls, key: str, eps: list) -> str:
+        """
+        Render an endpoint group as a directive spec GenerationService can turn into
+        concrete api_steps. A terse path list makes the model return little or nothing;
+        an explicit instruction + a per-endpoint example body + the auth flow makes it
+        reliably emit real, assertable tests.
+        """
         from core.auth_recipe import field_names
-        lines = [f"# API endpoints for '{key}' "
-                 "(no router source file — generated from the live/model surface)"]
+        lines = [
+            f"# API endpoints for module '{key}' (no router source file — generated "
+            "from the live/model surface).",
+            "# Write API test cases (api_steps) for EACH endpoint below: send the shown "
+            "request body and assert the expected outcome. For an endpoint marked "
+            "[auth required], first register then log in to obtain a bearer token and "
+            "send it as Authorization: Bearer <token>; also add a no-token case that "
+            "must be rejected (401/403).",
+            "",
+        ]
         for e in eps:
             m = str(e.get("method", "GET")).upper()
             p = str(e.get("path", ""))
             auth = "  [auth required]" if e.get("auth_required") else ""
+            lines.append(f"Endpoint: {m} {p}{auth}")
             fields = field_names(e.get("request_fields"))
-            body = f"  body: {', '.join(fields)}" if fields else ""
-            lines.append(f"{m} {p}{auth}{body}")
+            if fields:
+                import json as _json
+                body = {f: cls._example_value(f) for f in fields}
+                lines.append(f"  request body: {_json.dumps(body)}")
+            if m in ("POST",):
+                lines.append("  success: 2xx (resource created / action accepted).")
+            elif m in ("PUT", "PATCH", "DELETE"):
+                lines.append("  success: 2xx (resource updated / removed).")
+            else:
+                lines.append("  success: 200 OK with the resource(s).")
         return "\n".join(lines)
 
     def _generate_from_endpoints(self, model: AppModel, max_files: int,
@@ -688,18 +728,28 @@ class OrchestratorService:
         out: list = []
         covered: list[str] = []
         for key, eps in chosen:
-            try:
-                gen = gs.generate(f"endpoints://{key}", options=GenerationOptions(
-                    content=self._endpoints_as_spec(key, eps), test_type="api",
-                    module=key, repo_context=ctx, use_cache=False))
-                if gen.test_cases:
-                    out.extend(gen.test_cases)
-                    covered.append(key)   # record coverage only when tests were produced
-                else:
-                    logger.info("endpoint-group generation produced no tests for %s (%s)",
-                                key, getattr(gen, "error", "") or "empty")
-            except Exception as exc:
-                logger.warning("endpoint-group generation failed for %s: %s", key, exc)
+            spec = self._endpoints_as_spec(key, eps)
+            cases: list = []
+            # One retry: generation from a synthesised spec is occasionally empty
+            # (LLM non-determinism on a short input); a single retry makes the
+            # fallback reliably yield tests without looping.
+            for attempt in range(2):
+                try:
+                    gen = gs.generate(f"endpoints://{key}", options=GenerationOptions(
+                        content=spec, test_type="api", module=key,
+                        repo_context=ctx, use_cache=False))
+                    cases = gen.test_cases or []
+                    if cases:
+                        break
+                    logger.info("endpoint-group generation produced no tests for %s "
+                                "(attempt %d, %s)", key, attempt + 1,
+                                getattr(gen, "error", "") or "empty")
+                except Exception as exc:
+                    logger.warning("endpoint-group generation failed for %s: %s", key, exc)
+                    break
+            if cases:
+                out.extend(cases)
+                covered.append(key)   # record coverage only when tests were produced
         return out, covered
 
     # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
