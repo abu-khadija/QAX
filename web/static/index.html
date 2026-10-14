@@ -299,7 +299,7 @@ No token                    → HTTP 401
     </div>
     <div class="split">
       <div class="card">
-        <span class="badge-ok">CONFIRMED · 12</span>
+        <span class="badge-ok">CONFIRMED · 14</span>
         <ul class="list">
           <li><span class="sev">P1</span>Broken function-level authorization — <code>GET /admin/users</code></li>
           <li><span class="sev">P1</span>Forged JWT accepted — <code>GET /billing/invoices</code></li>
@@ -308,7 +308,8 @@ No token                    → HTTP 401
           <li><span class="sev">P1</span>Upload served back as HTML — <code>POST /upload</code></li>
           <li><span class="sev p2">P2</span>Host header reflected into reset link — <code>/reset-link</code></li>
           <li><span class="sev p2">P2</span>GraphQL introspection enabled — <code>POST /graphql</code></li>
-          <li class="faint">…and 5 more</li>
+          <li><span class="sev p2">P2</span>Negative order quantity accepted and stored — <code>POST /orders</code></li>
+          <li class="faint">…and 6 more</li>
         </ul>
       </div>
       <div class="card">
@@ -320,7 +321,7 @@ No token                    → HTTP 401
         <p class="caption" style="margin-top:20px">Leads are worth a look but aren't proven. On a real app this list also carries AI-investigator suspicions and dependency CVE or licence findings.</p>
       </div>
     </div>
-    <p class="caption">Same scan as above: QAX's golden test target, quick mode, 1.8 s, no LLM calls. The gate checks that two scans produce an identical confirmed list.</p>
+    <p class="caption">Same golden test target as above, quick mode, no LLM calls. The gate checks that two scans produce an identical confirmed list.</p>
   </div>
 </section>
 
@@ -329,7 +330,7 @@ No token                    → HTTP 401
   <div class="wrap">
     <div class="sec-head">
       <div class="eyebrow">Coverage</div>
-      <h2 id="cov-h">33 deterministic probes, each with a built-in control</h2>
+      <h2 id="cov-h">34 deterministic probes, each with a built-in control</h2>
       <p class="lead">Every probe compares an attack request against a benign one and only reports a bug when the difference proves it. On a well-written app, that's how QAX stays quiet.</p>
     </div>
     <div class="chips" aria-label="Probe classes">
@@ -340,9 +341,9 @@ No token                    → HTTP 401
       <span class="chip">Reflected &amp; stored XSS</span><span class="chip">Path traversal</span><span class="chip">Unrestricted file upload</span>
       <span class="chip">Host-header injection</span><span class="chip">Open redirect</span><span class="chip">CORS</span>
       <span class="chip">GraphQL introspection</span><span class="chip">Exposed debugger / stack traces</span><span class="chip">Rate limiting</span>
-      <span class="chip">Security headers &amp; cookie flags</span><span class="chip">Malformed-input crashes</span>
+      <span class="chip">Security headers &amp; cookie flags</span><span class="chip">Malformed-input crashes</span><span class="chip">Business logic: negative quantities &amp; amounts</span>
     </div>
-    <p class="caption">Plus a browser UI tour (JS errors, failed requests, visual regression against a baseline) and dependency CVE and licence checks. Business-logic bugs are on the roadmap, not covered yet.</p>
+    <p class="caption">Plus a browser UI tour (JS errors, failed requests, visual regression against a baseline) and dependency CVE and licence checks. Business logic is covered by a first check (negative quantities and amounts); broader logic and workflow bugs are on the roadmap.</p>
   </div>
 </section>
 
@@ -376,7 +377,7 @@ No token                    → HTTP 401
       <p class="lead">Every change to QAX goes through a gate that scans a deliberately vulnerable app and a fixed copy of it. If it misses a planted bug or flags the fixed copy, the change can't merge.</p>
     </div>
     <div class="grid g4">
-      <div class="stat"><div class="n ok">10 / 10</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
+      <div class="stat"><div class="n ok">11 / 11</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
       <div class="stat"><div class="n ok">0</div><div class="l">false positives</div><div class="src">The same gate, plus a fixed copy of the target that must come back silent.</div></div>
       <div class="stat"><div class="n">2×</div><div class="l">identical confirmed list</div><div class="src">The gate scans twice and requires the same result.</div></div>
       <div class="stat"><div class="n">3</div><div class="l">external stacks, 0 false alarms</div><div class="src">Well-written Node, Go and Java backends we didn't write. A small sample, and we say so.</div></div>
@@ -461,7 +462,7 @@ No token                    → HTTP 401
     <div class="sec-head"><div class="eyebrow">FAQ</div><h2 id="faq-h">Questions people ask first</h2></div>
     <details class="q"><summary>How is QAX different from an AI code reviewer?</summary><p>A code reviewer reads your changes and comments on them. QAX tests the deployed app: it sends real requests and reports a bug as confirmed only when the response proves it. The two work well together.</p></details>
     <details class="q"><summary>What does “confirmed” mean exactly?</summary><p>A deterministic probe saw the app misbehave in a way a control request rules out. For example, a forged token gets HTTP 200 while no token gets 401. The same scan reproduces the same confirmed list.</p></details>
-    <details class="q"><summary>Is it a replacement for a penetration test?</summary><p>No. QAX covers a defined set of bug classes (listed above) automatically and repeatably. Business-logic flaws and chained attacks still need a human, and business-logic probes are on our roadmap.</p></details>
+    <details class="q"><summary>Is it a replacement for a penetration test?</summary><p>No. QAX covers a defined set of bug classes (listed above) automatically and repeatably. Most business-logic flaws and chained attacks still need a human. QAX has a first business-logic check, and more are on the roadmap.</p></details>
     <details class="q"><summary>Do I need an OpenAPI spec or the source code?</summary><p>No, though both help. QAX can scan from a URL alone, using common-path discovery and a UI tour. With source it maps endpoints from the code and checks them against the live app.</p></details>
     <details class="q"><summary>Can it change data on my app?</summary><p>Some probes create disposable records to test access control. They're labelled as writing data, use <code>qax*</code> names, and the report lists what was created and cleaned up. Only scan apps you're allowed to test, ideally staging.</p></details>
     <details class="q"><summary>What leaves my machine?</summary><p>The scanning engine runs locally. The AI features (deeper investigation, test generation) send prompts to the model provider using your API key. Jira or Xray only receive data if you configure credentials and enable live export.</p></details>
