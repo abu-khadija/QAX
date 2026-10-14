@@ -2382,6 +2382,79 @@ def xss_probe(model, base_url: str, *, session: requests.Session | None = None,
     return out
 
 
+# Template-expression syntaxes across common engines (Jinja2/Twig, FreeMarker/JSP-EL, Razor).
+_SSTI_SYNTAXES = ("{{%d*%d}}", "${%d*%d}", "#{%d*%d}")
+
+
+def ssti_probe(model, base_url: str, *, session: requests.Session | None = None,
+               auth: dict | None = None) -> list[ProbeFinding]:
+    """
+    Server-side template injection (RCE-class). Inject a template expression into a GET
+    query param and confirm the server EVALUATED it — not reflected it.
+
+    Zero-false-positive control: the payload is an arithmetic expression with RANDOM
+    factors (a distinctive 5–6-digit product unlikely to occur by chance). A hit counts
+    only when the computed PRODUCT appears while the literal expression does NOT — and
+    it is then re-confirmed with a SECOND, different random product on the same engine.
+    A page that merely reflects input, or coincidentally contains one number, cannot
+    produce two independent correct products. P1. No model calls.
+    """
+    import random
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    cands = [e for e in getattr(model, "endpoints", [])
+             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+             and e.get("query_params")]
+    token = None
+    if any(e.get("auth_required") for e in cands):
+        token = _resolve_token(sess, base, recipe, model, f"ssti_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    def render_of(path, qp, headers, expr):
+        try:
+            return sess.get(f"{base}{path}", params={qp: expr}, headers=headers, timeout=15).text or ""
+        except Exception:
+            return ""
+
+    seen: set = set()
+    for e in cands[:8]:
+        path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
+        for qp in list(e.get("query_params") or [])[:3]:
+            if (path, qp) in seen:
+                continue
+            seen.add((path, qp))
+            engine = None
+            for fmt in _SSTI_SYNTAXES:
+                a, b = random.randint(200, 999), random.randint(200, 999)
+                expr, product = fmt % (a, b), str(a * b)
+                body = render_of(path, qp, headers, expr)
+                if product in body and expr not in body and f"{a}*{b}" not in body:
+                    engine = fmt
+                    break
+            if not engine:
+                continue
+            # Re-confirm with a different product on the same engine (rule out coincidence).
+            a2, b2 = random.randint(200, 999), random.randint(200, 999)
+            expr2, product2 = engine % (a2, b2), str(a2 * b2)
+            body2 = render_of(path, qp, headers, expr2)
+            if product2 in body2 and expr2 not in body2:
+                out.append(ProbeFinding(
+                    probe="ssti",
+                    title=f"Server-side template injection via query param '{qp}' on {e.get('path')}",
+                    exploited=True, severity="P1",
+                    evidence=(f"A template expression in '{qp}' on GET {e.get('path')} was EVALUATED "
+                              f"server-side: {expr2} rendered as {product2} (and a prior expression "
+                              f"rendered as {product}). The literal expression did not appear — user "
+                              f"input reaches a template engine, which is typically RCE."),
+                    target=str(e.get("path", ""))))
+                break
+    return out
+
+
 # ── stored XSS ────────────────────────────────────────────────────────────────
 # Body fields that typically hold displayed free text.
 _STORED_TEXT_KW = ("content", "comment", "message", "body", "text", "description", "desc",

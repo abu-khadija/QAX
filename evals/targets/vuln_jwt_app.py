@@ -105,6 +105,24 @@ def invoices():
     return (jsonify({"invoices": [{"id": 1, "amount": 4200}]}), 200) if sub else (jsonify({"error": "unauthorized"}), 401)
 
 
+@app.get("/greet")
+def greet():
+    # VULNERABLE: the `name` query param is rendered through a template engine, so a
+    # template expression is EVALUATED (simulated: {{a*b}} / ${a*b} / #{a*b} → product).
+    # SECURE mode renders the name literally (no evaluation).
+    import html as _html
+    import re as _re
+    name = request.args.get("name", "guest")
+    if SECURE:
+        name = _html.escape(name)            # encoded output: no SSTI eval, no reflected XSS
+    else:
+        def _ev(m):
+            return str(int(m.group(1)) * int(m.group(2)))
+        name = _re.sub(r"[{$#]\{(\d+)\*(\d+)\}\}?", _ev, name)   # evaluates the template (SSTI)
+    return ("<html><body>Hello " + name + "</body></html>", 200,
+            {"Content-Type": "text/html"})
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -122,6 +140,10 @@ def spec():
             "/me": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
             "/admin/users": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
             "/billing/invoices": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
+            "/greet": {"get": {
+                "parameters": [{"name": "name", "in": "query",
+                                "schema": {"type": "string"}}],
+                "responses": {"200": {"description": "ok"}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

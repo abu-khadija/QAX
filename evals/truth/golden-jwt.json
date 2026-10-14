@@ -6,6 +6,8 @@
     {"id": "jwt-alg-none",            "match": ["alg=none"]},
     {"id": "jwt-unverified-signature","match": ["signature not verified"]},
     {"id": "forged-token-replay",     "match": ["forged jwt accepted"]},
-    {"id": "bfla",                    "match": ["function-level authorization"]}
+    {"id": "bfla",                    "match": ["function-level authorization"]},
+    {"id": "ssti",                    "match": ["server-side template injection"]},
+    {"id": "reflected-xss",           "match": ["reflected xss"]}
   ]
 }

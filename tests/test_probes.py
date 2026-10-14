@@ -1252,3 +1252,39 @@ def test_bfla_ignores_public_admin_path():
     from execution.probes import bfla_probe
     out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token": _VALID_JWT})
     assert all(f.target != "/admin/public" for f in out)   # no-token 200 → not access-controlled
+
+
+# ── SSTI: template expression evaluated server-side (differential control) ──────
+
+def _ssti_model():
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/greet", "query_params": ["name"]}])
+
+
+class _SstiSession:
+    def __init__(self, mode):  # 'vuln' evaluates the expression | 'reflect' echoes literally
+        self.mode = mode
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        import re as _re
+        val = (params or {}).get("name", "")
+        if self.mode == "vuln":
+            val = _re.sub(r"[{$#]\{(\d+)\*(\d+)\}\}?",
+                          lambda m: str(int(m.group(1)) * int(m.group(2))), val)
+        return MagicMock(status_code=200, text=f"<html>Hello {val}</html>",
+                         headers={"Content-Type": "text/html"})
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_ssti_detects_server_side_evaluation():
+    from execution.probes import ssti_probe
+    out = ssti_probe(_ssti_model(), "http://x", session=_SstiSession("vuln"))
+    assert len(out) == 1 and out[0].probe == "ssti" and out[0].severity == "P1"
+    assert out[0].target == "/greet"
+
+
+def test_ssti_quiet_when_input_only_reflected():
+    from execution.probes import ssti_probe
+    assert ssti_probe(_ssti_model(), "http://x", session=_SstiSession("reflect")) == []

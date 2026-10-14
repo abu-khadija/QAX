@@ -22,6 +22,13 @@ _MAP = {
         "fix": "Verify the signature and expiry, and PIN the algorithm — jwt.decode(token, "
                "key, algorithms=['HS256']); never allow 'none'. Use a vetted JWT library.",
     },
+    "ssti": {
+        "why": "User input is concatenated into a server-side template and evaluated, so "
+               "an attacker can run template/engine code — typically a path to RCE.",
+        "fix": "Never build templates from user input. Render a fixed template and pass "
+               "user data as bound variables/context only; if dynamic templates are truly "
+               "needed, use a sandboxed engine and a strict allowlist.",
+    },
     "bfla": {
         "why": "A privileged, admin-namespaced endpoint enforces no role/function check, "
                "so any authenticated ordinary user can invoke admin functions (OWASP API5).",
