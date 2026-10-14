@@ -60,7 +60,7 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     DONE — 2 case studies (DRF + Go/Gin), 2 stacks, 0 FP on both.
 15. ✅ **B7 — business-logic bug probe (DONE)** — negative quantity/amount accepted+stored (P2).
 16. ✅ **S8 (refactor half, main.py)** — 2679→2288 lines: cli/ presentation modules
-    + ONE generation path (GenerationService) for CLI/scan/pipeline. Left: ui/app.py.
+    + ONE generation path for CLI/scan/pipeline. ui/app.py STARTED (presenters extracted, 2281→2174).
 17. **B8 — moat / GTM** — lead the message on "proven, zero false positives" (when pitching).
     ✅ First slice DONE (2026-10-14): product homepage at `/` (app moved to `/app`),
     positioned per the Qodo study below; every claim maps to a gate number or a shipped
@@ -276,8 +276,12 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       validate/report/auto-accept/push flow byte-for-byte; _process_single_file + 3
       dead imports deleted. ONE generation path now serves CLI analyze + scan +
       pipeline + multi-source. main.py 2679→2288 lines. Verified `analyze` end-to-end
-      (10 valid, 0 invalid) + gate green. NEXT S8 (lower priority, own session):
-      ui/app.py views (~2.3k lines).
+      (10 valid, 0 invalid) + gate green. S8 ui/app.py: STARTED — extracted the pure HTML/format helpers (badge,
+      confidence_bar, risk/score badge classes, mask_secret, count_todos,
+      build_markdown_export) to a testable `ui/presenters.py` (no Streamlit import);
+      ui/app.py 2281→2174. The `st.*`-heavy wizard/render views stay inline (need
+      the runtime). Next: pull the data-loading helpers (load_*/get_* cache stats)
+      into a testable module too.
       ✅ FIXED: the `.cs` folder-mode default (and a hard-coded "example3" → .ts map) is
       gone. Both folder paths (CLI + pipeline FolderInputAdapter) now auto-detect the
       folder's dominant source language (`core.code_reader.detect_dominant_extension`),
