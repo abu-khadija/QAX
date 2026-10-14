@@ -29,3 +29,12 @@ def test_off_origin_step_is_blocked_before_any_request_and_token():
     res = r.execute_api_step(step, {"token": "super-secret"})   # no network: blocked first
     assert res["status"] == "FAIL" and "egress" in (res["error"] or "").lower()
     assert res["response_code"] is None                          # never sent
+
+
+# S7: a legacy UI-shaped assertion must not read as PASS (it is not evaluated here).
+def test_legacy_assert_step_is_not_evaluated_not_pass():
+    r = _runner("http://localhost:8911")   # setup() creates a session, no network
+    res = r.execute_step({"step_number": 1, "playwright_action": "assert",
+                          "assertion_type": "text", "assertion_value": "ok"})
+    assert res["status"] == "SKIP"            # never PASS — nothing was checked
+    assert "not evaluated" in res["actual_result"].lower()

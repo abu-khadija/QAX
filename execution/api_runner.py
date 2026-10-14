@@ -202,10 +202,16 @@ class APIRunner:
                 result = self._do_post(result, value, assert_type, assert_val)
 
             elif action in ("assert", "verify", "check", "expect"):
+                # S7: a legacy UI-shaped assertion cannot be evaluated over HTTP here
+                # (no response body is fetched for it). Marking it PASS made an
+                # un-checked step look verified. Report it honestly as NOT EVALUATED —
+                # real assertions live in api_steps (status + expect_json), which ARE
+                # checked. Never let a skipped check read as proven coverage.
                 result["actual_result"] = (
-                    f"Assertion noted: {assert_type}={assert_val!r}"
+                    f"Assertion NOT evaluated in API mode (use api_steps): "
+                    f"{assert_type}={assert_val!r}"
                 )
-                result["status"] = "PASS"
+                result["status"] = "SKIP"
 
             elif action == "wait":
                 secs = min(float(value) if value else 1.0, 5.0)

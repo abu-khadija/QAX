@@ -147,9 +147,10 @@ B6 (real Jira filing) so an accidental live push is impossible.
       summary — no generated tests, no request/response trail. Undercuts the
       "reproducible evidence" claim and B4. Done when: a durable artifact carries the
       tests, the actual requests/status/body, probe inputs, stage failures, redacted.
-- [ ] **S7 — legacy "assert noted → PASS".** `api_runner` legacy automation_steps mark
-      an `assert`/`verify` PASS without evaluating it (extends B2 to the legacy path).
-      Done when: an un-evaluated step is "not evaluated"/SKIP, never PASS.
+- [x] **S7 — legacy "assert noted → PASS" (DONE).** `api_runner.execute_step`'s legacy
+      UI-shaped `assert`/`verify`/`check`/`expect` now returns SKIP ("Assertion NOT
+      evaluated in API mode — use api_steps"), never PASS, so an un-checked step can't
+      read as verified coverage. Real assertions remain in api_steps. +1 unit test.
 - [ ] **S8 — UI output escaping + module splits.** `ui/app.py` renders subprocess
       output via `unsafe_allow_html`; `main.py`/`ui/app.py` are oversized. Done when:
       UI output is escaped and the biggest files are split behind stable interfaces.
