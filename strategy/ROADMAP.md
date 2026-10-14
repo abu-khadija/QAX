@@ -264,9 +264,16 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       `cli/output.py` (save JSON/markdown, find saved case) — all unit-tested; main's
       helpers now delegate, plus `cli/files.py` (source-file collection). main.py
       2679 → 2507 lines; every extraction unit-tested, CLI exit codes pinned.
-      NEXT (deliberate, not mechanical): route `_process_single_file` (~220 lines, a
-      second generation path duplicating GenerationService) through the service —
-      a behavior change that needs its own tests first. Then ui/app.py views.
+      Then: `_process_single_file` (the CLI's own ~220-line generation path). Done so
+      far on it: (1) characterization tests pin its behavior; (2) fixed TWO real bugs
+      it had — per-chunk cache keys (large files were analyzed on chunk 1 only when
+      caching was on) and the size_lines/line_count key mismatch (always passed 0);
+      (3) ported chunking + testability-skip + real include_deps INTO GenerationService
+      (so scan/pipeline/multi-source paths gain them). REMAINING final swap (own
+      session): have run_analyze_command call GenerationService and delete
+      _process_single_file — BLOCKED on parity: the service still lacks (a) screenshot
+      capture and (b) a passed-in GitAnalyzer for git-risk; add those first, since the
+      `analyze` CLI is not gate-covered. Then ui/app.py views.
       ✅ FIXED: the `.cs` folder-mode default (and a hard-coded "example3" → .ts map) is
       gone. Both folder paths (CLI + pipeline FolderInputAdapter) now auto-detect the
       folder's dominant source language (`core.code_reader.detect_dominant_extension`),
