@@ -32,6 +32,13 @@ pytest-asyncio==1.4.0
 # Does NOT require a production server; flask dev server is fine for local use.
 flask>=3.0.0
 
+# ── Streamlit UI (primary professional UI: `python main.py ui`) ───────────────
+# ui/app.py imports these at load / in its views; without them the main UI cannot
+# launch from a clean install. Declared so `pip install -r requirements.txt` works.
+streamlit>=1.30.0
+plotly>=5.18.0
+pandas>=2.0.0
+
 # ── Excel export (ExcelAdapter) ───────────────────────────────────────────────
 openpyxl>=3.1.0
 
