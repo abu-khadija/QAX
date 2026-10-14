@@ -123,6 +123,15 @@ def greet():
             {"Content-Type": "text/html"})
 
 
+@app.get("/reset-link")
+def reset_link():
+    # VULNERABLE: builds the reset URL from the incoming Host header (host-header
+    # injection → reset-link / cache poisoning). SECURE uses a fixed canonical host.
+    host = "app.example.com" if SECURE else request.headers.get("Host", "app.example.com")
+    return ('<html><body>Reset at https://' + host + '/reset?t=abc</body></html>', 200,
+            {"Content-Type": "text/html"})
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -144,6 +153,7 @@ def spec():
                 "parameters": [{"name": "name", "in": "query",
                                 "schema": {"type": "string"}}],
                 "responses": {"200": {"description": "ok"}}}},
+            "/reset-link": {"get": {"responses": {"200": {"description": "ok"}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

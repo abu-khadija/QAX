@@ -1288,3 +1288,33 @@ def test_ssti_detects_server_side_evaluation():
 def test_ssti_quiet_when_input_only_reflected():
     from execution.probes import ssti_probe
     assert ssti_probe(_ssti_model(), "http://x", session=_SstiSession("reflect")) == []
+
+
+# ── host-header injection: forged Host used to build a URL ──────────────────────
+
+def _hhi_model():
+    return AppModel(root="/x", endpoints=[{"method": "GET", "path": "/reset-link"}])
+
+
+class _HostSession:
+    def __init__(self, mode):  # 'vuln' trusts the Host header | 'secure' fixed host
+        self.mode = mode
+
+    def get(self, url, headers=None, timeout=None, allow_redirects=None):
+        host = "app.example.com" if self.mode == "secure" else (headers or {}).get("Host", "app.example.com")
+        return MagicMock(status_code=200, text=f"<html>Reset at https://{host}/reset</html>", headers={})
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_host_header_injection_detected_in_url_context():
+    from execution.probes import host_header_injection_probe
+    out = host_header_injection_probe(_hhi_model(), "http://x", session=_HostSession("vuln"))
+    assert len(out) == 1 and out[0].probe == "host-header-injection" and out[0].severity == "P2"
+    assert out[0].target == "/reset-link"
+
+
+def test_host_header_injection_quiet_with_fixed_host():
+    from execution.probes import host_header_injection_probe
+    assert host_header_injection_probe(_hhi_model(), "http://x", session=_HostSession("secure")) == []

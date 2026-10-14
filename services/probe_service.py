@@ -191,6 +191,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("ssti probe failed: %s", exc)
 
+        # Host-header injection — forged Host used to build a URL (reset/cache poisoning).
+        try:
+            from execution.probes import host_header_injection_probe
+            findings.extend(host_header_injection_probe(model, base_url, session=shared, auth=auth))
+        except Exception as exc:
+            logger.error("host_header_injection probe failed: %s", exc)
+
         # Stored XSS — markup written then rendered unencoded on read-back (P1).
         try:
             from execution.probes import stored_xss_probe

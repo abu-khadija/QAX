@@ -50,8 +50,9 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 
 **REMAINING (in execution order):**
 12. ▶ **B3 — more probe classes** (coverage breadth; biggest product gap vs DAST).
-    One per step: **SSTI → file-upload → host-header/cache-poisoning → XXE → GraphQL**.
-    Continues opportunistically as B4 reveals gaps.
+    Done this track: BFLA ✅, SSTI ✅, host-header injection ✅ (30 probes, gate 7/7).
+    Next: **XXE → GraphQL introspection → file-upload**. Continues opportunistically
+    as B4 reveals gaps.
 13. **B5 — no-spec endpoint discovery** (widens reach to spec-less real apps; a
     prerequisite for strong B4 targets).
 14. **B4 — 2–3 case studies on real, messy, non-cherry-picked OSS apps** (the
@@ -101,16 +102,20 @@ Overlapping Phase-2/3 items are absorbed here.
 
 - [~] **B3 — coverage breadth vs DAST (IN PROGRESS, a continuing track).** Add the
       missing high-value classes deterministically, 0-FP, one per step, each seeded in
-      the golden target + a truth entry. QAX now has 28 probes.
-      - [x] **BFLA — Broken Function-Level Authorization (OWASP API5).** New
-        `bfla_probe`: an ordinary freshly-registered user reaching a privileged,
-        admin-namespaced GET that rejects a no-token request = privilege escalation
-        (P1). Converts what was a flaky LLM lead ("non-admin reaches /admin") into a
-        deterministic finding. Seeded in the golden target (SECURE mode enforces the
-        role → quiet); truth entry added; gate recall now 4/4, secure control watches
-        bfla. +3 unit tests.
-      - [ ] NEXT candidates (ranked): SSTI, unrestricted file upload, host-header /
-        cache poisoning, XXE, GraphQL introspection/batching. One per step.
+      the golden target + a truth entry. QAX now has **30 probes**; gate recall 7/7, FP 0.
+      - [x] **BFLA — Broken Function-Level Authorization (OWASP API5)** — `bfla_probe`:
+        an ordinary user reaching a privileged admin-namespaced GET that rejects a
+        no-token request = P1 escalation (converts a flaky LLM lead into a deterministic
+        finding). +3 tests.
+      - [x] **SSTI — server-side template injection** — `ssti_probe`: a template
+        expression evaluated server-side, proven by a two-product differential control
+        (P1, RCE-class). +2 tests.
+      - [x] **Host-header injection** — `host_header_injection_probe`: a forged Host
+        used to build a URL (Location/body URL context) = reset-link / cache poisoning
+        (P2). +2 tests.
+      - [ ] NEXT candidates: **XXE → GraphQL introspection → unrestricted file upload**
+        (file upload moved later — a 0-FP proof needs a retrievable uploaded-artifact
+        signal the generic endpoint model rarely exposes; design first). One per step.
 
 - [ ] **B4 — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,

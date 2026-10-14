@@ -22,6 +22,12 @@ _MAP = {
         "fix": "Verify the signature and expiry, and PIN the algorithm — jwt.decode(token, "
                "key, algorithms=['HS256']); never allow 'none'. Use a vetted JWT library.",
     },
+    "host-header-injection": {
+        "why": "The app builds URLs (reset links, redirects, cache keys) from the incoming "
+               "Host header, so an attacker can poison password-reset emails and the web cache.",
+        "fix": "Never trust the Host/X-Forwarded-Host header for URL generation. Use a "
+               "configured canonical base URL, and validate Host against an allowlist.",
+    },
     "ssti": {
         "why": "User input is concatenated into a server-side template and evaluated, so "
                "an attacker can run template/engine code — typically a path to RCE.",

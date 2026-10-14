@@ -312,6 +312,61 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
     return out
 
 
+def host_header_injection_probe(model, base_url: str, *, session: requests.Session | None = None,
+                                auth: dict | None = None, limit: int = 10) -> list[ProbeFinding]:
+    """
+    Host-header injection / web-cache & reset-link poisoning. Send a request with a
+    forged `Host` (and `X-Forwarded-Host`) and confirm the server used it to BUILD a
+    URL in its response.
+
+    Zero-false-positive: the forged host is a unique per-run marker; a hit counts only
+    when it comes back in a URL CONTEXT — a `Location` header, or `://marker` / `//marker`
+    in the body — proving the app trusts the Host header to construct links (not just a
+    reflected error string). GET only. P2. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    cands = [e for e in getattr(model, "endpoints", [])
+             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
+             and "{" not in str(e.get("path", ""))]
+    token = None
+    if any(e.get("auth_required") for e in cands):
+        token = _resolve_token(sess, base, recipe, model, f"hhi_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    marker = f"qax{uuid.uuid4().hex[:10]}.evil.invalid"
+    seen: set = set()
+    for e in cands[:limit]:
+        path = str(e.get("path", ""))
+        if path in seen:
+            continue
+        seen.add(path)
+        headers = {"Host": marker, "X-Forwarded-Host": marker}
+        if e.get("auth_required"):
+            headers.update(_auth_headers(token, auth))
+        try:
+            r = sess.get(f"{base}{path}", headers=headers, timeout=15, allow_redirects=False)
+        except Exception:
+            continue
+        loc = str(r.headers.get("Location", ""))
+        body = r.text or ""
+        if marker in loc or f"//{marker}" in body or f"://{marker}" in body:
+            where = "the Location header" if marker in loc else "a URL in the response body"
+            out.append(ProbeFinding(
+                probe="host-header-injection",
+                title=f"Host header reflected into a URL on GET {path}",
+                exploited=True, severity="P2",
+                evidence=(f"A forged Host '{marker}' was used by the server to build a URL in "
+                          f"{where} on GET {path}. An attacker can set the Host of a victim's request "
+                          f"to poison password-reset links and the web cache."),
+                target=path))
+            break   # Host trust is a server-wide behavior — one proof suffices
+    return out
+
+
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):

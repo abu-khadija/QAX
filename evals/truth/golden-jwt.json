@@ -8,6 +8,7 @@
     {"id": "forged-token-replay",     "match": ["forged jwt accepted"]},
     {"id": "bfla",                    "match": ["function-level authorization"]},
     {"id": "ssti",                    "match": ["server-side template injection"]},
-    {"id": "reflected-xss",           "match": ["reflected xss"]}
+    {"id": "reflected-xss",           "match": ["reflected xss"]},
+    {"id": "host-header-injection",   "match": ["host header reflected"]}
   ]
 }
