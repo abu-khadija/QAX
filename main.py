@@ -2023,47 +2023,17 @@ def _collect_files_from_args(
     folder: str | None,
     ext: str | None = None,
 ) -> list[str]:
-    """
-    Build a list of file paths to analyze from --file or --folder args.
-
-    Args:
-        file (str | None): Single file path.
-        folder (str | None): Directory path.
-        ext (str | None): Extension filter for folder mode. Auto-detected if None.
-
-    Returns:
-        list[str]: Resolved file paths that exist on disk.
-    """
-    if file:
-        path = Path(file)
-        if not path.exists():
-            logger.error("File not found: %s", file)
-            sys.exit(1)
-        return [str(path)]
-
-    if folder:
-        dir_path = Path(folder)
-        if not dir_path.is_dir():
-            logger.error("Folder not found: %s", folder)
-            sys.exit(1)
-        if ext is None:
-            project = os.getenv("DEFAULT_PROJECT", "")
-            ext_map = {
-                # Add your project → file extension here if needed.
-                # Default fallback is ".cs" if project is not listed.
-                "example3": ".ts",
-            }
-            ext = ext_map.get(project.lower(), ".cs")
-            logger.info("Auto-detected file extension for project '%s': %s", project, ext)
-        ext = ext if ext.startswith(".") else f".{ext}"
-        files = sorted(dir_path.rglob(f"*{ext}"))
-        if not files:
-            logger.warning("No %s files found in %s", ext, folder)
-            sys.exit(0)
-        logger.info("Found %d %s file(s) in %s", len(files), ext, folder)
-        return [str(f) for f in files]
-
-    return []
+    """Files to analyze from --file/--folder (logic in cli/files, S8); exits on bad input."""
+    from cli.files import collect_source_files
+    try:
+        files = collect_source_files(file, folder, ext, project=os.getenv("DEFAULT_PROJECT", ""))
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+    if folder and not files:
+        logger.warning("No matching files found in %s", folder)
+        sys.exit(0)
+    return files
 
 
 def _process_single_file(
