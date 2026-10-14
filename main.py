@@ -100,11 +100,8 @@ if hasattr(sys.stderr, "reconfigure"):
 load_dotenv(override=True)
 
 # ── Project module imports ─────────────────────────────────────────────────────
-from core.bug_fetcher import BugFetcher
-from core.claude_client import ClaudeClient
 from core.code_reader import chunk_large_file, extract_dependencies, is_testable, read_file
 from core.feedback_store import FeedbackStore
-from core.git_analyzer import GitAnalyzer
 from core.prompt_optimizer import optimize_prompt
 from core.session_manager import SessionManager
 from core.validator import fix_common_issues, generate_quality_report, validate_batch
@@ -295,11 +292,14 @@ Examples:
     )
     logger.info("Files to analyze: %d", len(file_paths))
 
-    # ── Initialize Claude ──────────────────────────────────────────────────
+    # ── Context for the generation service (validates the API key, loads config) ─
+    from services.context import QAXContext
+    from services.progress import PrintProgressReporter
     try:
-        claude = ClaudeClient(project=project)
-    except (ValueError, FileNotFoundError) as e:
-        logger.error("Failed to initialize Claude client: %s", e)
+        ctx = QAXContext.from_env(project=project)
+        ctx.require_anthropic_key()
+    except Exception as e:
+        logger.error("Failed to initialize: %s", e)
         sys.exit(1)
 
     # ── Initialize Xray (if pushing) ──────────────────────────────────────
@@ -310,10 +310,6 @@ Examples:
         except ValueError as e:
             logger.warning("Xray not configured (%s) — results will be saved locally only", e)
 
-    # ── Initialize optional clients ────────────────────────────────────────
-    git_analyzer = GitAnalyzer() if args.include_git else None
-    bug_fetcher = BugFetcher() if args.include_bugs else None
-
     # ── Initialize feedback store for auto-accept gating ──────────────────
     fb_store = None
     if args.auto_accept:
@@ -322,25 +318,29 @@ Examples:
         except Exception:
             pass
 
-    # ── Process each file ──────────────────────────────────────────────────
+    # ── Process each file (generation via the shared GenerationService) ──────
+    # The service handles reading, testability skip, chunking (per-chunk cache),
+    # screenshots, dependency resolution, git risk and the model call. This command
+    # keeps its OWN validation / quality report / auto-accept / push flow below, so
+    # it asks for RAW cases (validate=False) and validates them itself.
+    from services.generation_service import GenerationOptions, GenerationService
+    gen_service = GenerationService(ctx)
     run_start = time.time()
     all_raw_cases = []
     for file_path in file_paths:
-        raw = _process_single_file(
-            file_path=file_path,
-            claude=claude,
-            module_hint=args.module,
-            chunk_size=args.chunk_size,
-            include_deps=args.include_deps,
-            git_analyzer=git_analyzer,
-            bug_fetcher=bug_fetcher,
-            screenshot=args.screenshot,
-            use_cache=not args.no_cache,
+        gen = gen_service.generate(file_path, options=GenerationOptions(
+            module=args.module,
             user_story=args.story,
-            test_type_override=args.test_type if args.test_type != "auto" else None,
-            project=project,
-        )
-        all_raw_cases.extend(raw)
+            test_type=(args.test_type if args.test_type != "auto" else None),
+            include_git=args.include_git,
+            include_deps=args.include_deps,
+            include_bugs=args.include_bugs,
+            screenshot=args.screenshot,
+            chunk_size=args.chunk_size,
+            use_cache=not args.no_cache,
+            validate=False),
+            progress=PrintProgressReporter())
+        all_raw_cases.extend(gen.test_cases)
 
     if not all_raw_cases:
         logger.warning("No test cases generated. Check that your source files contain testable logic.")
@@ -2035,235 +2035,6 @@ def _collect_files_from_args(
         sys.exit(0)
     return files
 
-
-def _process_single_file(
-    file_path: str,
-    claude: ClaudeClient,
-    module_hint: str | None,
-    chunk_size: int,
-    include_deps: bool = False,
-    git_analyzer: GitAnalyzer | None = None,
-    bug_fetcher: BugFetcher | None = None,
-    screenshot: bool = False,
-    use_cache: bool = True,
-    user_story: str | None = None,
-    test_type_override: str | None = None,
-    project: str = "",
-) -> list[dict]:
-    """
-    Run the full Claude analysis pipeline for one source file.
-
-    Handles: testability check → SmartChecker pre-checks (B5) →
-    optional enhancements (screenshot, deps, git history, bug patterns)
-    → chunk → analyze → return raw test cases.
-
-    Args:
-        file_path (str): Path to the source file.
-        claude (ClaudeClient): Initialized Claude client.
-        module_hint (str | None): Module name override.
-        chunk_size (int): Max lines per chunk.
-        include_deps (bool): Resolve and include local import files.
-        git_analyzer (GitAnalyzer | None): If set, run git history analysis.
-        bug_fetcher (BugFetcher | None): If set, fetch Jira bug patterns.
-        screenshot (bool): If True, attempt screenshot capture.
-        use_cache (bool): If True, check file-level cache before calling API.
-        user_story (str | None): User story text injected into the prompt.
-        test_type_override (str | None): Force a specific test type instead of
-                                          auto-detecting (from --test-type flag).
-        project (str): Project name for SmartChecker context.
-
-    Returns:
-        list[dict]: Raw test case dicts from Claude. Empty list on skip/error.
-    """
-    logger.info("Processing: %s", file_path)
-
-    # ── Read the file ──────────────────────────────────────────────────────
-    try:
-        file_data = read_file(file_path)
-    except (FileNotFoundError, ValueError) as e:
-        logger.error("Cannot read %s: %s", file_path, e)
-        return []
-
-    effective_module = module_hint or file_data.get("module_hint")
-    # read_file() reports the length as "size_lines" (there is no "line_count" key —
-    # reading that silently gave 0, so size-based model selection and the chunk
-    # guard never saw a large file).
-    n_lines = (file_data.get("size_lines") or file_data.get("line_count")
-               or len(file_data["content"].splitlines()))
-
-    # ── Skip non-testable files ────────────────────────────────────────────
-    if not is_testable(file_data["content"]):
-        logger.info("Skipping %s — no testable logic", file_data["file_name"])
-        return []
-
-    # ── Optional: screenshot ───────────────────────────────────────────────
-    screenshot_b64 = None
-    if screenshot:
-        if os.getenv("ENABLE_SCREENSHOT", "false").lower() == "true":
-            try:
-                import asyncio
-                from core.screenshot_capture import ScreenshotCapture
-                capture = ScreenshotCapture()
-                screenshot_b64 = asyncio.run(capture.capture_module(effective_module or "General"))
-            except Exception as e:
-                logger.warning("Screenshot capture failed: %s", e)
-        else:
-            logger.info("--screenshot set but ENABLE_SCREENSHOT=false — skipping")
-
-    # ── Optional: dependency files ─────────────────────────────────────────
-    dependencies = None
-    if include_deps:
-        dependencies = extract_dependencies(
-            file_content=file_data["content"],
-            file_path=file_path,
-        )
-        if dependencies:
-            logger.info(
-                "  → %d dependency file(s): %s",
-                len(dependencies),
-                ", ".join(d["file_name"] for d in dependencies)
-            )
-
-    # ── Optional: git history ──────────────────────────────────────────────
-    git_history = None
-    if git_analyzer:
-        git_history = git_analyzer.get_file_history(file_path)
-        risk = git_history.get("risk_level", "low")
-        if risk in ("high", "medium"):
-            logger.info(
-                "  → Git risk: %s (%d bug-fix commits)",
-                risk.upper(), git_history.get("bug_fix_count", 0)
-            )
-
-    # ── B5: SmartChecker pre-checks ───────────────────────────────────────
-    smart_checks: dict = {}
-    try:
-        from core.smart_checker import SmartChecker
-        checker = SmartChecker(project=project)
-        smart_checks = checker.run_pre_checks(
-            file_path=file_path,
-            file_content=file_data["content"],
-            module=effective_module,
-            git_history=git_history,
-            user_story=user_story,
-        )
-        print(f"  ┌─ Pre-check: {smart_checks['pre_check_summary']}")
-        # Honour test_type_override from --test-type flag
-        if test_type_override:
-            smart_checks["test_type"] = test_type_override
-            logger.info("  → Test type overridden: %s", test_type_override)
-        else:
-            logger.info("  → Detected test type: %s", smart_checks.get("test_type", "feature"))
-
-        # Log risk and model
-        risk_info = smart_checks.get("risk", {})
-        model_name = smart_checks.get("recommended_model", "")
-        logger.info(
-            "  → Risk: %s (%s) → using %s",
-            risk_info.get("risk_level", "?").upper(),
-            risk_info.get("test_priority", "?"),
-            model_name,
-        )
-
-        # Early return on cache hit — but NOT for a file that will be chunked: a
-        # whole-file cache entry for a large file can only be a single chunk's
-        # result (written before per-chunk cache keys existed), so it is stale.
-        will_chunk = n_lines > chunk_size
-        if smart_checks.get("cache_hit") and use_cache and not will_chunk:
-            cached = smart_checks.get("cached_result", [])
-            logger.info(
-                "  → Cache hit — skipping API call (%d cached test case(s))",
-                len(cached),
-            )
-            return cached
-
-    except Exception as _sce:
-        logger.debug("SmartChecker failed (non-fatal): %s", _sce)
-
-    # ── Optional: bug patterns ─────────────────────────────────────────────
-    bug_patterns_text = None
-    if bug_fetcher and effective_module:
-        bug_patterns_text = bug_fetcher.get_patterns_for_module(effective_module)
-        if bug_patterns_text:
-            logger.info("  → Bug patterns fetched for module '%s'", effective_module)
-
-    # ── Chunk + analyze ────────────────────────────────────────────────────
-    chunks = chunk_large_file(
-        file_data["content"],
-        max_lines=chunk_size,
-        file_name=file_data["file_name"],
-    )
-    total_chunks = len(chunks)
-    if total_chunks > 1:
-        logger.info(
-            "  → Split into %d chunks (size=%d, overlap=30 lines)", total_chunks, chunk_size
-        )
-
-    all_raw = []
-    for chunk_dict in chunks:
-        if total_chunks > 1:
-            logger.info(
-                "  → Chunk %d/%d (lines %d–%d)",
-                chunk_dict["chunk_index"], total_chunks,
-                chunk_dict["start_line"], chunk_dict["end_line"],
-            )
-        # Use model from SmartChecker (B5/B2), fallback to legacy logic
-        line_count = n_lines
-        risk_level = "low"
-        if git_history:
-            risk_level = git_history.get("risk_level", "low")
-
-        # SmartChecker may have promoted risk to "critical" (B2)
-        smart_risk = smart_checks.get("risk", {})
-        if smart_risk.get("risk_level"):
-            risk_level = smart_risk["risk_level"]
-
-        model_override = smart_checks.get("recommended_model") or None
-
-        try:
-            cases = claude.analyze_code(
-                code=chunk_dict["content"],
-                file_path=file_path,
-                module_hint=effective_module,
-                screenshot_base64=screenshot_b64,
-                dependencies=dependencies,
-                bug_patterns=bug_patterns_text,
-                line_count=line_count,
-                risk_level=risk_level,
-                use_cache=use_cache,
-                user_story=user_story,
-                skill_context=smart_checks.get("skill_context"),
-                risk_assessment=smart_checks.get("risk"),
-                test_type=smart_checks.get("test_type"),
-                model_override=model_override,
-                cache_scope=(f"chunk-{chunk_dict['chunk_index']}-of-{total_chunks}-size-{chunk_size}"
-                             if total_chunks > 1 else None),
-            )
-            all_raw.extend(cases)
-        except Exception as e:
-            err_str = str(e)
-            if "credit balance is too low" in err_str:
-                logger.error(
-                    "Insufficient API credits. "
-                    "Add credits at: https://console.anthropic.com/settings/billing"
-                )
-                sys.exit(1)
-            logger.error("Error analyzing chunk %d: %s", chunk_dict["chunk_index"], e)
-
-    # ── Deduplicate by title across chunks ─────────────────────────────────
-    if total_chunks > 1 and all_raw:
-        before = len(all_raw)
-        all_raw = ClaudeClient.deduplicate_by_title(all_raw)
-        if len(all_raw) < before:
-            logger.info(
-                "  → Removed %d duplicate(s) after chunk merge", before - len(all_raw)
-            )
-
-    logger.info(
-        "Generated %d raw test case(s) from %s",
-        len(all_raw), file_data["file_name"]
-    )
-    return all_raw
 
 
 def _save_results_as_markdown(

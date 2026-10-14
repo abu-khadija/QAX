@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -56,6 +57,11 @@ class GenerationOptions:
         include_git (bool): Analyse git history for risk (needs a real file).
         include_deps (bool): Resolve local dependency files for richer context.
         include_bugs (bool): Inject recurring Jira bug patterns (needs module).
+        screenshot (bool): Capture a UI screenshot for the module and send it with
+            the code (real file only; honours the ENABLE_SCREENSHOT env gate).
+        validate (bool): When True (default) the result carries schema-validated cases.
+            Set False to return the RAW generated cases unvalidated in .test_cases —
+            used by a caller (the CLI `analyze`) that runs its own validation/reporting.
         use_cache (bool): Use the file-level result cache when possible.
         auto_accept (bool): Flag high-confidence cases as auto_accepted.
         content (str | None): Pre-loaded source content. When provided, the
@@ -79,6 +85,8 @@ class GenerationOptions:
     include_git: bool = False
     include_deps: bool = False
     include_bugs: bool = False
+    screenshot: bool = False
+    validate: bool = True
     use_cache: bool = True
     auto_accept: bool = False
     content: str | None = None
@@ -447,6 +455,19 @@ class GenerationService:
             except Exception as exc:
                 logger.debug("dependency resolution failed for %s: %s", source, exc)
 
+        # Optional UI screenshot (real file only; honours the ENABLE_SCREENSHOT gate).
+        screenshot_b64 = None
+        if opts.screenshot and is_real_file:
+            if os.getenv("ENABLE_SCREENSHOT", "false").lower() == "true":
+                try:
+                    import asyncio
+                    from core.screenshot_capture import ScreenshotCapture
+                    screenshot_b64 = asyncio.run(ScreenshotCapture().capture_module(module or "General"))
+                except Exception as exc:
+                    logger.warning("screenshot capture failed for %s: %s", source, exc)
+            else:
+                logger.info("screenshot requested but ENABLE_SCREENSHOT=false — skipping")
+
         chunks = [content]
         if will_chunk:
             from core.code_reader import chunk_large_file
@@ -462,6 +483,7 @@ class GenerationService:
                 code=chunk,
                 file_path=source,
                 module_hint=module,
+                screenshot_base64=screenshot_b64,
                 dependencies=dependencies,
                 bug_patterns=bug_patterns,
                 user_story=opts.user_story,
@@ -482,6 +504,10 @@ class GenerationService:
         used_model = pre.get("recommended_model", "") or (
             self.context.model_heavy if line_count > 150 else self.context.model_light
         )
+
+        if not opts.validate:
+            return GenerationResult(test_cases=raw, source=source, module=module,
+                                    from_cache=False, model=used_model)
 
         # ── Clean + validate ──────────────────────────────────────────────────
         fixed = [fix_common_issues(tc) for tc in raw]

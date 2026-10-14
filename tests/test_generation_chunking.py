@@ -81,3 +81,36 @@ def test_include_deps_is_actually_resolved(tmp_path, monkeypatch):
                         lambda **k: [{"file_name": "helper.py", "content": "def h(): pass"}])
     _svc().generate(_big(tmp_path, 5), options=GenerationOptions(use_cache=False, include_deps=True))
     assert calls[0]["dependencies"] and calls[0]["dependencies"][0]["file_name"] == "helper.py"
+
+
+def test_screenshot_passed_when_enabled(tmp_path, monkeypatch):
+    calls = _setup(monkeypatch)
+    monkeypatch.setenv("ENABLE_SCREENSHOT", "true")
+    import core.screenshot_capture as scap
+
+    class _Cap:
+        async def capture_module(self, mod): return "BASE64IMG"
+    monkeypatch.setattr(scap, "ScreenshotCapture", _Cap)
+    _svc().generate(_big(tmp_path, 5),
+                    options=GenerationOptions(use_cache=False, screenshot=True))
+    assert calls[0]["screenshot_base64"] == "BASE64IMG"
+
+
+def test_screenshot_skipped_when_env_off(tmp_path, monkeypatch):
+    calls = _setup(monkeypatch)
+    monkeypatch.setenv("ENABLE_SCREENSHOT", "false")
+    _svc().generate(_big(tmp_path, 5),
+                    options=GenerationOptions(use_cache=False, screenshot=True))
+    assert calls[0]["screenshot_base64"] is None
+
+
+def test_screenshot_not_attempted_for_virtual_source(tmp_path, monkeypatch):
+    calls = _setup(monkeypatch)
+    monkeypatch.setenv("ENABLE_SCREENSHOT", "true")
+    import core.screenshot_capture as scap
+
+    def _boom(*a, **k): raise AssertionError("must not capture for a virtual source")
+    monkeypatch.setattr(scap, "ScreenshotCapture", _boom)
+    _svc().generate("endpoints://x", options=GenerationOptions(
+        content="Endpoint: GET /x", test_type="api", use_cache=False, screenshot=True))
+    assert calls[0]["screenshot_base64"] is None
