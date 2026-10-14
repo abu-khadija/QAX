@@ -132,6 +132,18 @@ def reset_link():
             {"Content-Type": "text/html"})
 
 
+@app.post("/import")
+def import_xml():
+    # VULNERABLE: "parses" XML with external entities resolved — a file:// entity reads
+    # a local file (XXE). Simulated: if the body references /etc/passwd via SYSTEM, inline
+    # the passwd signature. SECURE mode does not resolve entities.
+    raw = request.get_data(as_text=True) or ""
+    if (not SECURE) and 'SYSTEM "file:///etc/passwd"' in raw:
+        return ("<result>root:x:0:0:root:/root:/bin/bash</result>", 200,
+                {"Content-Type": "application/xml"})
+    return ("<result>ok</result>", 200, {"Content-Type": "application/xml"})
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -154,6 +166,7 @@ def spec():
                                 "schema": {"type": "string"}}],
                 "responses": {"200": {"description": "ok"}}}},
             "/reset-link": {"get": {"responses": {"200": {"description": "ok"}}}},
+            "/import": {"post": {"responses": {"200": {"description": "ok"}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

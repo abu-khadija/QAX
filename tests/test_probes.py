@@ -1318,3 +1318,33 @@ def test_host_header_injection_detected_in_url_context():
 def test_host_header_injection_quiet_with_fixed_host():
     from execution.probes import host_header_injection_probe
     assert host_header_injection_probe(_hhi_model(), "http://x", session=_HostSession("secure")) == []
+
+
+# ── XXE: external-entity file read, proven by the /etc/passwd signature ─────────
+
+def _xxe_model():
+    return AppModel(root="/x", endpoints=[{"method": "POST", "path": "/import"}])
+
+
+class _XxeSession:
+    def __init__(self, mode):  # 'vuln' resolves the entity | 'secure' does not
+        self.mode = mode
+
+    def request(self, method, url, data=None, headers=None, timeout=None):
+        if self.mode == "vuln" and 'SYSTEM "file:///etc/passwd"' in (data or ""):
+            return MagicMock(status_code=200, text="<result>root:x:0:0:root:/root:/bin/bash</result>")
+        return MagicMock(status_code=200, text="<result>ok</result>")
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_xxe_detected_by_passwd_signature():
+    from execution.probes import xxe_probe
+    out = xxe_probe(_xxe_model(), "http://x", session=_XxeSession("vuln"))
+    assert len(out) == 1 and out[0].probe == "xxe" and out[0].severity == "P1"
+
+
+def test_xxe_quiet_when_entities_not_resolved():
+    from execution.probes import xxe_probe
+    assert xxe_probe(_xxe_model(), "http://x", session=_XxeSession("secure")) == []

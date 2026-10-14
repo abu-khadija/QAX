@@ -198,6 +198,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("host_header_injection probe failed: %s", exc)
 
+        # XXE — external-entity file read on an XML endpoint (proven by /etc/passwd).
+        try:
+            from execution.probes import xxe_probe
+            findings.extend(xxe_probe(model, base_url, session=shared, auth=read_auth))
+        except Exception as exc:
+            logger.error("xxe probe failed: %s", exc)
+
         # Stored XSS — markup written then rendered unencoded on read-back (P1).
         try:
             from execution.probes import stored_xss_probe

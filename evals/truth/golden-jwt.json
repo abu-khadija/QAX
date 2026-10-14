@@ -9,6 +9,7 @@
     {"id": "bfla",                    "match": ["function-level authorization"]},
     {"id": "ssti",                    "match": ["server-side template injection"]},
     {"id": "reflected-xss",           "match": ["reflected xss"]},
-    {"id": "host-header-injection",   "match": ["host header reflected"]}
+    {"id": "host-header-injection",   "match": ["host header reflected"]},
+    {"id": "xxe",                     "match": ["xml external entity"]}
   ]
 }

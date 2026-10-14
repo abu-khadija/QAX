@@ -28,6 +28,13 @@ _MAP = {
         "fix": "Never trust the Host/X-Forwarded-Host header for URL generation. Use a "
                "configured canonical base URL, and validate Host against an allowlist.",
     },
+    "xxe": {
+        "why": "The XML parser resolves external entities, so an attacker's document can "
+               "read local files and reach internal services (SSRF).",
+        "fix": "Disable DTDs and external entities in the parser (e.g. defusedxml, or set "
+               "FEATURE_SECURE_PROCESSING / disallow-doctype-decl). Never parse untrusted XML "
+               "with entity resolution enabled.",
+    },
     "ssti": {
         "why": "User input is concatenated into a server-side template and evaluated, so "
                "an attacker can run template/engine code — typically a path to RCE.",
