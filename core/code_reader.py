@@ -46,6 +46,45 @@ ANALYZABLE_EXTENSIONS = {
     ".vue", ".svelte"
 }
 
+# ── Directories that never hold the project's own source (vendored/build/tooling) ─
+SKIP_DIRS = {".git", "node_modules", "venv", ".venv", ".venv-exec", "__pycache__",
+             "dist", "build", ".next", ".pytest_cache", "site-packages", "migrations",
+             "vendor", "target", "bin", "obj", ".gradle", ".idea",
+             # generated/collected front-end assets (e.g. Django `collectstatic`)
+             "staticfiles", "bower_components", "jspm_packages", "coverage", "htmlcov",
+             ".nuxt", ".svelte-kit"}
+
+# Generated files that are never the project's own source, whatever their extension.
+_GENERATED_SUFFIXES = (".min.js", ".min.css", ".bundle.js", ".chunk.js", ".map")
+
+
+def is_generated_file(name: str) -> bool:
+    """True for minified/bundled/source-map files (not worth analyzing or counting)."""
+    return str(name).lower().endswith(_GENERATED_SUFFIXES)
+
+
+def detect_dominant_extension(folder: str) -> str | None:
+    """
+    The analyzable source extension with the most files under `folder` — QAX's
+    language auto-detection for folder mode when no --ext is given. Vendored/build
+    dirs (SKIP_DIRS) and hidden dirs are not counted, so node_modules can't make a
+    Python repo look like JavaScript. Ties break alphabetically (deterministic).
+    Returns None when the folder holds no analyzable source.
+    """
+    import os
+    from collections import Counter
+    counts: Counter = Counter()
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in ANALYZABLE_EXTENSIONS and not is_generated_file(f):
+                counts[ext] += 1
+    if not counts:
+        return None
+    return max(sorted(counts), key=lambda e: counts[e])
+
+
 # ── Patterns that indicate a file is NOT testable (config/types only) ─────────
 NON_TESTABLE_PATTERNS = [
     r"^\s*[A-Z_]+ = .+$",          # All-caps constants only

@@ -37,9 +37,7 @@ from services.results import AppModel
 logger = logging.getLogger(__name__)
 
 # Directories that never contain first-party source worth modelling.
-_SKIP_DIRS = {".git", "node_modules", "venv", ".venv", ".venv-exec", "__pycache__",
-              "dist", "build", ".next", ".pytest_cache", "site-packages", "migrations",
-              "vendor", "target", "bin", "obj", ".gradle", ".idea"}
+from core.code_reader import SKIP_DIRS as _SKIP_DIRS  # single shared list
 # Extensions we read (backend logic + frontend contract/UI). QAX is language-generic:
 # the model is built by an LLM that understands any of these, so the only limit is
 # which files we hand it. Backend languages beyond Python/JS let QAX model Go, Java,

@@ -8,7 +8,7 @@ path instead of a single file. Supports recursive and non-recursive modes.
 
 Usage:
     adapter = FolderInputAdapter()
-    items   = adapter.fetch("src/Auth/Controllers", ext=".cs")
+    items   = adapter.fetch("src/Auth/Controllers")   # language auto-detected
     # items is a list of dicts, one per .cs file found
 """
 
@@ -43,7 +43,7 @@ class FolderInputAdapter(BaseInputAdapter):
     def fetch(
         self,
         source: str,
-        ext: str = ".cs",
+        ext: str | None = None,
         recursive: bool = True,
         **kwargs,
     ) -> list[dict]:
@@ -52,8 +52,10 @@ class FolderInputAdapter(BaseInputAdapter):
 
         Args:
             source (str): Absolute or relative path to the directory.
-            ext (str): File extension to filter by (default: ".cs").
-                       Pass None to collect all files.
+            ext (str | None): Extension to filter by (e.g. ".py"). None (default)
+                       auto-detects the folder's dominant source language — QAX is
+                       generic, so there is no hard-coded language default. Pass "*"
+                       to collect every file. Vendored/build dirs are always skipped.
             recursive (bool): If True (default), walk all subdirectories.
                               If False, look only in the top-level folder.
             **kwargs: Unused additional options.
@@ -71,8 +73,17 @@ class FolderInputAdapter(BaseInputAdapter):
             print(f"  [QAX] Folder not found: {source}")
             return []
 
-        # Normalise extension
-        if ext and not ext.startswith("."):
+        # Resolve extension: "*" → all files; None → auto-detect; else normalise.
+        if ext == "*":
+            ext = None
+        elif not ext:
+            from core.code_reader import detect_dominant_extension
+            ext = detect_dominant_extension(source)
+            if not ext:
+                logger.warning("QAX FolderInputAdapter: no analyzable source in %s", source)
+                return []
+            logger.info("QAX FolderInputAdapter: auto-detected %s in %s", ext, source)
+        elif not ext.startswith("."):
             ext = f".{ext}"
 
         results: list[dict] = []
@@ -84,9 +95,13 @@ class FolderInputAdapter(BaseInputAdapter):
             entries = os.listdir(source)
             walker = [(source, [], entries)]
 
-        for root, _, files in walker:
+        from core.code_reader import SKIP_DIRS, is_generated_file
+        for root, dirs, files in walker:
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
             for fname in sorted(files):
                 if ext and not fname.endswith(ext):
+                    continue
+                if is_generated_file(fname):
                     continue
                 fpath = os.path.join(root, fname)
                 try:

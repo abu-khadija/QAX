@@ -267,9 +267,11 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       NEXT (deliberate, not mechanical): route `_process_single_file` (~220 lines, a
       second generation path duplicating GenerationService) through the service —
       a behavior change that needs its own tests first. Then ui/app.py views.
-      FOLLOW-UP found during S8: folder mode defaults to `.cs` when --ext is omitted
-      (leftover from the original C# project; violates "QAX is GENERIC"). Replace with
-      language auto-detection or require --ext.
+      ✅ FIXED: the `.cs` folder-mode default (and a hard-coded "example3" → .ts map) is
+      gone. Both folder paths (CLI + pipeline FolderInputAdapter) now auto-detect the
+      folder's dominant source language (`core.code_reader.detect_dominant_extension`),
+      skip vendored/build/collected-asset dirs + minified files, and `"*"` means all
+      files. Verified on 4 real trees (QAX→.py, DRF→.py, Go/Gin→.go, FastAPI→.py).
 
 ---
 

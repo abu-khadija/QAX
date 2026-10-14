@@ -2,30 +2,30 @@
 
 Pure (no sys.exit): raises FileNotFoundError for a missing file/folder and returns
 [] when nothing matches; main.py maps those to its original exit codes.
+
+Folder mode with no --ext auto-detects the folder's dominant source language
+(core.code_reader.detect_dominant_extension) — QAX is generic, so there is no
+per-project or per-language hard-coded default. Vendored/build dirs are skipped.
 """
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
+
+from core.code_reader import SKIP_DIRS, detect_dominant_extension, is_generated_file
 
 logger = logging.getLogger(__name__)
 
-# Folder-mode extension fallback when --ext is not given. NOTE: the ".cs" default is a
-# leftover from the original C#-only project and is not generic — kept unchanged here
-# so this refactor doesn't alter behavior; see the roadmap for the follow-up.
-_PROJECT_EXT = {"example3": ".ts"}
-_DEFAULT_EXT = ".cs"
+
+def resolve_ext(ext: str | None, folder: str | None = None) -> str | None:
+    """Explicit --ext (normalised), else the folder's detected language, else None."""
+    if ext:
+        return ext if ext.startswith(".") else f".{ext}"
+    return detect_dominant_extension(folder) if folder else None
 
 
-def resolve_ext(ext: str | None, project: str = "") -> str:
-    """The extension to collect: explicit --ext, else the project map, else the default."""
-    if ext is None:
-        ext = _PROJECT_EXT.get((project or "").lower(), _DEFAULT_EXT)
-    return ext if ext.startswith(".") else f".{ext}"
-
-
-def collect_source_files(file: str | None, folder: str | None, ext: str | None = None,
-                         project: str = "") -> list[str]:
+def collect_source_files(file: str | None, folder: str | None, ext: str | None = None) -> list[str]:
     """Paths to analyze from --file or --folder. Raises FileNotFoundError if missing."""
     if file:
         path = Path(file)
@@ -33,11 +33,19 @@ def collect_source_files(file: str | None, folder: str | None, ext: str | None =
             raise FileNotFoundError(f"File not found: {file}")
         return [str(path)]
     if folder:
-        dir_path = Path(folder)
-        if not dir_path.is_dir():
+        if not Path(folder).is_dir():
             raise FileNotFoundError(f"Folder not found: {folder}")
-        ext = resolve_ext(ext, project)
-        files = sorted(dir_path.rglob(f"*{ext}"))
-        logger.info("Found %d %s file(s) in %s", len(files), ext, folder)
-        return [str(f) for f in files]
+        resolved = resolve_ext(ext, folder)
+        if not resolved:
+            logger.warning("No analyzable source files detected in %s", folder)
+            return []
+        if not ext:
+            logger.info("Auto-detected source language in %s: %s (override with --ext)", folder, resolved)
+        out: list[str] = []
+        for root, dirs, files in os.walk(folder):
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+            out.extend(os.path.join(root, f) for f in sorted(files)
+                       if f.endswith(resolved) and not is_generated_file(f))
+        logger.info("Found %d %s file(s) in %s", len(out), resolved, folder)
+        return sorted(out)
     return []

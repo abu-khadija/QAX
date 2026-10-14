@@ -173,7 +173,7 @@ Examples:
         type=str,
         default=None,
         help="File extension filter when using --folder. "
-             "Auto-detected from project type if not set."
+             "Auto-detected (the folder's most common source language) if not set."
     )
     parser.add_argument(
         "--output", "-o",
@@ -502,7 +502,7 @@ Examples:
     parser.add_argument("--version", type=str, default=None,
                         help="Release version for release mode. E.g., 12.28.5")
     parser.add_argument("--ext", type=str, default=None,
-                        help="File extension filter for folder analysis. Default: .py")
+                        help="File extension filter for folder analysis. Default: auto-detected (the folder's most common source language).")
     parser.add_argument("--chunk-size", type=int, default=None,
                         help="Max lines per chunk. Default: 300")
     parser.add_argument("--output", "-o", type=str, default=None,
@@ -1827,7 +1827,7 @@ def run_pipeline_command() -> None:
     parser.add_argument(
         "--ext",
         default=None,
-        help="File extension filter for folder input (e.g. .cs, .py). Default: auto.",
+        help="File extension filter for folder input (e.g. .py, .ts). Default: auto-detected (the folder's most common source language).",
     )
     parser.add_argument(
         "--test-type",
@@ -2026,7 +2026,7 @@ def _collect_files_from_args(
     """Files to analyze from --file/--folder (logic in cli/files, S8); exits on bad input."""
     from cli.files import collect_source_files
     try:
-        files = collect_source_files(file, folder, ext, project=os.getenv("DEFAULT_PROJECT", ""))
+        files = collect_source_files(file, folder, ext)
     except FileNotFoundError as exc:
         logger.error("%s", exc)
         sys.exit(1)
