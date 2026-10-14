@@ -1378,3 +1378,50 @@ def test_graphql_introspection_detected_when_schema_returned():
 def test_graphql_introspection_quiet_when_disabled():
     from execution.probes import graphql_introspection_probe
     assert graphql_introspection_probe(_gql_model(), "http://x", session=_GqlSession("secure")) == []
+
+
+# ── unrestricted file upload (upload HTML → retrieve → served as HTML) ──────────
+
+def _upload_model():
+    return AppModel(root="/x", endpoints=[{"method": "POST", "path": "/upload"}])
+
+
+class _UploadSession:
+    def __init__(self, mode):  # 'vuln' stores+serves html | 'secure' rejects non-images
+        self.mode = mode
+        self.store = {}
+
+    def request(self, method, url, files=None, headers=None, timeout=None):
+        field, (fname, content, ct) = next(iter((files or {}).items()))
+        if self.mode == "secure" and not fname.lower().endswith((".png", ".jpg")):
+            return MagicMock(status_code=400, text='{"error":"only images"}')
+        self.store[fname] = content
+        return MagicMock(status_code=201, text='{"url":"/uploads/' + fname + '"}')
+
+    def get(self, url, headers=None, timeout=None):
+        name = url.rsplit("/", 1)[-1]
+        data = self.store.get(name)
+        if data is None:
+            return MagicMock(status_code=404, text="nf", headers={})
+        ct = "application/octet-stream" if self.mode == "secure" else "text/html"
+        return MagicMock(status_code=200, text=data, headers={"Content-Type": ct})
+
+    def post(self, *a, **k):
+        return MagicMock(status_code=201, text="{}")
+
+
+def test_file_upload_detected_when_html_served_back():
+    from execution.probes import file_upload_probe
+    out = file_upload_probe(_upload_model(), "http://x", session=_UploadSession("vuln"))
+    assert len(out) == 1 and out[0].probe == "file-upload" and out[0].severity == "P1"
+    assert out[0].target == "/upload"
+
+
+def test_file_upload_quiet_when_extension_rejected():
+    from execution.probes import file_upload_probe
+    assert file_upload_probe(_upload_model(), "http://x", session=_UploadSession("secure")) == []
+
+
+def test_file_upload_is_labelled_mutating():
+    from execution.probes import MUTATING_PROBES
+    assert "file-upload" in MUTATING_PROBES

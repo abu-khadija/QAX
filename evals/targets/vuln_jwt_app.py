@@ -155,6 +155,37 @@ def graphql():
     return jsonify({"data": {}}), 200
 
 
+_UPLOADS: dict = {}
+
+
+@app.post("/upload")
+def upload():
+    f = request.files.get("file")
+    if f is None and request.files:
+        f = next(iter(request.files.values()))
+    if f is None:
+        return jsonify({"error": "no file"}), 400
+    name = f.filename or "file"
+    # VULNERABLE: accepts any extension and later serves it by its guessed type.
+    # SECURE: only image uploads are allowed.
+    if SECURE and not name.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+        return jsonify({"error": "only image uploads allowed"}), 400
+    _UPLOADS[name] = f.read()
+    return jsonify({"url": "/uploads/" + name}), 201
+
+
+@app.get("/uploads/<name>")
+def serve_upload(name):
+    import mimetypes
+    data = _UPLOADS.get(name)
+    if data is None:
+        return jsonify({"error": "not found"}), 404
+    # VULNERABLE: serves with the type guessed from the extension (so .html → text/html,
+    # executable in-origin). SECURE: never serves user uploads as an executable type.
+    ct = "application/octet-stream" if SECURE else (mimetypes.guess_type(name)[0] or "application/octet-stream")
+    return (data, 200, {"Content-Type": ct})
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -179,6 +210,7 @@ def spec():
             "/reset-link": {"get": {"responses": {"200": {"description": "ok"}}}},
             "/import": {"post": {"responses": {"200": {"description": "ok"}}}},
             "/graphql": {"post": {"responses": {"200": {"description": "ok"}}}},
+            "/upload": {"post": {"responses": {"201": {"description": "ok"}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

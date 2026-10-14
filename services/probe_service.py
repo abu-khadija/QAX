@@ -212,6 +212,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("graphql_introspection probe failed: %s", exc)
 
+        # Unrestricted file upload — upload HTML, retrieve it, prove it serves as HTML.
+        try:
+            from execution.probes import file_upload_probe
+            findings.extend(file_upload_probe(model, base_url, session=shared, auth=auth))
+        except Exception as exc:
+            logger.error("file_upload probe failed: %s", exc)
+
         # Stored XSS — markup written then rendered unencoded on read-back (P1).
         try:
             from execution.probes import stored_xss_probe

@@ -240,7 +240,7 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
 # not listed.)
 MUTATING_PROBES = frozenset({
     "bola", "mass-assignment", "stored-xss", "persistence",
-    "injection", "nosql", "malformed-input",
+    "injection", "nosql", "malformed-input", "file-upload",
 })
 
 
@@ -419,6 +419,96 @@ def xxe_probe(model, base_url: str, *, session: requests.Session | None = None,
                           f"{method} {path} returned the /etc/passwd signature 'root:x:0:0' — the "
                           f"parser resolved external entities, so an attacker can read local files "
                           f"(and often reach SSRF)."),
+                target=path))
+            break
+    return out
+
+
+# Signals that an endpoint accepts a file upload.
+_UPLOAD_KW = ("upload", "file", "avatar", "image", "attachment", "media", "photo",
+              "document", "picture", "import")
+
+
+def _extract_upload_url(text: str, fname: str, base: str) -> str | None:
+    """Find the stored URL/path for our uploaded file in the upload response."""
+    import re as _re
+    m = _re.search(r'(https?://[^\s"\'<>]*' + _re.escape(fname) + r'|/[^\s"\'<>]*' + _re.escape(fname) + r')',
+                   text or "")
+    if not m:
+        return None
+    cand = m.group(1)
+    if cand.startswith("http"):
+        return cand if cand.startswith(base) else None   # egress: same-origin retrieval only
+    return base + cand if cand.startswith("/") else f"{base}/{cand}"
+
+
+def file_upload_probe(model, base_url: str, *, session: requests.Session | None = None,
+                      auth: dict | None = None, limit: int = 6) -> list[ProbeFinding]:
+    """
+    Unrestricted file upload → stored XSS / code execution. Upload an HTML file with a
+    unique marker, then RETRIEVE it and confirm the server serves it back as
+    `text/html` with the marker intact.
+
+    Zero-false-positive: a hit needs the whole round trip — the upload is accepted, the
+    response yields a (same-origin) URL to our file, and fetching it returns our marker
+    with an HTML content-type. A server that rejects the extension, renames away our
+    name, or serves it non-executable (octet-stream/text-plain) gives no proof, so the
+    probe stays quiet. P1. No model calls. (A mutating probe — it writes a file.)
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    def _is_upload(e):
+        if not isinstance(e, dict) or str(e.get("method", "")).upper() not in ("POST", "PUT"):
+            return False
+        hay = (str(e.get("path", "")) + " " + " ".join(
+            str(x) for x in (e.get("request_fields") or []))).lower()
+        return any(k in hay for k in _UPLOAD_KW)
+
+    cands = [e for e in getattr(model, "endpoints", []) if _is_upload(e)]
+    token = None
+    if any(e.get("auth_required") for e in cands):
+        token = _resolve_token(sess, base, recipe, model, f"upl_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    seen: set = set()
+    for e in cands[:limit]:
+        method = str(e.get("method", "POST")).upper()
+        path = str(e.get("path", ""))
+        if path in seen:
+            continue
+        seen.add(path)
+        from core.auth_recipe import field_names
+        names = field_names(e.get("request_fields"))
+        field = next((n for n in names if any(k in n.lower() for k in _UPLOAD_KW)), "file")
+        marker = f"qax{uuid.uuid4().hex[:10]}"
+        fname = f"{marker}.html"
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
+        files = {field: (fname, f"<html><body>{marker}</body></html>", "text/html")}
+        try:
+            r = sess.request(method, f"{base}{path}", files=files, headers=headers, timeout=15)
+        except Exception:
+            continue
+        if not (200 <= r.status_code < 300):
+            continue
+        url = _extract_upload_url(r.text or "", fname, base)
+        if not url:
+            continue
+        try:
+            g = sess.get(url, headers=headers, timeout=15)
+        except Exception:
+            continue
+        ct = str(g.headers.get("Content-Type", "")).lower()
+        if "html" in ct and marker in (g.text or ""):
+            out.append(ProbeFinding(
+                probe="file-upload",
+                title=f"Unrestricted file upload served as HTML on {method} {path}",
+                exploited=True, severity="P1",
+                evidence=(f"An uploaded .html file was stored and served back from {url} as "
+                          f"{g.headers.get('Content-Type')} with our marker intact — attacker HTML/JS "
+                          f"executes in the app's origin (stored XSS; often a path to RCE)."),
                 target=path))
             break
     return out

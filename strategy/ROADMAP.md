@@ -50,8 +50,8 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 
 **REMAINING (in execution order):**
 12. ▶ **B3 — more probe classes** (coverage breadth; biggest product gap vs DAST).
-    Done this track: BFLA ✅, SSTI ✅, host-header ✅, XXE ✅, GraphQL ✅ (32 probes, gate 9/9).
-    Next: **file-upload** (design the 0-FP artifact-retrieval check first). Continues opportunistically
+    Done this track: BFLA ✅, SSTI ✅, host-header ✅, XXE ✅, GraphQL ✅, file-upload ✅ (33 probes, gate 10/10).
+    Planned batch complete (6 classes). Continues opportunistically
     as B4 reveals gaps.
 13. **B5 — no-spec endpoint discovery** (widens reach to spec-less real apps; a
     prerequisite for strong B4 targets).
@@ -102,7 +102,7 @@ Overlapping Phase-2/3 items are absorbed here.
 
 - [~] **B3 — coverage breadth vs DAST (IN PROGRESS, a continuing track).** Add the
       missing high-value classes deterministically, 0-FP, one per step, each seeded in
-      the golden target + a truth entry. QAX now has **32 probes**; gate recall 9/9, FP 0.
+      the golden target + a truth entry. QAX now has **33 probes**; gate recall 10/10, FP 0.
       - [x] **BFLA — Broken Function-Level Authorization (OWASP API5)** — `bfla_probe`:
         an ordinary user reaching a privileged admin-namespaced GET that rejects a
         no-token request = P1 escalation (converts a flaky LLM lead into a deterministic
@@ -118,9 +118,12 @@ Overlapping Phase-2/3 items are absorbed here.
       - [x] **GraphQL introspection** — `graphql_introspection_probe`: a minimal
         introspection query that returns a real schema (data.__schema.queryType) =
         full attack-surface disclosure (P2). +2 tests.
-      - [ ] NEXT candidate: **unrestricted file upload** (a 0-FP proof needs a
-        retrievable uploaded-artifact signal the generic endpoint model rarely
-        exposes; design the artifact-retrieval check first).
+      - [x] **Unrestricted file upload** — `file_upload_probe`: upload an HTML file,
+        RETRIEVE it (same-origin URL from the upload response), and confirm it is served
+        back as text/html with the marker = stored-XSS/RCE-class (P1). 0-FP via the full
+        round trip; labelled mutating. +3 tests.
+      - B3 planned batch COMPLETE (6 classes). The track stays open — add more classes
+        opportunistically as B4 reveals real-world gaps.
 
 - [ ] **B4 — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,

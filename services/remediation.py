@@ -28,6 +28,13 @@ _MAP = {
         "fix": "Never trust the Host/X-Forwarded-Host header for URL generation. Use a "
                "configured canonical base URL, and validate Host against an allowlist.",
     },
+    "file-upload": {
+        "why": "The app stores an uploaded file under an attacker-chosen name/extension and "
+               "serves it back executable (HTML/JS in-origin), giving stored XSS and often RCE.",
+        "fix": "Allowlist content types/extensions, store uploads off the web root or on a "
+               "separate origin, assign server-generated names, and serve with a safe "
+               "Content-Type + Content-Disposition: attachment (never text/html).",
+    },
     "graphql-introspection": {
         "why": "GraphQL introspection is enabled, so anyone can download the full schema — "
                "every type, field, and mutation — which hands an attacker the whole API map.",
