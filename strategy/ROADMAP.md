@@ -262,8 +262,14 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       and aligned with B1 (deterministic CONFIRMED vs AI leads, not severity). main.py
       shrank ~25 lines and that logic now has a test net. Done so far: `cli/scan_render.py`, `cli/summaries.py` (run/push/sessions), and
       `cli/output.py` (save JSON/markdown, find saved case) — all unit-tested; main's
-      helpers now delegate. NEXT (one tested extraction per
-      step): `_save_results`/markdown, analyze/pipeline rendering, then ui/app.py views.
+      helpers now delegate, plus `cli/files.py` (source-file collection). main.py
+      2679 → 2507 lines; every extraction unit-tested, CLI exit codes pinned.
+      NEXT (deliberate, not mechanical): route `_process_single_file` (~220 lines, a
+      second generation path duplicating GenerationService) through the service —
+      a behavior change that needs its own tests first. Then ui/app.py views.
+      FOLLOW-UP found during S8: folder mode defaults to `.cs` when --ext is omitted
+      (leftover from the original C# project; violates "QAX is GENERIC"). Replace with
+      language auto-detection or require --ext.
 
 ---
 
