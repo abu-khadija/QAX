@@ -144,6 +144,17 @@ def import_xml():
     return ("<result>ok</result>", 200, {"Content-Type": "application/xml"})
 
 
+@app.post("/graphql")
+def graphql():
+    # VULNERABLE: introspection enabled — returns the schema. SECURE disables it.
+    body = request.get_json(silent=True) or {}
+    if "__schema" in str(body.get("query", "")):
+        if SECURE:
+            return jsonify({"errors": [{"message": "introspection is disabled"}]}), 200
+        return jsonify({"data": {"__schema": {"queryType": {"name": "Query"}}}}), 200
+    return jsonify({"data": {}}), 200
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -167,6 +178,7 @@ def spec():
                 "responses": {"200": {"description": "ok"}}}},
             "/reset-link": {"get": {"responses": {"200": {"description": "ok"}}}},
             "/import": {"post": {"responses": {"200": {"description": "ok"}}}},
+            "/graphql": {"post": {"responses": {"200": {"description": "ok"}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

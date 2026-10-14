@@ -28,6 +28,12 @@ _MAP = {
         "fix": "Never trust the Host/X-Forwarded-Host header for URL generation. Use a "
                "configured canonical base URL, and validate Host against an allowlist.",
     },
+    "graphql-introspection": {
+        "why": "GraphQL introspection is enabled, so anyone can download the full schema — "
+               "every type, field, and mutation — which hands an attacker the whole API map.",
+        "fix": "Disable introspection in production (e.g. validation rule / "
+               "introspection: false), and require auth on the GraphQL endpoint.",
+    },
     "xxe": {
         "why": "The XML parser resolves external entities, so an attacker's document can "
                "read local files and reach internal services (SSRF).",

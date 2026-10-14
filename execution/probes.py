@@ -424,6 +424,61 @@ def xxe_probe(model, base_url: str, *, session: requests.Session | None = None,
     return out
 
 
+# Common GraphQL endpoint paths (GraphQL rarely appears in an OpenAPI spec).
+_GRAPHQL_PATHS = ("/graphql", "/api/graphql", "/graphql/v1", "/v1/graphql", "/gql", "/query")
+_INTROSPECTION_QUERY = {"query": "{__schema{queryType{name}}}"}
+
+
+def graphql_introspection_probe(model, base_url: str, *, session: requests.Session | None = None,
+                                auth: dict | None = None, limit: int = 10) -> list[ProbeFinding]:
+    """
+    GraphQL introspection left enabled (attack-surface disclosure). POST a minimal
+    introspection query and confirm the server returned a real schema.
+
+    Zero-false-positive: a hit counts only when the JSON response has
+    `data.__schema.queryType.name` — i.e. introspection actually resolved the schema.
+    A server with introspection disabled returns an error (no `data.__schema`), and a
+    non-GraphQL endpoint returns something without it, so both stay quiet. The query is
+    read-only. P2. No model calls.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    headers = _auth_headers(auth.get("token"), auth) if auth and auth.get("token") else {}
+
+    paths: list[str] = []
+    for e in getattr(model, "endpoints", []):
+        p = str(e.get("path", "")) if isinstance(e, dict) else ""
+        if p and ("graphql" in p.lower() or "/gql" in p.lower()):
+            paths.append(p)
+    for p in _GRAPHQL_PATHS:
+        paths.append(p)
+
+    seen: set = set()
+    for p in paths:
+        if p in seen or len(seen) >= limit:
+            continue
+        seen.add(p)
+        try:
+            r = sess.post(f"{base}{p}", json=_INTROSPECTION_QUERY, headers=headers, timeout=15)
+            data = r.json()
+        except Exception:
+            continue
+        schema = (data.get("data") or {}).get("__schema") if isinstance(data, dict) else None
+        if isinstance(schema, dict) and isinstance(schema.get("queryType"), dict) \
+                and schema["queryType"].get("name"):
+            out.append(ProbeFinding(
+                probe="graphql-introspection",
+                title=f"GraphQL introspection enabled on POST {p}",
+                exploited=True, severity="P2",
+                evidence=(f"POST {p} answered an introspection query with a full schema "
+                          f"(queryType '{schema['queryType'].get('name')}'). An attacker can map "
+                          f"every type, field and mutation — disable introspection in production."),
+                target=p))
+            break
+    return out
+
+
 def _jwt_algorithm(model) -> str:
     """Read the JWT algorithm from the model's config, defaulting to HS256."""
     for c in getattr(model, "config", []):

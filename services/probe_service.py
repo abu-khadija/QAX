@@ -205,6 +205,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("xxe probe failed: %s", exc)
 
+        # GraphQL introspection left enabled — full schema/attack-surface disclosure.
+        try:
+            from execution.probes import graphql_introspection_probe
+            findings.extend(graphql_introspection_probe(model, base_url, session=shared, auth=read_auth))
+        except Exception as exc:
+            logger.error("graphql_introspection probe failed: %s", exc)
+
         # Stored XSS — markup written then rendered unencoded on read-back (P1).
         try:
             from execution.probes import stored_xss_probe

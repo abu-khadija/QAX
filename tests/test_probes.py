@@ -1348,3 +1348,33 @@ def test_xxe_detected_by_passwd_signature():
 def test_xxe_quiet_when_entities_not_resolved():
     from execution.probes import xxe_probe
     assert xxe_probe(_xxe_model(), "http://x", session=_XxeSession("secure")) == []
+
+
+# ── GraphQL introspection left enabled ─────────────────────────────────────────
+
+def _gql_model():
+    return AppModel(root="/x", endpoints=[{"method": "POST", "path": "/graphql"}])
+
+
+class _GqlSession:
+    def __init__(self, mode):  # 'vuln' returns a schema | 'secure' errors
+        self.mode = mode
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        q = str((json or {}).get("query", ""))
+        if "__schema" in q and self.mode == "vuln":
+            return MagicMock(status_code=200,
+                             json=lambda: {"data": {"__schema": {"queryType": {"name": "Query"}}}})
+        return MagicMock(status_code=200, json=lambda: {"errors": [{"message": "disabled"}]})
+
+
+def test_graphql_introspection_detected_when_schema_returned():
+    from execution.probes import graphql_introspection_probe
+    out = graphql_introspection_probe(_gql_model(), "http://x", session=_GqlSession("vuln"))
+    assert len(out) == 1 and out[0].probe == "graphql-introspection" and out[0].severity == "P2"
+    assert out[0].target == "/graphql"
+
+
+def test_graphql_introspection_quiet_when_disabled():
+    from execution.probes import graphql_introspection_probe
+    assert graphql_introspection_probe(_gql_model(), "http://x", session=_GqlSession("secure")) == []
