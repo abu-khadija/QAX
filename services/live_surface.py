@@ -218,6 +218,36 @@ def ground_endpoints(base_url: str, *, session: requests.Session | None = None) 
     return eps
 
 
+# Common REST/GraphQL paths to probe on an app that serves no OpenAPI spec.
+_COMMON_API_PATHS = (
+    "/api", "/api/v1", "/health", "/status", "/me", "/users", "/api/users",
+    "/login", "/auth/login", "/products", "/api/products", "/orders", "/api/orders",
+    "/search", "/admin", "/graphql", "/api/graphql",
+)
+
+
+def discover_endpoints(base_url: str, model, *, session: requests.Session | None = None) -> list[dict]:
+    """
+    Spec-less discovery. When the app serves no OpenAPI, probe a small set of common
+    REST/GraphQL paths and return the ones that are actually LIVE (a definitive handler
+    response via `_route_exists`) and not already in the model — so the probes get a
+    real surface to work on instead of only unverified code inference. Discovery can be
+    generous: the probes have their own zero-false-positive controls, so an extra path
+    only costs a request, never a bogus finding.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    existing = {normalize_path_params(str(e.get("path", "")))
+                for e in getattr(model, "endpoints", []) if isinstance(e, dict)}
+    out: list[dict] = []
+    for p in _COMMON_API_PATHS:
+        if p in existing or p in {d["path"] for d in out}:
+            continue
+        if _route_exists(base, p, sess):
+            out.append({"method": "GET", "path": p, "auth_required": False, "source": "discovered"})
+    return out
+
+
 def _route_exists(base: str, path: str, sess: requests.Session) -> bool:
     """
     True only when a GET to `path` gets a DEFINITIVE "a handler ran" response.

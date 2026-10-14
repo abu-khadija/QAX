@@ -133,6 +133,16 @@ class OrchestratorService:
                 pref = recover_base_path(model, base_url)
                 if pref:
                     prog.emit("orchestrate", "info", f"recovered base path '{pref}' from the live app")
+                # B5 — spec-less discovery: probe common REST/GraphQL paths and add the
+                # live ones, so a no-spec target still gets a real surface (not only
+                # unverified code inference).
+                from services.live_surface import discover_endpoints
+                disc = discover_endpoints(base_url, model)
+                if disc:
+                    model.endpoints = list(getattr(model, "endpoints", []) or []) + disc
+                    prog.emit("orchestrate", "info",
+                              f"no OpenAPI spec — discovered {len(disc)} live endpoint(s) by probing "
+                              "common paths")
             # Canonicalise path params to {name} so the probes recognise them whatever
             # framework spelled them (Flask <id>, Express/Gin/Rails :id, …).
             from services.live_surface import normalize_path_params

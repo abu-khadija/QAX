@@ -137,3 +137,23 @@ def test_endpoints_from_spec_no_base_unchanged():
     spec = {"openapi": "3.0.0", "servers": [{"url": ""}],
             "paths": {"/books/v1": {"get": {}}}}
     assert [e["path"] for e in endpoints_from_spec(spec)] == ["/books/v1"]
+
+
+# ── B5: spec-less discovery of live common paths ────────────────────────────────
+
+class _DiscoverySession:
+    """/health and /api are live (200); everything else 404s."""
+    def get(self, url, timeout=None, allow_redirects=None):
+        path = "/" + url.split("://", 1)[-1].split("/", 1)[-1] if "/" in url.split("://", 1)[-1] else "/"
+        return MagicMock(status_code=200 if path in ("/health", "/api") else 404)
+
+
+def test_discover_endpoints_finds_live_commons_excludes_known_and_dead():
+    from services.live_surface import discover_endpoints
+    model = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/health"}])  # already known
+    disc = discover_endpoints("http://x", model, session=_DiscoverySession())
+    paths = {d["path"] for d in disc}
+    assert "/api" in paths            # live + not already in model → discovered
+    assert "/health" not in paths     # already modelled → skipped
+    assert "/users" not in paths      # 404 → not live → excluded
+    assert all(d["method"] == "GET" and d["source"] == "discovered" for d in disc)

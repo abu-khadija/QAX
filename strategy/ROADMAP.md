@@ -53,8 +53,8 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     Done this track: BFLA ✅, SSTI ✅, host-header ✅, XXE ✅, GraphQL ✅, file-upload ✅ (33 probes, gate 10/10).
     Planned batch complete (6 classes). Continues opportunistically
     as B4 reveals gaps.
-13. **B5 — no-spec endpoint discovery** (widens reach to spec-less real apps; a
-    prerequisite for strong B4 targets).
+13. ✅ **B5 — no-spec endpoint discovery** (DONE) — probes common paths on spec-less
+    apps; widens reach for B4.
 14. **B4 — 2–3 case studies on real, messy, non-cherry-picked OSS apps** (the
     credibility wedge; publish honest scorecards + the S6 replay evidence).
 15. **B7 — business-logic bug probe** (hardest, highest-value class; after breadth).
@@ -132,11 +132,12 @@ Overlapping Phase-2/3 items are absorbed here.
       `strategy/` holds ≥2 real-app case studies with scorecards. (Absorbs Phase-2
       case studies.)
 
-- [ ] **B5 — targets without an OpenAPI spec degrade.** Risk: many real apps have no
-      spec; grounding falls back to partial code-inference. Task: a no-spec
-      endpoint-discovery fallback (crawl served links / probe common REST patterns /
-      verify each code-derived path is live before probing). Done when: a spec-less
-      target on the gate is still enumerated and probed.
+- [x] **B5 — no-spec endpoint discovery (DONE).** `live_surface.discover_endpoints`:
+      when the app serves no OpenAPI, probe a set of common REST/GraphQL paths and add
+      the ones that are actually LIVE (definitive handler response), not already in the
+      model — so a spec-less target gets a real surface instead of only unverified code
+      inference. Wired into the orchestrator's no-spec branch. +1 unit test. (Not
+      gate-exercised — the golden target has a spec; verified by unit test.)
 
 - [ ] **B6 — Jira/Xray filing never proven live.** Risk: "files to Jira" is DRY_RUN
       only. Task: with the owner's trial creds, file a real Bug + a real Xray Test
