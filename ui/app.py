@@ -321,12 +321,15 @@ def run_qax_command(
             bufsize=1,
             cwd=str(QAX_ROOT),
         )
+        import html as _html
         lines: list[str] = []
         if stream_to is not None:
             for line in proc.stdout:  # type: ignore[union-attr]
                 lines.append(line)
+                # S8: escape child-process output — it is model/target-influenced and
+                # must never be rendered as HTML inside the terminal div (injection).
                 stream_to.markdown(
-                    f'<div class="terminal">{"".join(lines)}</div>',
+                    f'<div class="terminal">{_html.escape("".join(lines))}</div>',
                     unsafe_allow_html=True,
                 )
         else:
@@ -336,9 +339,11 @@ def run_qax_command(
         proc.wait()
         return proc.returncode, "".join(lines)
     except Exception as exc:
+        import html as _html
         err = f"[QAX UI] Command failed: {exc}"
         if stream_to:
-            stream_to.markdown(f'<div class="terminal">{err}</div>', unsafe_allow_html=True)
+            stream_to.markdown(f'<div class="terminal">{_html.escape(err)}</div>',
+                               unsafe_allow_html=True)
         return 1, err
 
 

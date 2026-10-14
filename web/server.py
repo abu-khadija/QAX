@@ -31,6 +31,26 @@ _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app = Flask(__name__, static_folder=_STATIC, static_url_path="")
 
 
+@app.before_request
+def _require_api_token():
+    """
+    S3 — auth gate for the JSON API. When `QAX_API_TOKEN` is set, every `/api/*`
+    request must carry a matching `X-QAX-Token` header; otherwise 401. When it is NOT
+    set, the API is open (local-dev default) — so exposing the server beyond loopback
+    means setting the token first. Static pages and files are not gated.
+    """
+    import hmac
+    if not request.path.startswith("/api/"):
+        return None
+    expected = os.getenv("QAX_API_TOKEN", "")
+    if not expected:
+        return None   # no token configured → local-dev open mode
+    presented = request.headers.get("X-QAX-Token", "")
+    if not (presented and hmac.compare_digest(presented, expected)):
+        return jsonify({"error": "unauthorized — set a valid X-QAX-Token header"}), 401
+    return None
+
+
 @app.get("/")
 def index():
     return send_from_directory(_STATIC, "index.html")
@@ -249,7 +269,11 @@ def export():
     kind = str(data.get("kind", "tests")).lower()
     target = str(data.get("target", "xray")).lower()
     project = str(data.get("project", "")).strip() or None
-    dry_run = data.get("dry_run", True) is not False   # default True (safe)
+    # S3 — export live-gate: a caller can NEVER force a live push. A live export
+    # happens only when the operator opted in server-side (QAX_ALLOW_LIVE_EXPORT=true)
+    # AND the caller did not ask for dry-run. Otherwise it is always a dry run.
+    allow_live = os.getenv("QAX_ALLOW_LIVE_EXPORT", "false").lower() == "true"
+    dry_run = True if not allow_live else (data.get("dry_run", True) is not False)
     if not items:
         return jsonify({"error": "Nothing to file."}), 400
 

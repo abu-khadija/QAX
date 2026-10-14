@@ -132,10 +132,12 @@ B6 (real Jira filing) so an accidental live push is impossible.
       relative allowed. +3 unit tests (origin rules; off-origin blocked with no request
       and no token sent). Same-origin scans unaffected (gate recall 4/4). Follow-up
       (deferred): request count / payload-size caps.
-- [ ] **S3 — web API auth/authz + export policy.** `/api/scan|generate|export` have no
-      auth; export honours caller-supplied `dry_run:false` with server creds. Gates
-      any non-loopback exposure (private beta). Done when: routes require auth and
-      export cannot be forced live by the caller.
+- [x] **S3 — web API auth/authz + export policy (DONE).** A `before_request` gate: when
+      `QAX_API_TOKEN` is set, every `/api/*` call must present a matching `X-QAX-Token`
+      (else 401); unset = local-dev open mode (so exposing the server means setting the
+      token). Export live-gate: a caller can NEVER force a live push — a live export
+      needs the operator's server-side `QAX_ALLOW_LIVE_EXPORT=true` AND a non-dry-run
+      request; otherwise it is always a dry run. +3 Flask-test-client tests.
 - [x] **S4 — authorized-target gate + active-probe safety (DONE).** `main.py scan` now
       REFUSES without `--authorized` (exit 2), naming the data-mutating probes that will
       run — explicit ownership/permission confirmation before any active probing.
@@ -159,9 +161,13 @@ B6 (real Jira filing) so an accidental live push is impossible.
       UI-shaped `assert`/`verify`/`check`/`expect` now returns SKIP ("Assertion NOT
       evaluated in API mode — use api_steps"), never PASS, so an un-checked step can't
       read as verified coverage. Real assertions remain in api_steps. +1 unit test.
-- [ ] **S8 — UI output escaping + module splits.** `ui/app.py` renders subprocess
-      output via `unsafe_allow_html`; `main.py`/`ui/app.py` are oversized. Done when:
-      UI output is escaped and the biggest files are split behind stable interfaces.
+- [~] **S8 — UI output escaping (DONE) + module splits (DEFERRED).** Security half
+      done: `ui/app.py`'s `run_qax_command` now `html.escape()`s child-process output
+      before the terminal `unsafe_allow_html` div, so model/target-influenced output
+      can't inject HTML (compile-checked; not runtime-verified — no streamlit in the
+      test env). The module-split half (main.py 2.6k lines, ui/app.py 2.3k) is a large
+      pure refactor — deferred to its own focused session (no rushing a 2.6k-line split
+      at the tail of a long session).
 
 ---
 
