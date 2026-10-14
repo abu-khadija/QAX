@@ -1,7 +1,7 @@
 """
 web/server.py — QAX product front door (thin backend over the scan engine)
 ==========================================================================
-Serves the single-page UI and the scan endpoints:
+Serves the product homepage (GET /), the app UI (GET /app) and the scan endpoints:
   • GET  /api/scan/stream — Server-Sent Events: streams live progress events as the
     scan runs (model → ground → probe → tour → prove), then the final report.
   • POST /api/scan        — same scan, single JSON response (no streaming).
@@ -53,7 +53,16 @@ def _require_api_token():
 
 @app.get("/")
 def index():
-    return send_from_directory(_STATIC, "index.html")
+    """Product homepage — what QAX is, how it works, and the evidence behind it.
+    Falls back to the app UI until the homepage (static/index.html) exists."""
+    page = "index.html" if os.path.exists(os.path.join(_STATIC, "index.html")) else "app.html"
+    return send_from_directory(_STATIC, page)
+
+
+@app.get("/app")
+def app_ui():
+    """The working app: scan a running app, generate test cases, file to Jira/Xray."""
+    return send_from_directory(_STATIC, "app.html")
 
 
 @app.get("/files/<path:p>")
@@ -87,6 +96,20 @@ def _inputs():
     token = str(src.get("token", "")).strip()
     auth = {"token": token, "header": "Authorization", "scheme": "Bearer"} if token else None
     return url, repo, auth
+
+
+_UNAUTHORIZED_TARGET = ("Confirm you own this app or are authorized to test it — QAX sends "
+                        "adversarial input and may create test records on the target.")
+
+
+def _target_authorized() -> bool:
+    """
+    S4 — authorized-target gate, same rule as the CLI's --authorized: active probing
+    sends adversarial input and can write to the target, so a scan runs only when the
+    caller explicitly confirms they are allowed to test it (`authorized=true`).
+    """
+    src = request.args if request.method == "GET" else (request.get_json(force=True, silent=True) or {})
+    return str(src.get("authorized", "")).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _supply_chain_leads(repo: str) -> list:
@@ -196,6 +219,8 @@ def scan():
     url, repo, auth = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
+    if not _target_authorized():
+        return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
     payload = _run_scan(url, repo, auth)
     return (jsonify(payload), 502) if payload.get("error") else jsonify(payload)
 
@@ -308,6 +333,8 @@ def scan_stream():
     url, repo, auth = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
+    if not _target_authorized():
+        return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
     q: "queue.Queue" = queue.Queue()
 
     def work():

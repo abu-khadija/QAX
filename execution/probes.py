@@ -240,7 +240,7 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
 # not listed.)
 MUTATING_PROBES = frozenset({
     "bola", "mass-assignment", "stored-xss", "persistence",
-    "injection", "nosql", "malformed-input", "file-upload",
+    "injection", "nosql", "malformed-input", "file-upload", "business-logic",
 })
 
 
@@ -565,6 +565,89 @@ def graphql_introspection_probe(model, base_url: str, *, session: requests.Sessi
                           f"(queryType '{schema['queryType'].get('name')}'). An attacker can map "
                           f"every type, field and mutation — disable introspection in production."),
                 target=p))
+            break
+    return out
+
+
+# Numeric fields where a NEGATIVE value is business-nonsensical (a quantity/amount).
+_QTY_FIELDS = ("quantity", "qty", "count", "units", "stock", "amount", "price",
+               "total", "subtotal", "points", "credits", "balance_change")
+
+
+def _benign_create_body(fields: list, target: str, value):
+    """A create body that fills required fields with benign values, with `target` set."""
+    from core.auth_recipe import nest_body
+    body: dict = {}
+    for f in fields:
+        leaf = str(f).lower().rsplit(".", 1)[-1]
+        if f == target:
+            body[f] = value
+        elif "email" in leaf:
+            body[f] = f"bl_{uuid.uuid4().hex[:8]}@example.com"
+        elif any(k in leaf for k in _QTY_FIELDS) or leaf in ("id", "num") or leaf.endswith("_id"):
+            body[f] = 1
+        else:
+            body[f] = "test"
+    return nest_body(body)
+
+
+def business_logic_probe(model, base_url: str, *, session: requests.Session | None = None,
+                         auth: dict | None = None, limit: int = 6) -> list[ProbeFinding]:
+    """
+    Business-logic flaw: a NEGATIVE quantity/amount accepted and stored on a create
+    endpoint (a nonsensical order of -N items / a -N price). The one logic class with a
+    clean behavioural control.
+
+    Zero-false-positive control, per endpoint+field: a POSITIVE value must be accepted
+    (2xx) — proving the endpoint works and uses the field — AND a DISTINCTIVE negative
+    value must be accepted AND echoed back in the response (stored). A correct app
+    rejects the negative (4xx), so it stays quiet. P2. No model calls.
+    """
+    sess = session or requests.Session()
+    from core.auth_recipe import derive_auth_recipe, field_names
+    recipe = derive_auth_recipe(model)
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+
+    cands = []
+    for e in getattr(model, "endpoints", []):
+        if not (isinstance(e, dict) and str(e.get("method", "")).upper() == "POST"
+                and "{" not in str(e.get("path", ""))):
+            continue
+        names = field_names(e.get("request_fields"))
+        tgt = next((n for n in names if any(k in n.lower().rsplit(".", 1)[-1] for k in _QTY_FIELDS)), None)
+        if tgt:
+            cands.append((e, names, tgt))
+    token = None
+    if any(e.get("auth_required") for e, _, _ in cands):
+        token = _resolve_token(sess, base, recipe, model, f"bl_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+
+    seen: set = set()
+    for e, names, tgt in cands[:limit]:
+        path = str(e.get("path", ""))
+        key = (path, tgt)
+        if key in seen:
+            continue
+        seen.add(key)
+        headers = _auth_headers(token, auth) if e.get("auth_required") else {}
+        neg = -(40000 + (uuid.uuid4().int % 9000))   # distinctive negative, unlikely by chance
+        try:
+            rp = sess.post(f"{base}{path}", json=_benign_create_body(names, tgt, 3), headers=headers, timeout=15)
+            if not (200 <= rp.status_code < 300):
+                continue   # positive control not accepted → can't establish the endpoint
+            rn = sess.post(f"{base}{path}", json=_benign_create_body(names, tgt, neg), headers=headers, timeout=15)
+        except Exception:
+            continue
+        if 200 <= rn.status_code < 300 and str(neg) in (rn.text or ""):
+            out.append(ProbeFinding(
+                probe="business-logic",
+                title=f"Negative '{tgt}' accepted and stored on POST {path}",
+                exploited=True, severity="P2",
+                evidence=(f"POST {path} accepted and stored a negative '{tgt}' ({neg}) — a positive "
+                          f"value was accepted too, and the negative was echoed back. Negative "
+                          f"quantities/amounts are business-nonsensical (refund/credit abuse); a "
+                          f"correct app rejects them."),
+                target=path))
             break
     return out
 

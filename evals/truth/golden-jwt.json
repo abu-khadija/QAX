@@ -12,6 +12,7 @@
     {"id": "host-header-injection",   "match": ["host header reflected"]},
     {"id": "xxe",                     "match": ["xml external entity"]},
     {"id": "graphql-introspection",   "match": ["graphql introspection enabled"]},
-    {"id": "file-upload",             "match": ["unrestricted file upload"]}
+    {"id": "file-upload",             "match": ["unrestricted file upload"]},
+    {"id": "business-logic",          "match": ["negative", "accepted and stored"]}
   ]
 }

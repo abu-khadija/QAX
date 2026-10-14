@@ -57,10 +57,34 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     apps; widens reach for B4.
 14. **B4 — 2–3 case studies on real, messy, non-cherry-picked OSS apps** (the
     credibility wedge; publish honest scorecards + the S6 replay evidence).
-15. **B7 — business-logic bug probe** (hardest, highest-value class; after breadth).
+15. ✅ **B7 — business-logic bug probe (DONE)** — negative quantity/amount accepted+stored (P2).
 16. **S8 (refactor half)** — split the oversized `main.py` / `ui/app.py` behind the
     service interfaces (maintainability; do when it starts slowing feature work).
 17. **B8 — moat / GTM** — lead the message on "proven, zero false positives" (when pitching).
+    ✅ First slice DONE (2026-10-14): product homepage at `/` (app moved to `/app`),
+    positioned per the Qodo study below; every claim maps to a gate number or a shipped
+    control. Web scans now enforce the S4 authorized-target confirmation (was CLI-only).
+
+**From the Qodo competitive study (2026-10-14, `strategy/QODO_COMPETITIVE_INTEL.md`):**
+Qodo (≈$120M raised) is now enterprise AI *code review + governance*. It **retired test
+generation** (Cover unmaintained since Jun 2025; IDE plugin retires 30 Oct 2026) and shows
+**no runtime testing** in public docs. So QAX does NOT compete on code review — it is the
+**runtime proof layer** next to any reviewer ("code review reads the diff; QAX proves what
+the running app does"). Folded into the order above:
+- **Q1 → B6 + B4 first** — live Jira filing and one published case study are the proof the
+  homepage still marks as "dry run" / "in progress". Highest leverage now.
+- **Q2 — packaging: time-to-first-confirmed-finding ≤ 10 min** on a clean machine
+  (one command / Docker + bundled demo target). Qodo installs in one click; we don't.
+- **Q3 — confirmed finding → runnable regression test → Xray** (unique loop; nobody links
+  runtime proof to test management).
+- **Q4 — GitHub Action: scan a preview URL, comment CONFIRMED only.**
+- **Q5 — open benchmark:** publish golden targets + truth files + `make eval` (Qodo's
+  credibility playbook, done honestly incl. misses). Gated on B9 (IP) before going public.
+- **Later, only on demand:** MCP tool exposure (`qax.scan`), hosted mode (requires
+  target-ownership verification first), pricing tests (per-app + free local tier; see the
+  report §11 — hypotheses only).
+- **Do NOT build:** AI PR review, rules/governance dashboards, IDE plugin, SSO/on-prem,
+  standalone test-gen expansion — commoditized or owned by funded incumbents.
 
 **Opportunistic (externally gated — do the moment the trigger arrives, not in line):**
 - **B6 — real Jira/Xray filing** as soon as the owner's trial creds land (S1 made it

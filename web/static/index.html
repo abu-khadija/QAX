@@ -3,542 +3,520 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QAX — Prove the bugs others miss</title>
+<title>QAX — Prove what your running app actually does</title>
+<meta name="description" content="QAX scans your running API and UI, proves each bug with a replayable request and response, and turns it into a Jira bug and a test case. Runs locally.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#0a0d14; --bg2:#0e1220; --card:#141a2a; --card2:#1a2235; --line:#233047;
-    --txt:#e7ecf5; --muted:#8a97ad; --faint:#5b6678;
-    --accent:#6366f1; --accent2:#22d3ee;
-    --p1:#f0485f; --p2:#f6a338; --p3:#8aa0bf; --ok:#2ee6a6;
-    --radius:16px;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0}
-  body{background:radial-gradient(1200px 600px at 80% -10%, #16203a 0%, var(--bg) 55%) no-repeat, var(--bg);
-    color:var(--txt); font-family:Inter,system-ui,-apple-system,sans-serif; line-height:1.5; min-height:100vh;}
-  a{color:var(--accent2);text-decoration:none}
-  .wrap{max-width:960px;margin:0 auto;padding:0 20px}
+/* ── QAX design system ───────────────────────────────────────────────────────
+   Tokens extend the app UI (/app) so the homepage and the product look like one
+   thing. Signature: "evidence green" = CONFIRMED; amber/slate = leads. Indigo→cyan
+   is the brand accent, used sparingly (primary CTA, one hero line, focus).      */
+:root{
+  --bg:#0a0d14; --bg2:#0e1220; --card:#121828; --card2:#182035; --line:#233047; --line2:#2e3e5c;
+  --txt:#e7ecf5; --muted:#9aa6bb; --faint:#6b7689;
+  --accent:#6366f1; --accent2:#22d3ee; --ok:#2ee6a6; --p1:#f0485f; --p2:#f6a338; --p3:#8aa0bf;
+  --r-sm:8px; --r:12px; --r-lg:18px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:72px; --s9:112px;
+  --w:1160px; --w-text:680px;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --shadow:0 24px 60px -32px #000;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.6 Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent2);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent2);outline-offset:3px;border-radius:4px}
+code,.mono{font-family:var(--mono)}
+.wrap{max-width:var(--w);margin:0 auto;padding:0 var(--s5)}
+.skip{position:absolute;left:-9999px;top:8px;background:var(--card2);color:var(--txt);padding:8px 12px;border-radius:var(--r-sm);z-index:100}
+.skip:focus{left:8px}
 
-  header{display:flex;align-items:center;gap:12px;padding:26px 0 8px}
-  .logo{font-weight:800;font-size:22px;letter-spacing:-.5px;
-    background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .logo .dot{color:var(--accent2)}
-  .tag{color:var(--muted);font-size:13.5px;font-weight:500}
-  .spacer{flex:1}
-  .pill-ghost{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 11px}
+/* type scale */
+.eyebrow{font:600 12px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent2)}
+h1,h2,h3{margin:0;letter-spacing:-.02em;font-weight:700}
+h1{font-size:clamp(34px,4.6vw,56px);line-height:1.04;letter-spacing:-.035em;font-weight:800}
+h2{font-size:clamp(28px,3.6vw,42px);line-height:1.12}
+h3{font-size:19px;line-height:1.3}
+.lead{font-size:clamp(17px,1.6vw,19px);color:var(--muted);max-width:var(--w-text)}
+.muted{color:var(--muted)} .faint{color:var(--faint)}
 
-  .hero{padding:34px 0 10px}
-  .hero h1{font-size:40px;line-height:1.08;letter-spacing:-1.2px;margin:0 0 10px;font-weight:800}
-  .hero h1 .grad{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero p{color:var(--muted);font-size:16px;max-width:620px;margin:0}
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:13px 20px;font:700 15px/1 Inter,sans-serif;
+  border:1px solid transparent;cursor:pointer;transition:filter .15s,border-color .15s,background .15s;text-decoration:none!important;min-height:46px}
+.btn-primary{background:linear-gradient(90deg,var(--accent),#8b5cf6);color:#fff}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-ghost{background:transparent;color:var(--txt);border-color:var(--line2)}
+.btn-ghost:hover{border-color:var(--accent2);background:#ffffff08}
+.btn-sm{padding:9px 14px;font-size:14px;min-height:38px}
 
-  .panel{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);
-    border-radius:var(--radius);padding:20px;margin-top:22px;box-shadow:0 20px 50px -30px #000}
-  .row{display:flex;gap:10px;flex-wrap:wrap}
-  .field{flex:1;min-width:240px;display:flex;flex-direction:column;gap:6px}
-  label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-  input{background:#0c111c;border:1px solid var(--line);color:var(--txt);border-radius:11px;
-    padding:13px 14px;font-size:15px;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s;width:100%}
-  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #6366f133}
-  input::placeholder{color:var(--faint)}
-  .btn{background:linear-gradient(90deg,var(--accent),#8b5cf6);color:#fff;border:0;border-radius:11px;
-    padding:13px 22px;font-size:15px;font-weight:700;cursor:pointer;transition:transform .08s,filter .15s;white-space:nowrap}
-  .btn:hover{filter:brightness(1.08)}
-  .btn:active{transform:translateY(1px)}
-  .btn:disabled{opacity:.55;cursor:not-allowed}
-  .adv{margin-top:12px}
-  .adv summary{cursor:pointer;color:var(--muted);font-size:13px;list-style:none;user-select:none}
-  .adv summary::-webkit-details-marker{display:none}
-  .adv summary::before{content:"▸ ";color:var(--faint)}
-  .adv[open] summary::before{content:"▾ "}
-  .adv .row{margin-top:12px}
-  .hint{color:var(--faint);font-size:12.5px;margin-top:12px}
+/* nav */
+.nav{position:sticky;top:0;z-index:50;background:#0a0d14e6;backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;gap:var(--s5);height:64px}
+.logo{font-weight:800;font-size:22px;letter-spacing:-.5px;color:var(--txt);text-decoration:none!important}
+.logo span{color:var(--accent2)}
+.nav-links{display:flex;gap:var(--s5);list-style:none;margin:0;padding:0}
+.nav-links a{color:var(--muted);font-size:14.5px;font-weight:500}
+.nav-links a:hover{color:var(--txt);text-decoration:none}
+.nav-cta{margin-left:auto;display:flex;gap:var(--s2)}
+.menu-btn{display:none;margin-left:auto;background:none;border:1px solid var(--line2);color:var(--txt);border-radius:var(--r-sm);padding:8px 10px;font:600 14px Inter,sans-serif;cursor:pointer}
+@media (max-width:900px){
+  .nav-links,.nav-cta{display:none}
+  .menu-btn{display:block}
+  .nav.open{background:var(--bg2)}
+  .nav.open .wrap{flex-wrap:wrap;height:auto;min-height:64px;padding-bottom:var(--s5);row-gap:var(--s4)}
+  .nav.open .logo,.nav.open .menu-btn{align-self:center;margin-top:13px}
+  .nav.open .menu-btn{order:1}
+  .nav.open .nav-links{order:2;display:flex;flex-direction:column;flex-basis:100%;gap:var(--s4)}
+  .nav.open .nav-cta{order:3}
+  .nav.open .nav-links a{font-size:16px}
+  .nav.open .nav-cta{display:flex;flex-basis:100%;margin-left:0}
+}
 
-  /* capability switcher — two ways into one workflow */
-  .modes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
-  .mode{text-align:left;background:var(--card);border:1px solid var(--line);border-radius:14px;
-    padding:16px 18px;cursor:pointer;transition:border .15s,background .15s,transform .08s;color:var(--txt);font-family:inherit}
-  .mode:hover{border-color:#2e3e5c}
-  .mode.active{border-color:var(--accent);background:linear-gradient(180deg,#1a2238,#141a2a);box-shadow:0 0 0 3px #6366f122}
-  .mode .mt{font-size:15.5px;font-weight:700;letter-spacing:-.2px}
-  .mode .md{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.35}
-  textarea{background:#0c111c;border:1px solid var(--line);color:var(--txt);border-radius:11px;
-    padding:13px 14px;font-size:14.5px;font-family:inherit;outline:none;width:100%;resize:vertical;line-height:1.5}
-  textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px #6366f133}
-  textarea::placeholder{color:var(--faint)}
-  #genresults{display:none;margin-top:26px}
-  .tc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin-bottom:10px}
-  .tc .th{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .tc .tt{font-weight:600;font-size:15px}
-  .tc .pri{font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--card2);border:1px solid var(--line);color:var(--muted)}
-  .tc .rev{font-size:11px;color:var(--p2);border:1px solid #f6a33855;background:#f6a33822;border-radius:7px;padding:3px 9px}
-  .tc .steps{margin:9px 0 0;padding-left:20px;color:#cdd7e6;font-size:13.5px;line-height:1.5}
-  .tc .exp{margin-top:9px;background:#0c1a1b;border:1px solid #16403a;border-radius:9px;padding:9px 12px;font-size:13px;color:#e7f3ec}
-  .tc .exp .k{color:var(--ok);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+/* sections */
+section{padding:var(--s9) 0;border-top:1px solid var(--line)}
+section.first{border-top:0}
+.sec-head{max-width:760px;margin-bottom:var(--s7)}
+.sec-head h2{margin:var(--s3) 0 var(--s4)}
+.grid{display:grid;gap:var(--s4)}
+.grid>*,.hero-grid>*,.split>*{min-width:0}
+.g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g4{grid-template-columns:repeat(4,1fr)}
+@media (max-width:980px){.g3,.g4{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:640px){.g2,.g3,.g4{grid-template-columns:1fr} section{padding:var(--s8) 0}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s5)}
+.card p{margin:var(--s2) 0 0;color:var(--muted);font-size:15px}
+.card .ic{font:600 12px var(--mono);color:var(--accent2);letter-spacing:.08em}
 
-  /* live feed */
-  #scanning{display:none;margin-top:22px}
-  .live-head{display:flex;align-items:center;gap:12px;color:var(--txt);font-size:15px;font-weight:600;margin-bottom:12px}
-  .radar{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent2);animation:spin .8s linear infinite;flex:0 0 auto}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .live{background:#070a11;border:1px solid var(--line);border-radius:12px;padding:14px 16px;max-height:280px;overflow:auto;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
-  .logline{display:flex;gap:10px;padding:3px 0;color:#aeb9cc;animation:fadein .25s ease}
-  @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
-  .logline .ic{width:14px;text-align:center;flex:0 0 auto}
-  .logline .st{color:var(--faint);text-transform:uppercase;font-size:10px;letter-spacing:.4px;flex:0 0 58px;padding-top:1px}
-  .logline.ok .ic{color:var(--ok)} .logline.start .ic{color:var(--accent2)} .logline.error .ic,.logline.warn .ic{color:var(--p1)}
-  .logline.ok{color:#d7e6dd}
-  #err{display:none;margin-top:18px;border:1px solid #5a2330;background:#2a1118;color:#ffb4c0;border-radius:12px;padding:14px 16px;font-size:14px}
+/* hero */
+.hero{padding:var(--s8) 0 var(--s9);background:radial-gradient(900px 500px at 85% -10%,#18224099 0%,transparent 60%)}
+.hero-grid{display:grid;grid-template-columns:1.05fr 1fr;gap:var(--s7);align-items:center}
+@media (max-width:980px){.hero-grid{grid-template-columns:1fr}}
+.hero h1 .accent{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .lead{margin:var(--s5) 0 var(--s6)}
+.cta-row{display:flex;gap:var(--s3);flex-wrap:wrap}
+.hero-note{margin-top:var(--s5);font-size:13.5px;color:var(--faint)}
 
-  #results{display:none;margin-top:26px}
-  .verdict{border-radius:var(--radius);padding:20px 22px;border:1px solid var(--line);display:flex;align-items:center;gap:16px}
-  .verdict .big{font-size:30px;font-weight:800;letter-spacing:-.5px}
-  .verdict .sub{color:var(--muted);font-size:14px;margin-top:2px}
-  .verdict.bad{background:linear-gradient(180deg,#241019,#140b11);border-color:#4a2130}
-  .verdict.good{background:linear-gradient(180deg,#0f2020,#0a1514);border-color:#1f4a3e}
-  .vicon{font-size:30px}
+/* evidence card — the product's real output, our main visual */
+.window{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
+.window-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font:500 12px var(--mono);color:var(--faint)}
+.window-bar i{width:10px;height:10px;border-radius:50%;background:var(--line2);display:inline-block}
+.window-bar .t{margin-left:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.window-body{padding:var(--s5)}
+.finding{border:1px solid var(--line);border-left:3px solid var(--p1);border-radius:var(--r);padding:var(--s4);background:var(--card)}
+.f-top{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap}
+.sev{font:700 11px var(--mono);padding:3px 8px;border-radius:6px;background:#f0485f22;color:var(--p1);border:1px solid #f0485f55}
+.sev.p2{background:#f6a33822;color:var(--p2);border-color:#f6a33855}
+.sev.p3{background:#8aa0bf22;color:var(--p3);border-color:#8aa0bf55}
+.badge-ok{font:600 11px var(--mono);padding:3px 8px;border-radius:6px;color:var(--ok);background:#2ee6a614;border:1px solid #2ee6a655}
+.badge-lead{font:600 11px var(--mono);padding:3px 8px;border-radius:6px;color:var(--p2);background:#f6a33814;border:1px solid #f6a33855}
+.f-title{font-weight:600;font-size:15px;margin-top:var(--s2)}
+.f-target{font:500 12.5px var(--mono);color:var(--accent2);margin-top:4px}
+.ev{font:12.5px/1.55 var(--mono);color:#cdd7e6;background:#070a11;border:1px solid var(--line);border-radius:var(--r-sm);padding:var(--s3);margin-top:var(--s3);white-space:pre-wrap;word-break:break-word}
+.fix{margin-top:var(--s3);background:#0c1a1b;border:1px solid #16403a;border-radius:var(--r-sm);padding:var(--s3);font-size:13px;color:#e7f3ec}
+.k{font:700 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ok)}
+.caption{font-size:12.5px;color:var(--faint);margin-top:var(--s3)}
 
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:16px}
-  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-  .stat .n{font-size:24px;font-weight:800;letter-spacing:-.5px}
-  .stat .l{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:3px}
-  .stat .n.p1{color:var(--p1)} .stat .n.p3{color:var(--p3)} .stat .n.ok{color:var(--ok)}
+/* problem comparison */
+.compare .card h3{display:flex;gap:10px;align-items:center}
+.compare .card.qax{border-color:#2ee6a655;background:linear-gradient(180deg,#0f2020,var(--card))}
+.compare .verdict{margin-top:var(--s4);font:600 12.5px var(--mono);color:var(--faint)}
+.compare .qax .verdict{color:var(--ok)}
 
-  .rtool{display:none;justify-content:flex-end;gap:10px;margin-bottom:12px}
-  .btn2{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:10px;
-    padding:9px 15px;font-size:13.5px;font-weight:600;cursor:pointer;transition:border .15s,background .15s}
-  .btn2:hover{border-color:var(--accent);background:#1e2740}
+/* steps */
+.steps{counter-reset:s;display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s3);list-style:none;padding:0;margin:0}
+@media (max-width:980px){.steps{grid-template-columns:1fr 1fr}}
+@media (max-width:640px){.steps{grid-template-columns:1fr}}
+.steps li{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:var(--s5) var(--s4) var(--s4)}
+.steps li::before{counter-increment:s;content:"0" counter(s);font:600 12px var(--mono);color:var(--accent2)}
+.steps h3{font-size:16px;margin:var(--s2) 0 6px}
+.steps p{margin:0;color:var(--muted);font-size:14px}
+.steps .stage{display:inline-block;margin-top:var(--s3);font:500 11px var(--mono);color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
 
-  .layers{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px}
-  .chip{font-size:12px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:5px 11px}
-  .chip b{color:var(--txt)}
-  .hk{margin-top:14px;font-size:12.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 13px}
+/* confirmed vs leads */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+@media (max-width:780px){.split{grid-template-columns:1fr}}
+.list{list-style:none;margin:var(--s4) 0 0;padding:0;display:grid;gap:8px}
+.list li{display:flex;gap:10px;align-items:baseline;font-size:14px;color:#cdd7e6;border-bottom:1px dashed var(--line);padding-bottom:8px}
+.list li:last-child{border-bottom:0}
+.list .sev{flex:0 0 auto}
 
-  .sec-title{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin:26px 0 10px}
-  .tourgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
-  .shot{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .shot img{width:100%;height:112px;object-fit:cover;object-position:top;display:block;background:#0b101b;border-bottom:1px solid var(--line)}
-  .shot .cap{padding:8px 10px;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:8px;justify-content:space-between}
-  .shot .cap .u{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace;font-size:11px}
-  .shot .cap .bad{color:var(--p1);font-weight:700;flex:0 0 auto} .shot .cap .okb{color:var(--ok);flex:0 0 auto}
-  .finding{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--p3);border-radius:12px;padding:15px 16px;margin-bottom:10px}
-  .finding.sev-P1{border-left-color:var(--p1)} .finding.sev-P2{border-left-color:var(--p2)} .finding.sev-P3{border-left-color:var(--p3)}
-  .finding .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .sev{font-size:11px;font-weight:800;padding:3px 9px;border-radius:7px;letter-spacing:.3px}
-  .sev-P1 .sev,.sev.P1{background:#f0485f22;color:var(--p1);border:1px solid #f0485f55}
-  .sev-P2 .sev,.sev.P2{background:#f6a33822;color:var(--p2);border:1px solid #f6a33855}
-  .sev-P3 .sev,.sev.P3{background:#8aa0bf22;color:var(--p3);border:1px solid #8aa0bf55}
-  .finding .title{font-weight:600;font-size:15px}
-  .finding .meta{margin-left:auto;display:flex;gap:8px;align-items:center}
-  .tag{font-size:11px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
-  .finding .target{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--accent2);margin-top:7px}
-  .finding .ev{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:#cdd7e6;
-    background:#0b101b;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-top:10px;white-space:pre-wrap;word-break:break-word}
-  .finding .fix{margin-top:10px;background:#0c1a1b;border:1px solid #16403a;border-radius:9px;padding:11px 13px}
-  .finding .fix .k{color:var(--ok);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
-  .finding .fix .why{color:#aeb9cc;font-size:13px;margin:3px 0 9px}
-  .finding .fix .how{color:#e7f3ec;font-size:13px}
+/* probe classes */
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:500 13px var(--mono);color:#cdd7e6;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
 
-  footer{color:var(--faint);font-size:12.5px;text-align:center;padding:40px 0 30px}
-  footer b{color:var(--muted)}
-  @media(max-width:560px){.hero h1{font-size:30px}}
+/* proof numbers */
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s5)}
+.stat .n{font-size:clamp(30px,3.6vw,40px);font-weight:800;letter-spacing:-.03em}
+.stat .n.ok{color:var(--ok)}
+.stat .l{color:var(--txt);font-weight:600;margin-top:4px}
+.stat .src{font-size:12.5px;color:var(--faint);margin-top:var(--s2)}
+
+/* status pills for honesty */
+.status{display:inline-block;font:600 11px var(--mono);padding:3px 8px;border-radius:6px;margin-left:6px;vertical-align:middle}
+.status.live{color:var(--ok);border:1px solid #2ee6a655}
+.status.pre{color:var(--p2);border:1px solid #f6a33855}
+
+/* audience tabs */
+.tabs [role=tablist]{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--s4)}
+.tabs [role=tab]{background:var(--card);color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font:600 14px Inter,sans-serif;cursor:pointer;min-height:40px}
+.tabs [role=tab][aria-selected=true]{color:var(--txt);border-color:var(--accent);box-shadow:0 0 0 3px #6366f122}
+.tabs [role=tabpanel]{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s6)}
+.tabs [role=tabpanel] h3{font-size:22px}
+.tabs [role=tabpanel] ul{margin:var(--s4) 0 0;padding-left:20px;color:var(--muted)}
+.tabs [role=tabpanel] li{margin-bottom:6px}
+
+/* quickstart */
+.cmd{display:flex;align-items:center;gap:var(--s3);background:#070a11;border:1px solid var(--line);border-radius:var(--r);padding:var(--s3) var(--s4);font:13.5px var(--mono);color:#cdd7e6;margin-top:var(--s3)}
+.cmd code{flex:1;overflow-x:auto;white-space:nowrap}
+.cmd .p{color:var(--faint);user-select:none}
+.copy{background:var(--card2);border:1px solid var(--line2);color:var(--muted);border-radius:6px;padding:6px 10px;font:600 12px Inter,sans-serif;cursor:pointer;flex:0 0 auto}
+.copy:hover{color:var(--txt)}
+
+/* faq */
+details.q{border-bottom:1px solid var(--line);padding:var(--s4) 0}
+details.q summary{cursor:pointer;font-weight:600;font-size:17px;list-style:none;display:flex;justify-content:space-between;gap:var(--s4)}
+details.q summary::-webkit-details-marker{display:none}
+details.q summary::after{content:"+";color:var(--accent2);font:600 20px var(--mono)}
+details.q[open] summary::after{content:"–"}
+details.q p{color:var(--muted);margin:var(--s3) 0 0;max-width:820px}
+
+/* final cta + footer */
+.final{text-align:center;background:radial-gradient(700px 300px at 50% 0%,#18224099,transparent 70%)}
+.final .lead{margin:var(--s4) auto var(--s6)}
+.final .cta-row{justify-content:center}
+footer{border-top:1px solid var(--line);padding:var(--s7) 0;color:var(--faint);font-size:14px}
+footer .wrap{display:grid;grid-template-columns:2fr 1fr 1fr;gap:var(--s6)}
+@media (max-width:780px){footer .wrap{grid-template-columns:1fr}}
+footer h4{margin:0 0 var(--s3);color:var(--muted);font:600 12px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+footer ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+footer a{color:var(--muted)}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <span class="logo">QA<span class="dot">X</span></span>
-    <span class="tag">AI QA platform</span>
-    <span class="spacer"></span>
-    <span class="pill-ghost">local · nothing leaves your machine</span>
-  </header>
+<a class="skip" href="#main">Skip to content</a>
 
-  <section class="hero">
-    <h1>Generate the tests.<br><span class="grad">Prove the bugs. Ship to Jira.</span></h1>
-    <p>One platform for software quality: QAX <b>generates test cases</b> from your stories or code,
-       <b>scans your running app</b> and proves the bugs others miss, and pushes both into
-       <b>Jira / Xray</b>. Two ways in — the same workflow.</p>
-  </section>
-
-  <div class="modes">
-    <button class="mode active" id="mode-scan" onclick="setMode('scan')">
-      <div class="mt">🛡️ Scan &amp; prove bugs</div>
-      <div class="md">Point at a running app → confirmed vulnerabilities, with evidence and fixes.</div>
-    </button>
-    <button class="mode" id="mode-gen" onclick="setMode('gen')">
-      <div class="mt">🧪 Generate test cases</div>
-      <div class="md">From a user story or source code → structured, reviewable test cases.</div>
-    </button>
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a href="/" class="logo" aria-label="QAX home">QA<span>X</span></a>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#evidence">Evidence</a></li>
+      <li><a href="#workflow">Tests &amp; Jira</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+    <div class="nav-cta">
+      <a href="#start" class="btn btn-ghost btn-sm">Run it locally</a>
+      <a href="/app" class="btn btn-primary btn-sm">Open the app</a>
+    </div>
+    <button class="menu-btn" id="menu-btn" aria-expanded="false" aria-controls="nav-links">Menu</button>
   </div>
+</header>
 
-  <div class="panel" id="panel-scan">
-    <div class="row">
-      <div class="field">
-        <label for="url">Running app URL</label>
-        <input id="url" placeholder="http://127.0.0.1:8000" autocomplete="off" spellcheck="false">
+<main id="main">
+
+<!-- 1 · HERO — what it is in five seconds, shown with real output -->
+<section class="hero first">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">Runtime quality &amp; security proof</div>
+      <h1 style="margin-top:16px">Code review reads the diff.<br><span class="accent">QAX proves what the running app does.</span></h1>
+      <p class="lead">Point QAX at your running app. It probes the API and UI, keeps only the bugs it can
+        prove with a real request and response, explains the fix, and drafts the Jira bug and test case for you.</p>
+      <div class="cta-row">
+        <a href="/app#scan" class="btn btn-primary">Scan a running app →</a>
+        <a href="#evidence" class="btn btn-ghost">See real output</a>
       </div>
-      <div class="field" style="flex:0 0 auto;justify-content:flex-end">
-        <label style="opacity:0">.</label>
-        <button class="btn" id="go" onclick="runScan()">Run scan</button>
+      <p class="hero-note">Runs locally on your machine · scans only apps you confirm you may test · export stays a dry run until you enable it</p>
+    </div>
+
+    <figure class="window" style="margin:0" aria-label="A real QAX finding">
+      <div class="window-bar"><i></i><i></i><i></i><span class="t">QAX · quick scan · golden test target</span></div>
+      <div class="window-body">
+        <div class="finding">
+          <div class="f-top"><span class="sev">P1</span><span class="badge-ok">CONFIRMED · deterministic</span></div>
+          <div class="f-title">JWT alg=none accepted — authentication bypass</div>
+          <div class="f-target">GET /admin/users</div>
+          <div class="ev">Unsigned token (alg=none)  → HTTP 200   same as a valid token
+No token                    → HTTP 401
+⇒ the server doesn't enforce the signing algorithm — anyone can forge a session.</div>
+          <div class="fix"><div class="k">How to fix</div>Verify signature and expiry and pin the algorithm —
+            <code>jwt.decode(token, key, algorithms=["HS256"])</code>; never allow <code>none</code>.</div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="wrap"><p class="caption">Real output from QAX's built-in test target (an app with deliberately planted bugs), condensed for display. Run <code>make eval</code> to reproduce it.</p></div>
+</section>
+
+<!-- 2 · PROBLEM — why this exists if you already have review and scanners -->
+<section aria-labelledby="problem-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">The gap</div>
+      <h2 id="problem-h">Most quality tools give you opinions. Teams need proof.</h2>
+      <p class="lead">AI writes code faster than anyone can test it. Code review checks the diff, but it can't tell you
+        whether <code>/users/42</code> really leaks another user's data. Scanners can tell you, but they bury the real issues
+        under "possible" ones. Either way, somebody still has to reproduce every bug by hand.</p>
+    </div>
+    <div class="grid g3 compare">
+      <div class="card"><h3>AI code review</h3><p>Reads the change and points out risks in the code. Useful, and it never runs the app.</p><div class="verdict">→ “this looks risky”</div></div>
+      <div class="card"><h3>Traditional scanners</h3><p>Hit the app with payloads and report everything that might be a problem. Your team does the triage.</p><div class="verdict">→ “this might be a problem”</div></div>
+      <div class="card qax"><h3>QAX</h3><p>Attacks the running app and reports a bug as confirmed only when the app actually misbehaves, checked against a control request.</p><div class="verdict">→ “here's the request that proves it”</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · HOW IT WORKS — the real pipeline stages, not a marketing diagram -->
+<section id="how" aria-labelledby="how-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">How it works</div>
+      <h2 id="how-h">From a URL to a filed bug in five steps</h2>
+      <p class="lead">These are the stages QAX streams live while it scans: you watch each one run, and nothing is hidden behind a spinner.</p>
+    </div>
+    <ol class="steps">
+      <li><h3>Point it at your app</h3><p>A running URL. Add the source repo and an auth token if you want deeper coverage.</p><span class="stage">input</span></li>
+      <li><h3>Map the surface</h3><p>QAX reads the code (Python, JS/TS, Go, Java and more) and checks the endpoints it finds against the live app.</p><span class="stage">model · ground</span></li>
+      <li><h3>Probe and tour</h3><p>Deterministic probes attack the API. A real browser tours the UI and records JS errors and failed calls.</p><span class="stage">probe · tour</span></li>
+      <li><h3>Prove or demote</h3><p>A finding reaches <em>Confirmed</em> only if the app misbehaves where a control request doesn't. Everything else becomes a lead.</p><span class="stage">prove</span></li>
+      <li><h3>Fix and file</h3><p>Each finding explains why it matters and how to fix it, and can be drafted as a Jira bug with a test case.</p><span class="stage">report · export</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- 4 · CONFIRMED VS LEADS — the signature idea; answers "will it waste my time?" -->
+<section id="evidence" aria-labelledby="ev-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Confirmed vs leads</div>
+      <h2 id="ev-h">Two lists, on purpose</h2>
+      <p class="lead"><b>Confirmed</b> findings come from deterministic probes: run the scan again and you get the same list.
+        <b>Leads</b> come from AI investigation, the UI tour and dependency checks. They catch more, but they can vary between runs, so they're shown separately and never mixed in with the confirmed list.</p>
+    </div>
+    <div class="split">
+      <div class="card">
+        <span class="badge-ok">CONFIRMED · 12</span>
+        <ul class="list">
+          <li><span class="sev">P1</span>Broken function-level authorization — <code>GET /admin/users</code></li>
+          <li><span class="sev">P1</span>Forged JWT accepted — <code>GET /billing/invoices</code></li>
+          <li><span class="sev">P1</span>Server-side template injection — <code>/greet?name=</code></li>
+          <li><span class="sev">P1</span>XML external entity file read — <code>POST /import</code></li>
+          <li><span class="sev">P1</span>Upload served back as HTML — <code>POST /upload</code></li>
+          <li><span class="sev p2">P2</span>Host header reflected into reset link — <code>/reset-link</code></li>
+          <li><span class="sev p2">P2</span>GraphQL introspection enabled — <code>POST /graphql</code></li>
+          <li class="faint">…and 5 more</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="badge-lead">LEADS · 2</span>
+        <ul class="list">
+          <li><span class="sev p3">P3</span>Console error on the home screen (UI tour)</li>
+          <li><span class="sev p3">P3</span>Client error (4xx) on a background request (UI tour)</li>
+        </ul>
+        <p class="caption" style="margin-top:20px">Leads are worth a look but aren't proven. On a real app this list also carries AI-investigator suspicions and dependency CVE or licence findings.</p>
       </div>
     </div>
-    <details class="adv">
-      <summary>Advanced — source repo &amp; auth token (optional)</summary>
-      <div class="row">
-        <div class="field"><label for="repo">Repo path (optional)</label>
-          <input id="repo" placeholder="/path/to/source (improves coverage)" autocomplete="off" spellcheck="false"></div>
-        <div class="field"><label for="token">Bearer token (optional)</label>
-          <input id="token" placeholder="for apps behind auth" autocomplete="off" spellcheck="false"></div>
+    <p class="caption">Same scan as above: QAX's golden test target, quick mode, 1.8 s, no LLM calls. The gate checks that two scans produce an identical confirmed list.</p>
+  </div>
+</section>
+
+<!-- 5 · WHAT IT TESTS — breadth, stated as classes, not a vague "AI security" -->
+<section aria-labelledby="cov-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Coverage</div>
+      <h2 id="cov-h">33 deterministic probes, each with a built-in control</h2>
+      <p class="lead">Every probe compares an attack request against a benign one and only reports a bug when the difference proves it. On a well-written app, that's how QAX stays quiet.</p>
+    </div>
+    <div class="chips" aria-label="Probe classes">
+      <span class="chip">SQL injection (path, query, body, blind)</span><span class="chip">NoSQL operator injection</span>
+      <span class="chip">BOLA / IDOR</span><span class="chip">Broken function-level auth</span><span class="chip">JWT alg=none / unsigned</span>
+      <span class="chip">Forged-token replay</span><span class="chip">Mass assignment</span><span class="chip">Excessive data exposure</span>
+      <span class="chip">Command injection</span><span class="chip">SSRF</span><span class="chip">SSTI</span><span class="chip">XXE</span>
+      <span class="chip">Reflected &amp; stored XSS</span><span class="chip">Path traversal</span><span class="chip">Unrestricted file upload</span>
+      <span class="chip">Host-header injection</span><span class="chip">Open redirect</span><span class="chip">CORS</span>
+      <span class="chip">GraphQL introspection</span><span class="chip">Exposed debugger / stack traces</span><span class="chip">Rate limiting</span>
+      <span class="chip">Security headers &amp; cookie flags</span><span class="chip">Malformed-input crashes</span>
+    </div>
+    <p class="caption">Plus a browser UI tour (JS errors, failed requests, visual regression against a baseline) and dependency CVE and licence checks. Business-logic bugs are on the roadmap, not covered yet.</p>
+  </div>
+</section>
+
+<!-- 6 · WORKFLOW — tests + Jira: the rest of the platform, tied to the same story -->
+<section id="workflow" aria-labelledby="wf-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">One workflow</div>
+      <h2 id="wf-h">Bugs, test cases and tickets in one place</h2>
+      <p class="lead">Scanning and test generation are two ways into the same flow: you review the result, then it goes to the tools your team already uses.</p>
+    </div>
+    <div class="grid g3">
+      <div class="card"><div class="ic">SCAN</div><h3 style="margin-top:8px">Prove bugs in the running app</h3>
+        <p>Confirmed findings with request and response evidence, a "why it matters" and a fix. Download the report as self-contained HTML or print it to PDF.</p>
+        <p><a href="/app#scan">Open the scanner →</a></p></div>
+      <div class="card"><div class="ic">GENERATE</div><h3 style="margin-top:8px">Draft test cases from a story or code</h3>
+        <p>Paste a user story or a function and QAX drafts structured test cases with steps and expected results. They're drafts for a QA engineer to review, not a replacement for one.</p>
+        <p><a href="/app#generate">Generate test cases →</a></p></div>
+      <div class="card"><div class="ic">FILE</div><h3 style="margin-top:8px">Send to Jira, Xray, Zephyr or Excel <span class="status pre">dry run by default</span></h3>
+        <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · PROOF — numbers we can reproduce, with their source and limits -->
+<section aria-labelledby="proof-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Evidence</div>
+      <h2 id="proof-h">Measured, not claimed</h2>
+      <p class="lead">Every change to QAX goes through a gate that scans a deliberately vulnerable app and a fixed copy of it. If it misses a planted bug or flags the fixed copy, the change can't merge.</p>
+    </div>
+    <div class="grid g4">
+      <div class="stat"><div class="n ok">10 / 10</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
+      <div class="stat"><div class="n ok">0</div><div class="l">false positives</div><div class="src">The same gate, plus a fixed copy of the target that must come back silent.</div></div>
+      <div class="stat"><div class="n">2×</div><div class="l">identical confirmed list</div><div class="src">The gate scans twice and requires the same result.</div></div>
+      <div class="stat"><div class="n">3</div><div class="l">external stacks, 0 false alarms</div><div class="src">Well-written Node, Go and Java backends we didn't write. A small sample, and we say so.</div></div>
+    </div>
+    <p class="caption">Measured October 2026. Case studies on larger real-world apps are in progress and will be published with their full scorecards, including what QAX missed.</p>
+  </div>
+</section>
+
+<!-- 8 · SECURITY — every sentence maps to a shipped control -->
+<section id="security" aria-labelledby="sec-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Security &amp; privacy</div>
+      <h2 id="sec-h">Safe to point at your own stuff</h2>
+      <p class="lead">A tool that attacks apps should be careful about how it does it. These controls are built in and covered by tests.</p>
+    </div>
+    <div class="grid g3">
+      <div class="card"><h3>Runs on your machine</h3><p>QAX runs locally. Your code isn't uploaded anywhere. AI features call the model provider with your own API key.</p></div>
+      <div class="card"><h3>Authorized targets only</h3><p>A scan won't start until you confirm you own the app or are allowed to test it. Probes that write data are labelled as such.</p></div>
+      <div class="card"><h3>Stays on your origin</h3><p>Generated tests never send requests or your tokens to any host except the target you gave.</p></div>
+      <div class="card"><h3>Nothing filed by accident</h3><p>Exports are dry runs unless the server operator enables live export. A request can't force a live push.</p></div>
+      <div class="card"><h3>Lockable API</h3><p>Set <code>QAX_API_TOKEN</code> and every API call must carry it. Do this before exposing the server beyond localhost.</p></div>
+      <div class="card"><h3>Leaves no mess</h3><p>Test records use <code>qax*</code> names, and the report tells you exactly what QAX created on the target and what it cleaned up.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 · AUDIENCES — same product, different reasons to care -->
+<section aria-labelledby="aud-h">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">Who it's for</div>
+      <h2 id="aud-h">One report, read three ways</h2>
+    </div>
+    <div class="tabs" id="tabs">
+      <div role="tablist" aria-label="Audience">
+        <button role="tab" id="t-own" aria-controls="p-own" aria-selected="true">Founders &amp; tech leads</button>
+        <button role="tab" id="t-qa" aria-controls="p-qa" aria-selected="false" tabindex="-1">QA engineers</button>
+        <button role="tab" id="t-dev" aria-controls="p-dev" aria-selected="false" tabindex="-1">Developers</button>
       </div>
-    </details>
-    <div class="hint">Quick scan — deterministic probes + coverage, ~seconds and near-free. The app must be running and reachable.</div>
+      <div role="tabpanel" id="p-own" aria-labelledby="t-own" tabindex="0">
+        <h3>Know what's actually exploitable, without a security team</h3>
+        <ul><li>A clear verdict: how many issues are proven, and on which endpoints.</li><li>A shareable report you can send to a client or an investor.</li><li>Cheap to run: a quick scan usually costs cents in model usage, and often nothing.</li></ul>
+      </div>
+      <div role="tabpanel" id="p-qa" aria-labelledby="t-qa" tabindex="0" hidden>
+        <h3>Stop writing up bugs by hand</h3>
+        <ul><li>Each bug arrives with steps, evidence and an expected result.</li><li>Draft test cases from a user story, review them, push them to Xray.</li><li>Findings are drafted as Jira bugs in the format your team already uses.</li></ul>
+      </div>
+      <div role="tabpanel" id="p-dev" aria-labelledby="t-dev" tabindex="0" hidden>
+        <h3>No noise to triage</h3>
+        <ul><li>Confirmed means reproducible: the same scan gives the same list.</li><li>The exact request, the response and a concrete fix for each finding.</li><li>Works next to your code reviewer, not instead of it.</li></ul>
+      </div>
+    </div>
   </div>
+</section>
 
-  <div class="panel" id="panel-gen" style="display:none">
-    <div class="field">
-      <label for="story">User story / acceptance criteria</label>
-      <textarea id="story" rows="5" placeholder="As a user, I can reset my password via an emailed link that expires in 15 minutes. The link works once; an expired or reused link shows an error."></textarea>
+<!-- 10 · NEXT STEP — honest about maturity: local run, no pricing yet -->
+<section id="start" aria-labelledby="start-h">
+  <div class="wrap">
+    <div class="grid g2" style="align-items:start;gap:48px">
+      <div>
+        <div class="eyebrow">Get started</div>
+        <h2 id="start-h" style="margin:12px 0 16px">Run it locally in a few minutes</h2>
+        <p class="lead">QAX is in early access. It runs from the source repository, with no account and no signup.
+          Pricing hasn't been set yet: we're working with early teams first, and running it locally is free.</p>
+      </div>
+      <div>
+        <div class="faint" style="font-size:14px">1 · Start the app (from the repo root)</div>
+        <div class="cmd"><span class="p">$</span><code>./.venv-exec/bin/python -m web.server</code><button class="copy" data-copy="./.venv-exec/bin/python -m web.server">Copy</button></div>
+        <div class="faint" style="font-size:14px;margin-top:20px">2 · Open it and scan an app you own</div>
+        <div class="cmd"><span class="p">→</span><code>http://127.0.0.1:8900/app</code><button class="copy" data-copy="http://127.0.0.1:8900/app">Copy</button></div>
+        <div class="faint" style="font-size:14px;margin-top:20px">Or check QAX against its own test target</div>
+        <div class="cmd"><span class="p">$</span><code>make eval</code><button class="copy" data-copy="make eval">Copy</button></div>
+      </div>
     </div>
-    <details class="adv">
-      <summary>Or paste source code instead (optional)</summary>
-      <div class="field" style="margin-top:12px"><label for="code">Source code</label>
-        <textarea id="code" rows="6" placeholder="// paste a function, endpoint, or module"></textarea></div>
-    </details>
-    <div class="row" style="margin-top:14px;justify-content:flex-end">
-      <button class="btn" id="gengo" onclick="runGenerate()">Generate test cases</button>
-    </div>
-    <div class="hint">Turns requirements or code into structured test cases you can review, run, and push to Jira/Xray.</div>
   </div>
+</section>
 
-  <div id="scanning">
-    <div class="live-head"><span class="radar"></span><span id="scanmsg">Scanning…</span></div>
-    <div class="live" id="live"></div>
+<!-- 11 · FAQ — the long tail of objections -->
+<section id="faq" aria-labelledby="faq-h">
+  <div class="wrap">
+    <div class="sec-head"><div class="eyebrow">FAQ</div><h2 id="faq-h">Questions people ask first</h2></div>
+    <details class="q"><summary>How is QAX different from an AI code reviewer?</summary><p>A code reviewer reads your changes and comments on them. QAX tests the deployed app: it sends real requests and reports a bug as confirmed only when the response proves it. The two work well together.</p></details>
+    <details class="q"><summary>What does “confirmed” mean exactly?</summary><p>A deterministic probe saw the app misbehave in a way a control request rules out. For example, a forged token gets HTTP 200 while no token gets 401. The same scan reproduces the same confirmed list.</p></details>
+    <details class="q"><summary>Is it a replacement for a penetration test?</summary><p>No. QAX covers a defined set of bug classes (listed above) automatically and repeatably. Business-logic flaws and chained attacks still need a human, and business-logic probes are on our roadmap.</p></details>
+    <details class="q"><summary>Do I need an OpenAPI spec or the source code?</summary><p>No, though both help. QAX can scan from a URL alone, using common-path discovery and a UI tour. With source it maps endpoints from the code and checks them against the live app.</p></details>
+    <details class="q"><summary>Can it change data on my app?</summary><p>Some probes create disposable records to test access control. They're labelled as writing data, use <code>qax*</code> names, and the report lists what was created and cleaned up. Only scan apps you're allowed to test, ideally staging.</p></details>
+    <details class="q"><summary>What leaves my machine?</summary><p>The scanning engine runs locally. The AI features (deeper investigation, test generation) send prompts to the model provider using your API key. Jira or Xray only receive data if you configure credentials and enable live export.</p></details>
+    <details class="q"><summary>Which stacks does it support?</summary><p>QAX has been run on Python (Flask, FastAPI), Node/Express, Go/Gin and Java/Spring apps. The code reader also understands Ruby, PHP, C#, Kotlin, Rust and more, but those have been tested less.</p></details>
+    <details class="q"><summary>How much does it cost?</summary><p>Running it locally is free during early access. You pay your model provider for AI features: a quick scan typically costs cents or nothing, and a deep scan has measured around $0.40. Paid plans will come later.</p></details>
   </div>
-  <div id="err"></div>
+</section>
 
-  <section id="results">
-    <div class="rtool" id="rtool">
-      <button class="btn2" id="filebtn" onclick="fileFindings()">⤴ File to Jira/Xray</button>
-      <button class="btn2" onclick="downloadReport()">⤓ Download report</button>
-      <button class="btn2" onclick="printReport()">⎙ Print / PDF</button>
+<!-- 12 · FINAL CTA -->
+<section class="final" aria-labelledby="final-h">
+  <div class="wrap">
+    <h2 id="final-h">Find out what your app really does</h2>
+    <p class="lead">Scan an app you own and see the confirmed list in about a minute.</p>
+    <div class="cta-row">
+      <a href="/app#scan" class="btn btn-primary">Scan a running app →</a>
+      <a href="/app#generate" class="btn btn-ghost">Generate test cases</a>
     </div>
-    <div id="exportmsg" class="hk" style="display:none"></div>
-    <div class="verdict" id="verdict"></div>
-    <div class="stats" id="stats"></div>
-    <div class="layers" id="layers"></div>
-    <div id="housekeeping"></div>
-    <div id="tour"></div>
-    <div id="findings"></div>
-  </section>
+  </div>
+</section>
+</main>
 
-  <section id="genresults">
-    <div class="rtool" id="gentool" style="display:none">
-      <button class="btn2" id="gentfilebtn" onclick="fileTests()">⤴ Push to Jira/Xray</button>
-    </div>
-    <div class="sec-title">Generated test cases <span id="gencount" style="color:var(--txt)"></span></div>
-    <div id="tests"></div>
-    <div class="hint" id="genjira" style="margin-top:14px"></div>
-  </section>
-</div>
-
-<footer>QAX runs locally against an app you control. The <b>confirmed</b> block is deterministic and
-zero-false-positive — re-run and you get the same list. <b>Leads</b> (AI findings + dependency
-hygiene) are higher-recall but may vary — shown separately, on purpose.</footer>
+<footer>
+  <div class="wrap">
+    <div><a href="/" class="logo">QA<span>X</span></a>
+      <p style="margin-top:12px;max-width:380px">Runtime quality and security proof: scan the running app, prove the bugs, file them where your team works.</p></div>
+    <div><h4>Product</h4><ul><li><a href="/app#scan">Scanner</a></li><li><a href="/app#generate">Test generation</a></li><li><a href="#how">How it works</a></li><li><a href="#evidence">Confirmed vs leads</a></li></ul></div>
+    <div><h4>Trust</h4><ul><li><a href="#security">Security &amp; privacy</a></li><li><a href="#start">Run locally</a></li><li><a href="#faq">FAQ</a></li></ul></div>
+  </div>
+</footer>
 
 <script>
-const $ = id => document.getElementById(id);
-const esc = s => String(s==null?"":s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-
-let _es=null;
-const ICON={start:'▸',ok:'✓',info:'›',warn:'!',error:'✕'};
-function logLine(step,status,detail){
-  const el=document.createElement('div');
-  el.className='logline '+(status||'info');
-  el.innerHTML='<span class="ic">'+(ICON[status]||'›')+'</span>'
-    +'<span class="st">'+esc(status||'')+'</span>'
-    +'<span>'+esc(detail||step)+'</span>';
-  const box=$('live'); box.appendChild(el); box.scrollTop=box.scrollHeight;
-}
-function setMode(m){
-  const scan = m==='scan';
-  $('panel-scan').style.display = scan?'':'none';
-  $('panel-gen').style.display = scan?'none':'';
-  $('mode-scan').classList.toggle('active', scan);
-  $('mode-gen').classList.toggle('active', !scan);
-  $('results').style.display='none'; $('genresults').style.display='none';
-  $('scanning').style.display='none'; $('err').style.display='none';
-}
-function showErr(m){ $('err').textContent=m; $('err').style.display='block'; }
-
-async function runGenerate(){
-  const story=$('story').value.trim(), code=$('code').value.trim();
-  if(!story && !code){ showErr('Enter a user story or paste some source code.'); return; }
-  $('err').style.display='none'; $('results').style.display='none'; $('genresults').style.display='none';
-  const btn=$('gengo'); btn.disabled=true; const orig=btn.textContent; btn.textContent='Generating…';
-  $('scanning').style.display='block'; $('scanmsg').textContent='Generating test cases…'; $('live').innerHTML='';
-  logLine('generate','start','asking QAX to draft test cases from your input');
-  try{
-    const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({story,code})});
-    const d=await r.json();
-    if(d.error){ showErr(d.error); }
-    else { logLine('generate','ok',(d.tests||[]).length+' test case(s) drafted'); renderTests(d.tests||[]); }
-  }catch(e){ showErr('Generation failed: '+e); }
-  finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; }
-}
-window._lastTests=[];
-function renderTests(cases){
-  window._lastTests=cases||[];
-  $('genresults').style.display='block';
-  $('gentool').style.display = (cases&&cases.length)?'flex':'none';
-  $('gencount').textContent = cases.length ? '· '+cases.length : '';
-  if(!cases.length){ $('tests').innerHTML='<div class="hint">No test cases generated — try a more specific story.</div>'; $('genjira').innerHTML=''; return; }
-  $('tests').innerHTML = cases.map(tc=>{
-    const raw=(tc.steps||tc.test_steps||tc.automation_steps||[]);
-    const steps=Array.isArray(raw)?raw:[];
-    const fmtStep=s=>{
-      if(typeof s==='string') return s;
-      if(s.action||s.step||s.description) return s.action||s.step||s.description;
-      const act=(s.playwright_action||'').replace(/_/g,' ');
-      const sel=String(s.selector_key||s.selector||'').replace(/^TODO_/,'');
-      const val=s.value?(' → "'+s.value+'"'):'';
-      const asrt=(s.assertion_type&&!act.includes('fill')&&!act.includes('navigat'))?(' ['+s.assertion_type+(s.assertion_value?(' '+s.assertion_value):'')+']'):'';
-      return ((act+' '+sel).trim()+val+asrt).trim()||JSON.stringify(s);
-    };
-    const stepsH = steps.length ? '<ol class="steps">'+steps.map(s=>'<li>'+esc(fmtStep(s))+'</li>').join('')+'</ol>' : '';
-    const exp = tc.expected_result||tc.expected||tc.expectedResult||'';
-    const pri = tc.priority||tc.severity||'';
-    const rev = tc.needs_review||tc.needsReview;
-    return '<div class="tc"><div class="th"><span class="tt">'+esc(tc.title||tc.name||'Test case')+'</span>'
-      +(pri?'<span class="pri">'+esc(pri)+'</span>':'')
-      +(rev?'<span class="rev">needs review</span>':'')+'</div>'
-      +stepsH
-      +(exp?'<div class="exp"><div class="k">Expected</div>'+esc(exp)+'</div>':'')
-      +'</div>';
-  }).join('');
-  $('genjira').innerHTML = 'Review, then <b>push to Jira / Xray</b> with the button above.';
-}
-
-async function doExport(items, kind, btn, msgEl){
-  if(!items || !items.length){ msgEl.style.display='block'; msgEl.innerHTML='Nothing to file yet.'; return; }
-  const orig=btn.textContent; btn.disabled=true; btn.textContent='Filing…';
-  msgEl.style.display='block'; msgEl.innerHTML='Filing to Jira/Xray…';
-  try{
-    const r=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({items,kind,target:'xray'})});
-    const d=await r.json();
-    if(d.error){ msgEl.innerHTML='⚠️ '+esc(d.error); }
-    else {
-      const dry=d.dry_run, n=d.exported_count||0;
-      const noun=(d.kind==='findings')?('bug'+(n!==1?'s':'')):('test case'+(n!==1?'s':''));
-      const where=(d.kind==='findings')?'Jira':esc((d.target||'xray').toUpperCase());
-      msgEl.innerHTML=(dry?'🧪 <b>Dry run</b> — would file ':'✅ filed ')+n+' '+noun+' in <b>'+where+'</b>'
-        +(d.references&&d.references.length?' ('+d.references.slice(0,3).map(esc).join(', ')+(d.references.length>3?'…':'')+')':'')
-        +(dry?'. Add your Jira/Xray credentials to <code>.env</code> to file for real.':'.');
-    }
-  }catch(e){ msgEl.innerHTML='⚠️ Export failed: '+esc(String(e)); }
-  finally{ btn.disabled=false; btn.textContent=orig; }
-}
-function fileFindings(){
-  const d=window._last||{}; const items=[].concat(d.claims||[]).concat(d.leads||[]);
-  doExport(items,'findings',$('filebtn'),$('exportmsg'));
-}
-function fileTests(){
-  doExport(window._lastTests||[],'tests',$('gentfilebtn'),$('genjira'));
-}
-
-function runScan(){
-  const url=$('url').value.trim();
-  if(!url){ $('url').focus(); return; }
-  $('genresults').style.display='none';
-  $('go').disabled=true;
-  $('err').style.display='none'; $('results').style.display='none';
-  $('live').innerHTML=''; $('scanmsg').textContent='Scanning '+url+' …';
-  $('scanning').style.display='block';
-  if(_es) _es.close();
-  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim()});
-  _es=new EventSource('/api/scan/stream?'+qs.toString());
-  _es.onmessage=(e)=>{
-    let m; try{ m=JSON.parse(e.data); }catch{ return; }
-    if(m.type==='progress'){ logLine(m.step,m.status,m.detail); }
-    else if(m.type==='result'){ finish(); render(m.payload); }
-    else if(m.type==='error'){ finish(); showError(m.error||'Scan error'); }
-    else if(m.type==='done'){ finish(); }
-  };
-  _es.onerror=()=>{ finish(); if($('results').style.display!=='block' && $('err').style.display!=='block') showError('Lost connection to the scanner backend.'); };
-}
-function finish(){ if(_es){ _es.close(); _es=null; } $('scanning').style.display='none'; $('go').disabled=false; }
-function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }
-
-function render(d){
-  const sc = d.scorecard||{}, cost = sc.cost||{};
-  const nClaims = (d.claims||[]).length, nLeads=(d.leads||[]).length;
-  // verdict
-  const v=$('verdict');
-  if(nClaims>0){
-    v.className='verdict bad';
-    v.innerHTML='<span class="vicon">🛑</span><div><div class="big">'+nClaims+' confirmed issue'+(nClaims>1?'s':'')+'</div>'
-      +'<div class="sub">Proven exploitable on '+esc(d.url)+' — plus '+nLeads+' lead'+(nLeads!==1?'s':'')+' to review.</div></div>';
-  }else{
-    v.className='verdict good';
-    v.innerHTML='<span class="vicon">✓</span><div><div class="big">No confirmed issues</div>'
-      +'<div class="sub">The app held up to the scan. QAX reports only what it can prove — '+nLeads+' low-confidence lead'+(nLeads!==1?'s':'')+'.</div></div>';
-  }
-  // stats
-  const cstr = cost && cost.tracked ? ('$'+cost.estimated_usd) : '—';
-  $('stats').innerHTML = [
-    ['n p1',nClaims,'Confirmed · deterministic'],
-    ['n p3',nLeads,'Leads · AI / hygiene'],
-    ['n',sc.tests_run??'—','Tests run'],
-    ['n',(sc.duration_sec??'—')+'s','Duration'],
-    ['n',cstr,'LLM cost'],
-    ['n '+(sc.end_to_end?'ok':''),sc.end_to_end?'yes':'no','End-to-end'],
-  ].map(([c,n,l])=>'<div class="stat"><div class="'+c+'">'+esc(n)+'</div><div class="l">'+l+'</div></div>').join('');
-  // layers
-  const bl=d.by_layer||{};
-  $('layers').innerHTML = Object.keys(bl).length
-    ? Object.entries(bl).map(([k,v])=>'<span class="chip"><b>'+esc(v)+'</b> '+esc(k)+'</span>').join('') : '';
-  // housekeeping — transparency about test data QAX wrote on the target
-  const hk=d.housekeeping||{};
-  $('housekeeping').innerHTML = (hk.created||0)
-    ? '<div class="hk">🧹 QAX created '+hk.created+' disposable test record'+(hk.created>1?'s':'')
-      +' on the target and cleaned up '+(hk.cleaned||0)+'.'
-      +((hk.cleaned||0)<(hk.created||0) ? ' The rest need manual cleanup (all use qax* test identifiers).' : ' Nothing left behind.')
-      +'</div>'
-    : '';
-  // UI tour gallery
-  const scr=d.screens||[];
-  $('tour').innerHTML = scr.length
-    ? '<div class="sec-title">UI tour — '+scr.length+' screen'+(scr.length>1?'s':'')+' captured</div><div class="tourgrid">'
-      + scr.map(s=>{const errs=((s.errors||[]).length)+((s.net_errors||[]).length);
-          return '<div class="shot"><img src="'+esc(s.screenshot_url)+'" loading="lazy" alt="">'
-            +'<div class="cap"><span class="u" title="'+esc(s.url||'')+'">'+esc((s.title||s.url||'screen').slice(0,30))+'</span>'
-            +(errs?'<span class="bad">'+errs+' ⚠</span>':'<span class="okb">✓</span>')+'</div></div>';
-        }).join('') + '</div>'
-    : '';
-  // findings
-  const order={P1:0,P2:1,P3:2};
-  const card = b => {
-    const sev=(b.severity||'P?').toUpperCase();
-    return '<div class="finding sev-'+esc(sev)+'"><div class="top">'
-      +'<span class="sev '+esc(sev)+'">'+esc(sev)+'</span>'
-      +'<span class="title">'+esc(b.title)+'</span>'
-      +'<span class="meta">'+(b.source?'<span class="tag">'+esc(b.source)+'</span>':'')+'</span></div>'
-      +(b.target?'<div class="target">'+esc(b.target)+'</div>':'')
-      +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')
-      +((b.remediation&&b.remediation.fix)?'<div class="fix"><div class="k">Why it matters</div>'
-        +'<div class="why">'+esc(b.remediation.why)+'</div>'
-        +'<div class="k">How to fix</div><div class="how">'+esc(b.remediation.fix)+'</div></div>':'')
-      +'</div>';
-  };
-  let html='';
-  const claims=(d.claims||[]).slice().sort((a,b)=>order[(a.severity||'P3').toUpperCase()]-order[(b.severity||'P3').toUpperCase()]);
-  if(claims.length){ html+='<div class="sec-title">Confirmed — proven exploitable</div>'+claims.map(card).join(''); }
-  if((d.leads||[]).length){ html+='<div class="sec-title">Leads — flagged, not confirmed</div>'+(d.leads).map(card).join(''); }
-  $('findings').innerHTML=html;
-  window._last=d; $('rtool').style.display='flex';
-  $('results').style.display='block';
-  $('results').scrollIntoView({behavior:'smooth',block:'start'});
-}
-
-/* ---- shareable / printable report (self-contained HTML) ---- */
-function buildReportHTML(d){
-  const sc=d.scorecard||{}, cost=sc.cost||{};
-  const nC=(d.claims||[]).length, nL=(d.leads||[]).length;
-  const when=new Date().toLocaleString();
-  const cstr = cost&&cost.tracked ? ('$'+cost.estimated_usd) : '—';
-  const sevColor={P1:'#d11f3f',P2:'#c77700',P3:'#5b6b84'};
-  const fRow = b=>{const s=(b.severity||'P?').toUpperCase();return(
-    '<div class="f" style="border-left:4px solid '+(sevColor[s]||'#5b6b84')+'">'
-    +'<div class="fh"><span class="sev" style="background:'+(sevColor[s]||'#5b6b84')+'1a;color:'+(sevColor[s]||'#5b6b84')+';border:1px solid '+(sevColor[s]||'#5b6b84')+'55">'+esc(s)+'</span>'
-    +'<span class="ft">'+esc(b.title)+'</span>'+(b.source?'<span class="src">'+esc(b.source)+'</span>':'')+'</div>'
-    +(b.target?'<div class="tg">'+esc(b.target)+'</div>':'')
-    +(b.evidence?'<div class="ev">'+esc(b.evidence)+'</div>':'')
-    +((b.remediation&&b.remediation.fix)?'<div class="rfix"><div class="rk">Why it matters</div>'
-      +'<div class="rwhy">'+esc(b.remediation.why)+'</div><div class="rk">How to fix</div><div>'+esc(b.remediation.fix)+'</div></div>':'')
-    +'</div>');};
-  const order={P1:0,P2:1,P3:2};
-  const claims=(d.claims||[]).slice().sort((a,b)=>order[(a.severity||'P3').toUpperCase()]-order[(b.severity||'P3').toUpperCase()]);
-  const stat=(n,l)=>'<td><div class="n">'+esc(n)+'</div><div class="l">'+l+'</div></td>';
-  const layers=Object.entries(d.by_layer||{}).map(([k,v])=>esc(v)+' '+esc(k)).join(' · ')||'—';
-  return '<!doctype html><html><head><meta charset="utf-8"><title>QAX report — '+esc(d.url)+'</title>'
-  +'<style>'
-  +'*{box-sizing:border-box}body{font-family:-apple-system,Segoe UI,Roboto,Inter,sans-serif;color:#17202e;background:#f5f7fb;margin:0;padding:40px}'
-  +'.doc{max-width:820px;margin:0 auto;background:#fff;border:1px solid #e4e9f2;border-radius:14px;padding:38px;box-shadow:0 10px 40px -24px #15213a}'
-  +'.brand{font-weight:800;font-size:20px;color:#4f46e5;letter-spacing:-.5px}.brand span{color:#06b6d4}'
-  +'.sub{color:#6b7689;font-size:12.5px;margin-top:2px}'
-  +'h1{font-size:22px;margin:22px 0 4px}.meta{color:#6b7689;font-size:13px;margin-bottom:18px}'
-  +'.verdict{border-radius:12px;padding:16px 18px;font-weight:700;font-size:18px;margin:10px 0 18px}'
-  +'.vbad{background:#fdecef;color:#b3243c;border:1px solid #f3c2cd}.vgood{background:#e8f8f1;color:#17795a;border:1px solid #bce9d6}'
-  +'table.stats{width:100%;border-collapse:collapse;margin:0 0 10px}table.stats td{border:1px solid #e4e9f2;border-radius:0;padding:12px;text-align:center;width:16.6%}'
-  +'.stats .n{font-size:19px;font-weight:800}.stats .l{font-size:10.5px;color:#6b7689;text-transform:uppercase;letter-spacing:.4px;margin-top:3px}'
-  +'.lay{font-size:12.5px;color:#6b7689;margin:4px 0 20px}'
-  +'.sct{font-size:12px;color:#6b7689;text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin:22px 0 10px;border-top:1px solid #eef1f7;padding-top:16px}'
-  +'.f{background:#fbfcfe;border:1px solid #e9edf5;border-radius:10px;padding:13px 15px;margin-bottom:10px}'
-  +'.fh{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.sev{font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px}'
-  +'.ft{font-weight:600;font-size:14.5px}.src{margin-left:auto;font-size:11px;color:#6b7689;background:#eef1f7;border:1px solid #e0e6f0;border-radius:6px;padding:2px 8px}'
-  +'.tg{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#0a74b8;margin-top:6px}'
-  +'.ev{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#2a3344;background:#f1f4f9;border:1px solid #e4e9f2;border-radius:8px;padding:10px 11px;margin-top:9px;white-space:pre-wrap;word-break:break-word}'
-  +'.rfix{background:#eef4ff;border:1px solid #d6e2f7;border-radius:8px;padding:10px 12px;margin-top:9px;font-size:12.5px}'
-  +'.rk{color:#3b5bdb;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}.rwhy{color:#3a4557;margin:3px 0 8px}'
-  +'.rgal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}'
-  +'.rshot{border:1px solid #e4e9f2;border-radius:8px;overflow:hidden}.rshot img{width:100%;height:100px;object-fit:cover;object-position:top;display:block;border-bottom:1px solid #eef1f7}'
-  +'.rcap{padding:6px 8px;font-size:11px;color:#6b7689;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
-  +'.foot{color:#8a95a7;font-size:11.5px;margin-top:26px;border-top:1px solid #eef1f7;padding-top:14px}'
-  +'@media print{body{background:#fff;padding:0}.doc{border:0;box-shadow:none;max-width:none}}'
-  +'</style></head><body><div class="doc">'
-  +'<div class="brand">QA<span>X</span></div><div class="sub">deterministic exploit scanner — security &amp; QA report</div>'
-  +'<h1>Scan report</h1><div class="meta">Target: <b>'+esc(d.url)+'</b> · Generated '+esc(when)+' · Quick scan</div>'
-  +(nC>0
-     ? '<div class="verdict vbad">🛑 '+nC+' confirmed issue'+(nC>1?'s':'')+' — proven exploitable ('+nL+' lead'+(nL!==1?'s':'')+' to review)</div>'
-     : '<div class="verdict vgood">✓ No confirmed issues — the app held up ('+nL+' low-confidence lead'+(nL!==1?'s':'')+')</div>')
-  +'<table class="stats"><tr>'+stat(nC,'Confirmed · deterministic')+stat(nL,'Leads · may vary')+stat(sc.tests_run??'—','Tests')+stat((sc.duration_sec??'—')+'s','Duration')+stat(cstr,'LLM cost')+stat(sc.end_to_end?'yes':'no','End-to-end')+'</tr></table>'
-  +'<div class="lay">Caught by: '+layers+'</div>'
-  +(claims.length?'<div class="sct">Confirmed — proven exploitable</div>'+claims.map(fRow).join(''):'')
-  +((d.leads||[]).length?'<div class="sct">Leads — flagged, not confirmed</div>'+(d.leads).map(fRow).join(''):'')
-  +((d.screens||[]).length?'<div class="sct">UI tour — '+(d.screens.length)+' screen'+(d.screens.length>1?'s':'')+' captured</div><div class="rgal">'
-    +(d.screens).map(s=>{const src=s.dataurl||s.screenshot_url||'';const errs=((s.errors||[]).length)+((s.net_errors||[]).length);
-       return '<div class="rshot">'+(src?'<img src="'+esc(src)+'" alt="">':'')
-         +'<div class="rcap">'+esc((s.title||s.url||'screen').slice(0,40))+(errs?' · '+errs+' issue'+(errs>1?'s':''):' · ✓')+'</div></div>';}).join('')
-    +'</div>':'')
-  +(((d.housekeeping||{}).created||0)?'<div class="sct">Test-data footprint</div><div class="rwhy">QAX created '
-     +d.housekeeping.created+' disposable test record(s) on the target and cleaned up '+(d.housekeeping.cleaned||0)
-     +'. Any remainder uses qax* identifiers and can be removed manually.</div>':'')
-  +'<div class="foot">Generated by QAX. Confirmed (P1/P2) issues were proven on the live app; leads (P3) were flagged but not confirmed — reported separately, on purpose. Scan run locally against an app you control.</div>'
-  +'</div></body></html>';
-}
-async function _dataUrl(u){
-  try{ const r=await fetch(u); if(!r.ok) return ''; const b=await r.blob();
-    return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>res('');fr.readAsDataURL(b);}); }
-  catch{ return ''; }
-}
-async function _withShots(d){
-  const c=JSON.parse(JSON.stringify(d||{}));
-  await Promise.all((c.screens||[]).map(async s=>{ if(s.screenshot_url) s.dataurl=await _dataUrl(s.screenshot_url); }));
-  return c;  // self-contained: screenshots inlined as base64 so the report shares/prints standalone
-}
-async function downloadReport(){
-  if(!window._last) return;
-  let host='app'; try{ host=new URL(window._last.url).host.replace(/[:.]/g,'-'); }catch{}
-  const d=await _withShots(window._last);
-  const blob=new Blob([buildReportHTML(d)],{type:'text/html'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='QAX-report-'+host+'-'+new Date().toISOString().slice(0,10)+'.html';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
-}
-async function printReport(){
-  if(!window._last) return;
-  const d=await _withShots(window._last);
-  const w=window.open('','_blank');
-  w.document.write(buildReportHTML(d)); w.document.close();
-  setTimeout(()=>{ w.focus(); w.print(); },350);
-}
-$('url').addEventListener('keydown',e=>{ if(e.key==='Enter') runScan(); });
+// Mobile menu
+(function(){
+  var nav=document.getElementById('nav'), btn=document.getElementById('menu-btn');
+  btn.addEventListener('click',function(){ var o=nav.classList.toggle('open'); btn.setAttribute('aria-expanded',o); });
+  nav.querySelectorAll('.nav-links a').forEach(function(a){ a.addEventListener('click',function(){ nav.classList.remove('open'); btn.setAttribute('aria-expanded','false'); }); });
+})();
+// Accessible tabs (arrow keys move between tabs)
+(function(){
+  var tabs=[].slice.call(document.querySelectorAll('#tabs [role=tab]'));
+  function select(t){ tabs.forEach(function(x){ var on=x===t; x.setAttribute('aria-selected',on); x.tabIndex=on?0:-1;
+    document.getElementById(x.getAttribute('aria-controls')).hidden=!on; }); t.focus(); }
+  tabs.forEach(function(t,i){
+    t.addEventListener('click',function(){ select(t); });
+    t.addEventListener('keydown',function(e){ var d=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
+      if(d){ e.preventDefault(); select(tabs[(i+d+tabs.length)%tabs.length]); } });
+  });
+})();
+// Copy buttons
+document.querySelectorAll('.copy').forEach(function(b){
+  b.addEventListener('click',function(){
+    var t=b.getAttribute('data-copy'), done=function(){ b.textContent='Copied'; setTimeout(function(){ b.textContent='Copy'; },1500); };
+    if(navigator.clipboard){ navigator.clipboard.writeText(t).then(done,function(){ b.textContent='Select & copy'; }); } else { b.textContent='Select & copy'; }
+  });
+});
 </script>
 </body>
 </html>

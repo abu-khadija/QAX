@@ -186,6 +186,17 @@ def serve_upload(name):
     return (data, 200, {"Content-Type": ct})
 
 
+@app.post("/orders")
+def create_order():
+    body = request.get_json(silent=True) or {}
+    qty = body.get("quantity", 1)
+    # VULNERABLE: no business validation — a negative quantity is accepted and stored.
+    # SECURE: reject non-positive quantities.
+    if SECURE and (not isinstance(qty, int) or qty < 1):
+        return jsonify({"error": "quantity must be positive"}), 400
+    return jsonify({"id": 1, "item": body.get("item", "x"), "quantity": qty}), 201
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -211,6 +222,9 @@ def spec():
             "/import": {"post": {"responses": {"200": {"description": "ok"}}}},
             "/graphql": {"post": {"responses": {"200": {"description": "ok"}}}},
             "/upload": {"post": {"responses": {"201": {"description": "ok"}}}},
+            "/orders": {"post": {"responses": {"201": {"description": "ok"}},
+                                 "requestBody": {"content": {"application/json": {"schema": {"properties": {
+                                     "item": {"type": "string"}, "quantity": {"type": "integer"}}}}}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

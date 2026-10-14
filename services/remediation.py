@@ -28,6 +28,14 @@ _MAP = {
         "fix": "Never trust the Host/X-Forwarded-Host header for URL generation. Use a "
                "configured canonical base URL, and validate Host against an allowlist.",
     },
+    "business-logic": {
+        "why": "A negative quantity/amount is accepted and stored, so an attacker can "
+               "order -N items or set a negative price/total to abuse refunds, credits, or "
+               "inventory.",
+        "fix": "Validate business invariants server-side: reject non-positive quantities "
+               "and amounts (and other out-of-range values) before persisting; never trust "
+               "client-supplied totals.",
+    },
     "file-upload": {
         "why": "The app stores an uploaded file under an attacker-chosen name/extension and "
                "serves it back executable (HTML/JS in-origin), giving stored XSS and often RCE.",

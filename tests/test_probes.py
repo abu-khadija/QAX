@@ -1425,3 +1425,36 @@ def test_file_upload_quiet_when_extension_rejected():
 def test_file_upload_is_labelled_mutating():
     from execution.probes import MUTATING_PROBES
     assert "file-upload" in MUTATING_PROBES
+
+
+# ── business logic: negative quantity accepted + stored ─────────────────────────
+
+def _bl_model():
+    return AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/orders", "request_fields": ["item", "quantity"]}])
+
+
+class _BlSession:
+    def __init__(self, mode):  # 'vuln' accepts any qty | 'secure' rejects qty < 1
+        self.mode = mode
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        qty = (json or {}).get("quantity")
+        if self.mode == "secure" and isinstance(qty, int) and qty < 1:
+            return MagicMock(status_code=400, text='{"error":"quantity must be positive"}')
+        return MagicMock(status_code=201, text='{"id":1,"quantity":%s}' % qty)
+
+    def get(self, *a, **k):
+        return MagicMock(status_code=200, text="{}")
+
+
+def test_business_logic_detects_negative_quantity_stored():
+    from execution.probes import business_logic_probe
+    out = business_logic_probe(_bl_model(), "http://x", session=_BlSession("vuln"))
+    assert len(out) == 1 and out[0].probe == "business-logic" and out[0].severity == "P2"
+    assert out[0].target == "/orders"
+
+
+def test_business_logic_quiet_when_negative_rejected():
+    from execution.probes import business_logic_probe
+    assert business_logic_probe(_bl_model(), "http://x", session=_BlSession("secure")) == []

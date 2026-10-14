@@ -219,6 +219,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("file_upload probe failed: %s", exc)
 
+        # Business logic — a negative quantity/amount accepted and stored on a create.
+        try:
+            from execution.probes import business_logic_probe
+            findings.extend(business_logic_probe(model, base_url, session=shared, auth=auth))
+        except Exception as exc:
+            logger.error("business_logic probe failed: %s", exc)
+
         # Stored XSS — markup written then rendered unencoded on read-back (P1).
         try:
             from execution.probes import stored_xss_probe
