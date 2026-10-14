@@ -2571,31 +2571,8 @@ def run_scan_command() -> None:
         print(f"\n  Scan failed: {result.error}\n")
         sys.exit(1)
 
-    print("\n" + "─" * 66)
-    print(f"  RESULT — {result.summary()}")
-    print("─" * 66)
-
-    if result.coverage:
-        print("\n  Coverage goals:")
-        for goal, status in result.coverage.items():
-            mark = {"generation": "✓ covered", "template": "✓ covered (gap filled by QAX)",
-                    "uncovered": "✗ uncovered"}.get(status, status)
-            print(f"    · {goal} — {mark}")
-
-    if result.confirmed:
-        _claims = [b for b in result.confirmed
-                   if str(b.get("severity", "")).upper() in ("P1", "P2")]
-        _leads = [b for b in result.confirmed if b not in _claims]
-        print(f"\n  🐞 Confirmed (P1/P2): {len(_claims)}   ·   leads (P3): {len(_leads)}")
-        for b in _claims + _leads:
-            sev = f"[{b.get('severity') or 'P?'}] "
-            src = b.get("source", "")
-            print(f"    {sev}{b.get('title', '')}  ({src})")
-            if b.get("evidence"):
-                print(f"        {str(b['evidence'])[:150]}")
-    else:
-        print("\n  No findings — the app held up to the scan.")
-    print()
+    from cli.scan_render import render_scan_result
+    print(render_scan_result(result))   # S8: extracted, B1-aligned (deterministic vs AI leads)
 
     # Scorecard — the honest, trackable number for this run.
     _truth = None

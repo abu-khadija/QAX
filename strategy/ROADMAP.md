@@ -58,8 +58,8 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 14. **B4 — 2–3 case studies on real, messy, non-cherry-picked OSS apps** (the
     credibility wedge; publish honest scorecards + the S6 replay evidence).
 15. ✅ **B7 — business-logic bug probe (DONE)** — negative quantity/amount accepted+stored (P2).
-16. **S8 (refactor half)** — split the oversized `main.py` / `ui/app.py` behind the
-    service interfaces (maintainability; do when it starts slowing feature work).
+16. ▶ **S8 (refactor half)** — IN PROGRESS: incremental extraction from main.py
+    (cli/scan_render.py done, tested). Continue one tested extraction per step.
 17. **B8 — moat / GTM** — lead the message on "proven, zero false positives" (when pitching).
     ✅ First slice DONE (2026-10-14): product homepage at `/` (app moved to `/app`),
     positioned per the Qodo study below; every claim maps to a gate number or a shipped
@@ -244,13 +244,14 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       UI-shaped `assert`/`verify`/`check`/`expect` now returns SKIP ("Assertion NOT
       evaluated in API mode — use api_steps"), never PASS, so an un-checked step can't
       read as verified coverage. Real assertions remain in api_steps. +1 unit test.
-- [~] **S8 — UI output escaping (DONE) + module splits (DEFERRED).** Security half
-      done: `ui/app.py`'s `run_qax_command` now `html.escape()`s child-process output
-      before the terminal `unsafe_allow_html` div, so model/target-influenced output
-      can't inject HTML (compile-checked; not runtime-verified — no streamlit in the
-      test env). The module-split half (main.py 2.6k lines, ui/app.py 2.3k) is a large
-      pure refactor — deferred to its own focused session (no rushing a 2.6k-line split
-      at the tail of a long session).
+- [~] **S8 — UI escaping (DONE) + module splits (IN PROGRESS, incremental).** Security
+      half done (ui/app.py html.escape of subprocess output). Module-split half started
+      incrementally (audit: "incrementally, no rewrite"): extracted the scan-result
+      console rendering out of main.py into `cli/scan_render.py` — pure + unit-tested,
+      and aligned with B1 (deterministic CONFIRMED vs AI leads, not severity). main.py
+      shrank ~25 lines and that logic now has a test net. NEXT extractions (one per
+      step, each tested): `_print_run_summary`/`_print_push_summary`, `_save_results`,
+      then analyze/pipeline rendering; ui/app.py views later.
 
 ---
 
