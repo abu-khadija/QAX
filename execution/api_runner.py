@@ -326,6 +326,25 @@ class APIRunner:
             return value
         return f"{self.base_url}{value}" if self.base_url else value
 
+    def _is_approved_origin(self, url: str) -> bool:
+        """
+        True when `url` is on the approved target origin (same host + effective port as
+        base_url). The egress boundary: QAX only talks to the app it was pointed at, so
+        a step carrying an absolute off-origin URL (which would otherwise receive the
+        saved bearer token) is refused. With no base_url configured there is nothing to
+        anchor against, so a relative path is allowed and an absolute URL is refused.
+        """
+        from urllib.parse import urlparse
+        if not self.base_url:
+            return not (url.startswith("http://") or url.startswith("https://"))
+        b, u = urlparse(self.base_url), urlparse(url)
+        if not u.scheme and not u.netloc:
+            return True   # a relative path resolved against base_url — same origin
+        defp = {"http": 80, "https": 443}
+        bport = b.port or defp.get(b.scheme, 0)
+        uport = u.port or defp.get(u.scheme, 0)
+        return (u.hostname or "").lower() == (b.hostname or "").lower() and uport == bport
+
     def _step_error(self, step: dict, message: str) -> dict:
         """
         Build a FAIL step result for infrastructure errors.
@@ -423,10 +442,20 @@ class APIRunner:
         if not self.session:
             return self._step_error(step, "APIRunner not set up — call setup() first")
 
+        # S2 — egress boundary: a step may carry an ABSOLUTE url; QAX must never send
+        # a request (let alone the saved bearer token) to a host other than the one it
+        # was pointed at. Refuse off-origin requests outright.
+        full_url = self._resolve_url(path)
+        if not self._is_approved_origin(full_url):
+            return self._step_error(
+                step, f"off-origin request blocked by QAX egress policy: {full_url} "
+                      f"is not on the approved target origin ({self.base_url})")
+
         headers = {}
         # use_auth: true → the default "token"; use_auth: "token_b" → that named
         # token. Named tokens let one test hold two users at once (userA vs userB)
-        # so ownership / IDOR attacks are executable.
+        # so ownership / IDOR attacks are executable. The saved token is attached ONLY
+        # because the origin check above has already confirmed the approved target.
         auth = step.get("use_auth")
         if auth:
             token_var = auth if isinstance(auth, str) else "token"
@@ -437,7 +466,7 @@ class APIRunner:
         t0 = time.time()
         try:
             resp = self.session.request(
-                method, self._resolve_url(path),
+                method, full_url,
                 json=body if isinstance(body, (dict, list)) else None,
                 headers=headers, timeout=self.timeout,
             )

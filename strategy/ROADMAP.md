@@ -125,12 +125,13 @@ B6 (real Jira filing) so an accidental live push is impossible.
       `os.environ["DRY_RUN"]` mutation (a race under threaded Flask) is deleted
       everywhere. No path can push live unless dry_run is explicitly false. +2 unit
       tests (explicit flag wins; safe default when unset).
-- [ ] **S2 — scanner egress / token boundary.** `execution/api_runner.py` accepts an
-      absolute URL in a step and attaches `Authorization: Bearer <token>` with no host
-      allowlist — the scanner could send the user's token to an arbitrary host. Fix: a
-      per-run allowed-origin set; never send the saved token off an approved origin;
-      cap timeouts/counts/payload. Done when: a step pointing off-origin is refused the
-      token (test-proven).
+- [x] **S2 — scanner egress / token boundary (DONE).** `APIRunner._is_approved_origin`
+      enforces that every step hits the same host+port as the target `base_url`; a step
+      carrying an absolute OFF-origin URL is refused BEFORE any request is made, so the
+      saved bearer token can never leak off-origin. No base_url → absolute URLs refused,
+      relative allowed. +3 unit tests (origin rules; off-origin blocked with no request
+      and no token sent). Same-origin scans unaffected (gate recall 4/4). Follow-up
+      (deferred): request count / payload-size caps.
 - [ ] **S3 — web API auth/authz + export policy.** `/api/scan|generate|export` have no
       auth; export honours caller-supplied `dry_run:false` with server creds. Gates
       any non-loopback exposure (private beta). Done when: routes require auth and
