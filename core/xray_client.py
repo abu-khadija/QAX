@@ -39,7 +39,7 @@ class XrayClient:
         result = client.push_test_case(test_case_dict)
     """
 
-    def __init__(self):
+    def __init__(self, dry_run: bool | None = None):
         """
         Initialize the Xray client.
 
@@ -49,6 +49,13 @@ class XrayClient:
           - JIRA_CLOUD_ID: Your Jira Cloud instance ID
           - JIRA_PROJECT_KEY: Target project key (e.g., "EXAMPLE")
           - DRY_RUN: Set to "true" to skip actual API calls
+
+        Args:
+            dry_run (bool | None): Explicit, request-scoped dry-run flag. When given
+                it WINS — the caller decides, and no process-global state is consulted
+                or mutated. When None, falls back to the DRY_RUN env var, defaulting to
+                TRUE (safe default — never push live unless explicitly told to). This
+                matches QAXContext's default and removes the old live-by-default gap.
 
         Raises:
             ValueError: If required credentials are missing.
@@ -63,8 +70,11 @@ class XrayClient:
         self.jira_email = os.getenv("JIRA_EMAIL", "")
         self.jira_api_token = os.getenv("JIRA_API_TOKEN", "")
 
-        # DRY_RUN mode: set to "true" to preview without pushing
-        self.dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
+        # Request-scoped flag wins; otherwise env with a SAFE default of true.
+        if dry_run is not None:
+            self.dry_run = bool(dry_run)
+        else:
+            self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
 
         if self.dry_run:
             logger.info("XrayClient initialized in DRY RUN mode — no API calls will be made")

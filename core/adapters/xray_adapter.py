@@ -83,13 +83,11 @@ class XrayAdapter(BaseExportAdapter):
             logger.warning("QAX XrayAdapter: %s", err)
             return self._empty_result(len(test_cases), error=err)
 
-        # Temporarily override DRY_RUN so XrayClient honours the flag
-        original_dry_run = os.environ.get("DRY_RUN")
-        os.environ["DRY_RUN"] = "true" if dry_run else "false"
-
+        # S1: pass the dry-run flag request-scoped straight into the client — no
+        # process-global os.environ mutation (which raced between threaded requests).
         try:
             from core.xray_client import XrayClient
-            client = XrayClient()
+            client = XrayClient(dry_run=dry_run)
             batch_result = client.push_batch(test_cases)
 
             pushed   = batch_result.get("pushed", [])
@@ -108,10 +106,3 @@ class XrayAdapter(BaseExportAdapter):
         except Exception as exc:
             logger.error("QAX XrayAdapter: export failed — %s", exc)
             return self._empty_result(len(test_cases), error=str(exc))
-
-        finally:
-            # Restore original env state
-            if original_dry_run is None:
-                os.environ.pop("DRY_RUN", None)
-            else:
-                os.environ["DRY_RUN"] = original_dry_run

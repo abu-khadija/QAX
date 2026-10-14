@@ -105,6 +105,56 @@ Overlapping Phase-2/3 items are absorbed here.
 
 ---
 
+## SELF-HARDENING track (S) — from the 2026-10-14 implementation audit
+
+The audit (verified against source — every checked claim was accurate) exposed a
+whole category the B-backlog missed: **is QAX itself safe?** A security product that
+is itself insecure is an existential credibility risk — we audit others but hadn't
+dogfooded ourselves. These are real, mostly deployment/safety items (no P0). The B1
+(deterministic/AI split) and B2 (stage diagnostics) work was independently confirmed
+present by the audit.
+
+**Merged execution order (what to march through):** S1 → S2 → S7 → S5 → S6 → S4 →
+S3 → S8, then resume the B-track (more B3 probe classes, then B4…). S1 comes before
+B6 (real Jira filing) so an accidental live push is impossible.
+
+- [x] **S1 — DRY_RUN safety (DONE; gated B6).** `XrayClient(dry_run=...)` is now
+      request-scoped — the explicit flag wins, else env with a SAFE default of **true**
+      (was false). Both `core/adapters/xray_adapter.py` and `web/server.py`'s findings
+      export now pass `dry_run` straight to the client; the process-global
+      `os.environ["DRY_RUN"]` mutation (a race under threaded Flask) is deleted
+      everywhere. No path can push live unless dry_run is explicitly false. +2 unit
+      tests (explicit flag wins; safe default when unset).
+- [ ] **S2 — scanner egress / token boundary.** `execution/api_runner.py` accepts an
+      absolute URL in a step and attaches `Authorization: Bearer <token>` with no host
+      allowlist — the scanner could send the user's token to an arbitrary host. Fix: a
+      per-run allowed-origin set; never send the saved token off an approved origin;
+      cap timeouts/counts/payload. Done when: a step pointing off-origin is refused the
+      token (test-proven).
+- [ ] **S3 — web API auth/authz + export policy.** `/api/scan|generate|export` have no
+      auth; export honours caller-supplied `dry_run:false` with server creds. Gates
+      any non-loopback exposure (private beta). Done when: routes require auth and
+      export cannot be forced live by the caller.
+- [ ] **S4 — authorized-target gate + active-probe safety.** No ownership/consent gate
+      before active (mutating) probing. Done when: a scan requires explicit
+      target-authorization, destructive probes are labelled, and cleanup is proven.
+- [ ] **S5 — packaging/install reproducible.** `requirements.txt` omits
+      streamlit/plotly/pandas that `ui/app.py` imports at load. Fix: declare them (an
+      extras group) + a clean-install/launch check. Done when: a fresh install can
+      launch the UI.
+- [ ] **S6 — replayable evidence artifact.** `OrchestratorResult.to_dict()` is a
+      summary — no generated tests, no request/response trail. Undercuts the
+      "reproducible evidence" claim and B4. Done when: a durable artifact carries the
+      tests, the actual requests/status/body, probe inputs, stage failures, redacted.
+- [ ] **S7 — legacy "assert noted → PASS".** `api_runner` legacy automation_steps mark
+      an `assert`/`verify` PASS without evaluating it (extends B2 to the legacy path).
+      Done when: an un-evaluated step is "not evaluated"/SKIP, never PASS.
+- [ ] **S8 — UI output escaping + module splits.** `ui/app.py` renders subprocess
+      output via `unsafe_allow_html`; `main.py`/`ui/app.py` are oversized. Done when:
+      UI output is escaped and the biggest files are split behind stable interfaces.
+
+---
+
 ## Phase 1 — HARDEN (now, the chosen focus)
 
 Goal: make quality provable and repeatable before adding surface.

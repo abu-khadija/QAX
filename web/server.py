@@ -256,19 +256,12 @@ def export():
     # Findings are filed as Jira BUGS (standard Jira issue API), not Xray Tests.
     if kind == "findings":
         bugs = [_finding_to_testcase(b, i) for i, b in enumerate(items) if isinstance(b, dict)]
-        orig = os.environ.get("DRY_RUN")
-        os.environ["DRY_RUN"] = "true" if dry_run else "false"
         try:
             from core.xray_client import XrayClient
-            result = XrayClient().push_bugs(bugs)
+            result = XrayClient(dry_run=dry_run).push_bugs(bugs)   # S1: request-scoped, no env mutation
         except Exception as exc:
             result = {"success": False, "exported_count": 0, "failed_count": len(bugs),
                       "references": [], "error": f"Bug filing failed: {exc}"}
-        finally:
-            if orig is None:
-                os.environ.pop("DRY_RUN", None)
-            else:
-                os.environ["DRY_RUN"] = orig
         result = dict(result or {})
         result.update({"dry_run": dry_run, "target": "jira", "kind": "findings"})
         return jsonify(result)
