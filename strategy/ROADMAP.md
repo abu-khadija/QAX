@@ -55,9 +55,9 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     as B4 reveals gaps.
 13. ✅ **B5 — no-spec endpoint discovery** (DONE) — probes common paths on spec-less
     apps; widens reach for B4.
-14. ▶ **B4 — real-app case studies** (IN PROGRESS: 1 done — MIT DRF RealWorld,
+14. ✅ **B4 — real-app case studies** (DONE: 2 done — MIT DRF RealWorld,
     0 FP after a found+fixed cry-wolf; see strategy/CASE_STUDY_REALWORLD_DRF.md).
-    NEXT: a 2nd real app on a different stack.
+    DONE — 2 case studies (DRF + Go/Gin), 2 stacks, 0 FP on both.
 15. ✅ **B7 — business-logic bug probe (DONE)** — negative quantity/amount accepted+stored (P2).
 16. ▶ **S8 (refactor half)** — IN PROGRESS: incremental extraction from main.py
     (cli/scan_render.py done, tested). Continue one tested extraction per step.
@@ -156,8 +156,10 @@ Overlapping Phase-2/3 items are absorbed here.
       QAX improvements: drf-yasg/drf-spectacular spec grounding, and a FALSE-POSITIVE
       fix (public GET flagged via the spec's global security — now needs per-op
       auth_explicit). Final: 0 confirmed, 0 FP, 1 legit P3 (no CSP) — QAX stays quiet
-      on a well-written app. NEXT: a second real app (ideally a different stack) for
-      the "≥2 case studies" bar.
+      on a well-written app. Second case study DONE: a spec-less MIT Go/Gin RealWorld backend
+      (strategy/CASE_STUDY_REALWORLD_GO.md) — 0 confirmed, 0 FP, 1 P3; drove a wider
+      spec-less discovery (B5 now probes /api/<resource>). **B4 bar met: 2 real apps,
+      2 stacks, 0 false positives on both.**
 - [ ] **B4-orig — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,
       real OSS apps we did NOT pick for being vulnerable; publish honest scorecards

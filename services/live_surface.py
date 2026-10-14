@@ -227,12 +227,17 @@ def ground_endpoints(base_url: str, *, session: requests.Session | None = None) 
     return eps
 
 
-# Common REST/GraphQL paths to probe on an app that serves no OpenAPI spec.
-_COMMON_API_PATHS = (
-    "/api", "/api/v1", "/health", "/status", "/me", "/users", "/api/users",
-    "/login", "/auth/login", "/products", "/api/products", "/orders", "/api/orders",
-    "/search", "/admin", "/graphql", "/api/graphql",
-)
+# Common REST/GraphQL paths to probe on an app that serves no OpenAPI spec. Covers
+# bare and /api-prefixed common resource nouns (the dominant REST convention — e.g.
+# a RealWorld backend mounts /api/articles, /api/profiles, /api/tags).
+_COMMON_RESOURCES = ("users", "user", "articles", "posts", "comments", "profiles",
+                     "tags", "products", "orders", "items", "todos", "accounts",
+                     "login", "auth/login", "search", "admin", "me", "health",
+                     "status", "graphql")
+_COMMON_API_PATHS = tuple(dict.fromkeys(
+    ["/" + r for r in _COMMON_RESOURCES]
+    + ["/api/" + r for r in _COMMON_RESOURCES]
+    + ["/api", "/api/v1"]))
 
 
 def discover_endpoints(base_url: str, model, *, session: requests.Session | None = None) -> list[dict]:
