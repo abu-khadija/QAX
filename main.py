@@ -2085,6 +2085,11 @@ def _process_single_file(
         return []
 
     effective_module = module_hint or file_data.get("module_hint")
+    # read_file() reports the length as "size_lines" (there is no "line_count" key —
+    # reading that silently gave 0, so size-based model selection and the chunk
+    # guard never saw a large file).
+    n_lines = (file_data.get("size_lines") or file_data.get("line_count")
+               or len(file_data["content"].splitlines()))
 
     # ── Skip non-testable files ────────────────────────────────────────────
     if not is_testable(file_data["content"]):
@@ -2160,8 +2165,11 @@ def _process_single_file(
             model_name,
         )
 
-        # Early return on cache hit
-        if smart_checks.get("cache_hit") and use_cache:
+        # Early return on cache hit — but NOT for a file that will be chunked: a
+        # whole-file cache entry for a large file can only be a single chunk's
+        # result (written before per-chunk cache keys existed), so it is stale.
+        will_chunk = n_lines > chunk_size
+        if smart_checks.get("cache_hit") and use_cache and not will_chunk:
             cached = smart_checks.get("cached_result", [])
             logger.info(
                 "  → Cache hit — skipping API call (%d cached test case(s))",
@@ -2200,7 +2208,7 @@ def _process_single_file(
                 chunk_dict["start_line"], chunk_dict["end_line"],
             )
         # Use model from SmartChecker (B5/B2), fallback to legacy logic
-        line_count = file_data.get("line_count", 0)
+        line_count = n_lines
         risk_level = "low"
         if git_history:
             risk_level = git_history.get("risk_level", "low")
@@ -2228,6 +2236,8 @@ def _process_single_file(
                 risk_assessment=smart_checks.get("risk"),
                 test_type=smart_checks.get("test_type"),
                 model_override=model_override,
+                cache_scope=(f"chunk-{chunk_dict['chunk_index']}-of-{total_chunks}-size-{chunk_size}"
+                             if total_chunks > 1 else None),
             )
             all_raw.extend(cases)
         except Exception as e:

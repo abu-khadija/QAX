@@ -170,6 +170,14 @@ class ClaudeClient:
     # Main Analysis Method
     # ─────────────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _scoped_cache_key(file_key: str | None, scope: str | None) -> str | None:
+        """The file-level cache key, narrowed by `scope` (e.g. a chunk id) when given."""
+        if not file_key or not scope:
+            return file_key
+        import hashlib
+        return hashlib.md5(f"{file_key}|{scope}".encode("utf-8")).hexdigest()
+
     def analyze_code(
         self,
         code: str,
@@ -188,9 +196,15 @@ class ClaudeClient:
         test_type: str | None = None,
         model_override: str | None = None,
         repo_context: str | None = None,
+        cache_scope: str | None = None,
     ) -> list[dict]:
         """
         Send source code to Claude for test case generation.
+
+        `cache_scope` narrows the cache key below the file level. Pass it when `code`
+        is only PART of `file_path` (a chunk): the file-level key hashes the whole file,
+        so without a scope every chunk of one file would share a key and chunks 2..N
+        would be served chunk 1's cached result.
 
         Builds the user prompt, calls the Claude API, parses the JSON response,
         and returns a list of test case dictionaries. If the first response
@@ -268,7 +282,7 @@ class ClaudeClient:
             try:
                 from core.cache_manager import CacheManager
                 cache = CacheManager()
-                cache_key = cache.get_key(file_path)
+                cache_key = self._scoped_cache_key(cache.get_key(file_path), cache_scope)
                 if cache_key:
                     cached = cache.get(cache_key)
                     if cached is not None:
@@ -384,7 +398,7 @@ class ClaudeClient:
                 try:
                     from core.cache_manager import CacheManager
                     cache = CacheManager()
-                    cache_key = cache.get_key(file_path)
+                    cache_key = self._scoped_cache_key(cache.get_key(file_path), cache_scope)
                     if cache_key:
                         cache.set(cache_key, result)
                 except Exception as _ce:

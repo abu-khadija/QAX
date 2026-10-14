@@ -55,3 +55,35 @@ def test_cache_hit_returns_cached_without_calling_model(tmp_path, monkeypatch):
     claude = _FakeClaude()
     out = main._process_single_file(_big_py(tmp_path, 10), claude, None, chunk_size=300, use_cache=True)
     assert out == [{"title": "from cache"}] and claude.calls == 0
+
+
+def test_chunked_file_ignores_stale_whole_file_cache_and_scopes_chunks(tmp_path, monkeypatch):
+    # A whole-file cache entry for a file that gets chunked can only be one chunk's
+    # result (pre-fix), so it must not short-circuit; each chunk call gets a scope.
+    _precheck(monkeypatch, cache_hit=True, cached_result=[{"title": "stale chunk-1 only"}])
+    scopes = []
+
+    class _Rec(_FakeClaude):
+        def analyze_code(self, **kw):
+            scopes.append(kw.get("cache_scope"))
+            return super().analyze_code(**kw)
+    claude = _Rec()
+    out = main._process_single_file(_big_py(tmp_path), claude, None, chunk_size=100, use_cache=True)
+    assert claude.calls > 1 and {"title": "stale chunk-1 only"} not in out
+    assert len(set(scopes)) == claude.calls and None not in scopes      # one distinct scope per chunk
+
+
+def test_real_line_count_reaches_model_selection(tmp_path, monkeypatch):
+    # read_file() reports "size_lines"; the legacy path used to read a missing
+    # "line_count" key and always passed 0, so large files never got the heavy model.
+    _precheck(monkeypatch)
+    seen = []
+
+    class _Rec(_FakeClaude):
+        def analyze_code(self, **kw):
+            seen.append(kw.get("line_count"))
+            return super().analyze_code(**kw)
+    path = _big_py(tmp_path)
+    main._process_single_file(path, _Rec(), None, chunk_size=10_000, use_cache=False)
+    expected = len(open(path).read().splitlines())
+    assert seen == [expected] and expected > 150
