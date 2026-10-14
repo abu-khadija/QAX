@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from services.context import QAXContext
 from services.exceptions import QAXGenerationError
@@ -60,6 +61,12 @@ class GenerationOptions:
         content (str | None): Pre-loaded source content. When provided, the
             service skips reading from disk — used for story/jira/virtual
             sources where `source` is not a real file path.
+        chunk_size (int): Real source files longer than this many lines are split into
+            overlapping chunks, each analyzed (and cached) separately, then
+            de-duplicated by title — so a large file is tested end to end instead of
+            being truncated in one oversized call. Virtual sources are never chunked.
+        skip_untestable (bool): Skip a real file with no testable logic (pure config,
+            constants, type-only) without calling the model.
         repo_context (str | None): Whole-source understanding from the
             RepoComprehensionService (app overview, flows, risk areas). When
             set, it is injected into the prompt so tests are informed by the
@@ -77,6 +84,8 @@ class GenerationOptions:
     content: str | None = None
     repo_context: str | None = None
     model: str | None = None   # override the auto-selected model (e.g. a faster one)
+    chunk_size: int = 300      # real files longer than this are analyzed in chunks
+    skip_untestable: bool = True   # skip real files with no testable logic (no model call)
 
 
 class GenerationService:
@@ -353,6 +362,20 @@ class GenerationService:
         from core.smart_checker import SmartChecker
         from core.validator import fix_common_issues, validate_batch
 
+        # Real file (read from disk) vs a virtual source (story, endpoint spec, …):
+        # testability, dependency resolution and chunking only make sense for files.
+        is_real_file = opts.content is None
+        if is_real_file and opts.skip_untestable:
+            from core.code_reader import is_testable
+            if not is_testable(content):
+                prog.emit("load", "info", "no testable logic — skipped")
+                return GenerationResult(
+                    source=source, module=module,
+                    summary={"total": 0, "valid_count": 0, "invalid_count": 0,
+                             "needs_review_count": 0, "avg_confidence": 0.0,
+                             "skipped": "no testable logic"})
+        will_chunk = bool(is_real_file and opts.chunk_size and line_count > opts.chunk_size)
+
         # ── Optional git history for risk assessment ──────────────────────────
         git_history: dict | None = None
         if opts.include_git and opts.content is None:
@@ -381,7 +404,9 @@ class GenerationService:
         # cached, so cached cases are always fixed + validated and only the valid
         # ones returned. If nothing survives validation the cache is treated as a
         # miss and we regenerate — this self-heals a poisoned cache entry.
-        if opts.use_cache and pre.get("cache_hit"):
+        # (Not for a file that gets chunked: a whole-file entry for one can only be a
+        # single chunk's result written before per-chunk cache keys existed.)
+        if opts.use_cache and pre.get("cache_hit") and not will_chunk:
             cached = pre.get("cached_result") or []
             fixed = [fix_common_issues(tc) for tc in cached]
             batch = validate_batch(fixed)
@@ -414,23 +439,45 @@ class GenerationService:
                 logger.debug("bug patterns unavailable for %s: %s", module, exc)
 
         # ── The API call ──────────────────────────────────────────────────────
-        prog.emit("generate", "start", "Calling Claude")
+        dependencies = None
+        if opts.include_deps and is_real_file:
+            try:
+                from core.code_reader import extract_dependencies
+                dependencies = extract_dependencies(file_content=content, file_path=source) or None
+            except Exception as exc:
+                logger.debug("dependency resolution failed for %s: %s", source, exc)
+
+        chunks = [content]
+        if will_chunk:
+            from core.code_reader import chunk_large_file
+            chunks = [c["content"] for c in chunk_large_file(
+                content, max_lines=opts.chunk_size, file_name=Path(source).name)] or [content]
+
+        prog.emit("generate", "start",
+                  f"Calling Claude ({len(chunks)} chunk(s))" if len(chunks) > 1 else "Calling Claude")
         client = ClaudeClient(project=self.context.project)
-        raw = client.analyze_code(
-            code=content,
-            file_path=source,
-            module_hint=module,
-            bug_patterns=bug_patterns,
-            user_story=opts.user_story,
-            risk_assessment=pre.get("risk"),
-            test_type=opts.test_type or pre.get("test_type"),
-            skill_context=pre.get("skill_context"),
-            risk_level=(pre.get("risk") or {}).get("risk_level", "low"),
-            line_count=line_count,
-            use_cache=opts.use_cache,
-            repo_context=opts.repo_context,
-            model_override=opts.model,
-        )
+        raw: list = []
+        for i, chunk in enumerate(chunks, 1):
+            raw.extend(client.analyze_code(
+                code=chunk,
+                file_path=source,
+                module_hint=module,
+                dependencies=dependencies,
+                bug_patterns=bug_patterns,
+                user_story=opts.user_story,
+                risk_assessment=pre.get("risk"),
+                test_type=opts.test_type or pre.get("test_type"),
+                skill_context=pre.get("skill_context"),
+                risk_level=(pre.get("risk") or {}).get("risk_level", "low"),
+                line_count=line_count,
+                use_cache=opts.use_cache,
+                repo_context=opts.repo_context,
+                model_override=opts.model,
+                cache_scope=(f"chunk-{i}-of-{len(chunks)}-size-{opts.chunk_size}"
+                             if len(chunks) > 1 else None),
+            ) or [])
+        if len(chunks) > 1 and raw:
+            raw = ClaudeClient.deduplicate_by_title(raw)
 
         used_model = pre.get("recommended_model", "") or (
             self.context.model_heavy if line_count > 150 else self.context.model_light
