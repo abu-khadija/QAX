@@ -82,10 +82,24 @@ def _is_conventionally_public(path: str) -> bool:
     return p.rsplit("/", 1)[-1] in _PUBLIC_SEGMENTS
 
 
+def _asserts_auth(e: dict) -> bool:
+    """
+    Whether to assert that this endpoint rejects a no-token request. A write
+    (POST/PUT/PATCH/DELETE) or an endpoint with its OWN explicit security must reject.
+    A GET whose auth is only INHERITED from a global spec security is NOT asserted —
+    frameworks (e.g. drf-yasg) slap a global security on everything, including public
+    list reads, and asserting there cries wolf on a legitimate public 200.
+    """
+    if str(e.get("method", "")).upper() != "GET":
+        return True                      # writes should always require auth
+    return bool(e.get("auth_explicit"))  # GET: only when it declares its own security
+
+
 def auth_bypass_templates(model, recipe: dict | None = None, cap: int = 8) -> list[dict]:
     """One test per protected endpoint: calling it with NO token must be rejected."""
     protected = [e for e in getattr(model, "endpoints", [])
                  if isinstance(e, dict) and e.get("auth_required")
+                 and _asserts_auth(e)
                  and not _is_conventionally_public(e.get("path", ""))]
     out = []
     for e in protected[:cap]:

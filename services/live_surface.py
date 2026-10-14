@@ -50,6 +50,9 @@ _SPEC_PATHS = [
     "/openapi.json", "/openapi.yaml", "/swagger.json", "/v2/swagger.json",
     "/v3/api-docs", "/api-docs", "/api/openapi.json", "/docs/openapi.json",
     "/swagger/v1/swagger.json",
+    # Django ecosystems: drf-yasg serves the spec at /swagger/?format=openapi,
+    # drf-spectacular at /api/schema/ (found scanning a real DRF app, 2026-10-14).
+    "/swagger/?format=openapi", "/api/schema/", "/api/schema", "/schema/",
 ]
 
 
@@ -141,11 +144,17 @@ def endpoints_from_spec(spec: dict) -> list[dict]:
             if method.lower() not in ("get", "post", "put", "delete", "patch"):
                 continue
             op = op if isinstance(op, dict) else {}
-            auth_required = ("security" in op and bool(op["security"])) or has_global_sec
+            auth_explicit = "security" in op and bool(op["security"])
+            auth_required = auth_explicit or has_global_sec
             out.append({
                 "method": method.upper(),
                 "path": _join_base(base, str(path)),
                 "auth_required": bool(auth_required),
+                # True only when THIS operation declares its own security. A global
+                # spec `security` (e.g. drf-yasg applies one to everything, including
+                # public list reads) sets auth_required but NOT auth_explicit — so the
+                # auth-bypass coverage check won't cry wolf on a public GET it covered.
+                "auth_explicit": bool(auth_explicit),
                 "query_params": _query_params(op, item, spec),
                 "request_fields": _request_fields(op, spec),
                 "response_fields": _response_fields(op, spec),

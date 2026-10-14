@@ -18,10 +18,10 @@ def _model() -> AppModel:
     return AppModel(endpoints=[
         {"method": "POST", "path": "/auth/register", "request_fields": ["email", "password"]},
         {"method": "POST", "path": "/auth/login", "response_fields": ["access_token"]},
-        {"method": "GET", "path": "/todos", "auth_required": True,
+        {"method": "GET", "path": "/todos", "auth_required": True, "auth_explicit": True,
          "response_fields": ["items", "total", "total_pages"]},
         {"method": "POST", "path": "/todos", "auth_required": True, "request_fields": ["title"]},
-        {"method": "GET", "path": "/todos/{todo_id}", "auth_required": True},
+        {"method": "GET", "path": "/todos/{todo_id}", "auth_required": True, "auth_explicit": True},
         {"method": "DELETE", "path": "/todos/{todo_id}", "auth_required": True},
     ])
 
@@ -59,7 +59,7 @@ def test_auth_bypass_excludes_conventionally_public_endpoints():
         {"method": "GET", "path": "/health", "auth_required": True},
         {"method": "GET", "path": "/api-docs", "auth_required": True},
         {"method": "GET", "path": "/openapi.json", "auth_required": True},
-        {"method": "GET", "path": "/users/", "auth_required": True},
+        {"method": "GET", "path": "/users/", "auth_required": True, "auth_explicit": True},
     ])
     titles = " ".join(t["title"] for t in cg.auth_bypass_templates(model))
     assert "/users/" in titles
@@ -67,6 +67,21 @@ def test_auth_bypass_excludes_conventionally_public_endpoints():
         assert public not in titles
     assert cg._is_conventionally_public("/") and cg._is_conventionally_public("/v1/health")
     assert not cg._is_conventionally_public("/api/users")
+
+
+def test_auth_bypass_skips_global_only_auth_get_but_keeps_writes():
+    # A GET whose auth is only INHERITED from a global spec security (auth_explicit
+    # False) is a common public list read (drf-yasg marks everything) — asserting auth
+    # there cries wolf (the real /api/articles FP). Writes are still asserted.
+    model = AppModel(endpoints=[
+        {"method": "GET", "path": "/articles", "auth_required": True},            # global-only → skip
+        {"method": "GET", "path": "/user", "auth_required": True, "auth_explicit": True},  # explicit → assert
+        {"method": "POST", "path": "/articles", "auth_required": True},            # write → assert
+    ])
+    titles = " ".join(t["title"] for t in cg.auth_bypass_templates(model))
+    assert "GET /articles requires" not in titles          # public-list FP avoided
+    assert "GET /user requires" in titles                  # explicitly protected GET still asserted
+    assert "POST /articles requires" in titles             # writes still asserted
 
 
 # ── IDOR (two named tokens, secure = 403 or 404) ─────────────────────────────
