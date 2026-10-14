@@ -403,15 +403,8 @@ def get_projects() -> list[str]:
     Returns:
         list[str]: Project folder names, e.g. ["example", "example2", "example3"].
     """
-    projects_dir = QAX_ROOT / "config" / "projects"
-    if not projects_dir.exists():
-        default = os.getenv("DEFAULT_PROJECT", "")
-        return [default] if default else []
-    found = sorted(p.name for p in projects_dir.iterdir() if p.is_dir())
-    if not found:
-        default = os.getenv("DEFAULT_PROJECT", "")
-        return [default] if default else []
-    return found
+    from ui.data import list_projects
+    return list_projects(QAX_ROOT)
 
 
 @st.cache_data(ttl=10)
@@ -422,16 +415,8 @@ def load_all_test_cases() -> list[dict]:
     Returns:
         list[dict]: Flat list of all test case dicts across all output files.
     """
-    output_dir = QAX_ROOT / "output"
-    all_cases: list[dict] = []
-    for f in sorted(output_dir.glob("test_cases_*.json"), reverse=True):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                all_cases.extend(data)
-        except Exception:
-            continue
-    return all_cases
+    from ui.data import load_all_test_cases as _impl
+    return _impl(QAX_ROOT)
 
 
 def load_latest_test_cases() -> list[dict]:
@@ -441,14 +426,8 @@ def load_latest_test_cases() -> list[dict]:
     Returns:
         list[dict]: Test cases from the latest file, or [] if none found.
     """
-    output_dir = QAX_ROOT / "output"
-    files = sorted(output_dir.glob("test_cases_*.json"), reverse=True)
-    if not files:
-        return []
-    try:
-        return json.loads(files[0].read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    from ui.data import load_latest_test_cases as _impl
+    return _impl(QAX_ROOT)
 
 
 def get_connection_status() -> dict[str, bool | str]:
@@ -460,12 +439,8 @@ def get_connection_status() -> dict[str, bool | str]:
     Returns:
         dict: Keys: claude, jira, xray, dry_run. Values: bool (or str for dry_run).
     """
-    return {
-        "claude":   bool(os.getenv("ANTHROPIC_API_KEY")),
-        "jira":     bool(os.getenv("JIRA_BASE_URL") and os.getenv("JIRA_EMAIL") and os.getenv("JIRA_API_TOKEN")),
-        "xray":     bool(os.getenv("XRAY_CLIENT_ID") and os.getenv("XRAY_CLIENT_SECRET")),
-        "dry_run":  os.getenv("DRY_RUN", "true").lower() == "true",
-    }
+    from ui.data import connection_status
+    return connection_status()
 
 
 @st.cache_data(ttl=30)

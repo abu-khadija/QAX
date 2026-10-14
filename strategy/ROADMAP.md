@@ -280,8 +280,10 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       confidence_bar, risk/score badge classes, mask_secret, count_todos,
       build_markdown_export) to a testable `ui/presenters.py` (no Streamlit import);
       ui/app.py 2281→2174. The `st.*`-heavy wizard/render views stay inline (need
-      the runtime). Next: pull the data-loading helpers (load_*/get_* cache stats)
-      into a testable module too.
+      the runtime). Also extracted the data-access helpers (list_projects, load_all/latest_test_cases,
+      connection_status) to `ui/data.py` (pure, takes a root path); app.py keeps the thin
+      @st.cache_data wrappers. ui/app.py 2281→2149. Remaining: the st.*-heavy wizard/render
+      views stay inline (need the runtime) — a later pass could move their pure sub-logic.
       ✅ FIXED: the `.cs` folder-mode default (and a hard-coded "example3" → .ts map) is
       gone. Both folder paths (CLI + pipeline FolderInputAdapter) now auto-detect the
       folder's dominant source language (`core.code_reader.detect_dominant_extension`),
