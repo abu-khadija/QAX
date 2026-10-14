@@ -2291,56 +2291,15 @@ def _save_results_as_markdown(
     source_files: list[str],
     output_path: str,
 ) -> str:
-    """
-    Save test cases as a Markdown PR comment file instead of JSON.
-
-    Used when --output ends with .md (e.g., --output pr_comment.md).
-    Calls core.markdown_reporter.generate_pr_comment() and writes the
-    result to the specified path. Useful for CI/CD pipelines that post
-    the output as a PR comment.
-
-    Args:
-        test_cases (list[dict]): Valid test cases to include.
-        source_files (list[str]): Source file paths that were analyzed.
-        output_path (str): Path ending in .md to write the comment to.
-
-    Returns:
-        str: The path to the saved file, or empty string on error.
-    """
-    try:
-        from core.markdown_reporter import generate_pr_comment
-        comment = generate_pr_comment(test_cases, source_files)
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(comment)
-        logger.info("Saved markdown PR comment (%d cases) to: %s", len(test_cases), output_path)
-        return output_path
-    except Exception as e:
-        logger.error("Could not save markdown output: %s", e)
-        return ""
+    """Save test cases as a Markdown PR comment (logic in cli/output, S8)."""
+    from cli.output import save_results_markdown
+    return save_results_markdown(test_cases, source_files, output_path)
 
 
 def _save_results(test_cases: list[dict], output_path: str | None) -> str:
-    """
-    Save test cases to a JSON file in output/.
-
-    Args:
-        test_cases (list[dict]): Test cases to save.
-        output_path (str | None): Custom path or None for auto-generated name.
-
-    Returns:
-        str: Path to the saved file.
-    """
-    if output_path is None:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        output_path = f"output/test_cases_{timestamp}.json"
-
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(test_cases, f, indent=2, ensure_ascii=False)
-
-    logger.info("Saved %d test case(s) to: %s", len(test_cases), output_path)
-    return output_path
+    """Save test cases to JSON in output/ (logic in cli/output, S8)."""
+    from cli.output import save_results_json
+    return save_results_json(test_cases, output_path)
 
 
 def _print_push_summary(push_result: dict) -> None:
@@ -2356,54 +2315,15 @@ def _print_run_summary(mode: str, results: dict) -> None:
 
 
 def _print_sessions(sessions: list[dict]) -> None:
-    """
-    Print a formatted list of recent run sessions.
-
-    Args:
-        sessions (list[dict]): Session summaries from SessionManager.list_sessions().
-    """
-    print("\n" + "=" * 60)
-    print("  QAX — Recent Sessions")
-    print("=" * 60)
-    if not sessions:
-        print("  No sessions found. Run the agent first.")
-    else:
-        for s in sessions:
-            ts = s.get("timestamp", "")[:19].replace("T", " ")
-            print(f"  [{s.get('mode', '?').upper():<12}] {s.get('session_id', '')}")
-            print(f"    Time    : {ts}")
-            print(f"    Files   : {s.get('files_processed', 0)}  |  Valid: {s.get('total_valid', 0)}")
-            if s.get("output_file"):
-                print(f"    Output  : {s['output_file']}")
-            print()
-    print("=" * 60 + "\n")
+    """Print recent run sessions (logic in cli/summaries, S8)."""
+    from cli.summaries import render_sessions
+    print(render_sessions(sessions))
 
 
 def _find_test_case_in_output(tc_id: str) -> dict | None:
-    """
-    Search all output JSON files for a test case with the given ID.
-
-    Args:
-        tc_id (str): The test_case_id to look for (e.g., "TC-TRK-0001").
-
-    Returns:
-        dict | None: The test case dict if found, or None.
-    """
-    output_dir = Path("output")
-    if not output_dir.exists():
-        return None
-
-    for json_file in sorted(output_dir.glob("test_cases_*.json"), reverse=True):
-        try:
-            with open(json_file, encoding="utf-8") as f:
-                cases = json.load(f)
-            for tc in cases:
-                if tc.get("test_case_id") == tc_id:
-                    return tc
-        except (json.JSONDecodeError, IOError):
-            continue
-
-    return None
+    """Find a saved test case by ID in output/ (logic in cli/output, S8)."""
+    from cli.output import find_test_case_in_output
+    return find_test_case_in_output(tc_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

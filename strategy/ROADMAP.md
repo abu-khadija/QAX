@@ -260,8 +260,9 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       incrementally (audit: "incrementally, no rewrite"): extracted the scan-result
       console rendering out of main.py into `cli/scan_render.py` — pure + unit-tested,
       and aligned with B1 (deterministic CONFIRMED vs AI leads, not severity). main.py
-      shrank ~25 lines and that logic now has a test net. Done so far: `cli/scan_render.py` + `cli/summaries.py` (run/push summaries), both
-      pure + unit-tested; main's helpers now delegate. NEXT (one tested extraction per
+      shrank ~25 lines and that logic now has a test net. Done so far: `cli/scan_render.py`, `cli/summaries.py` (run/push/sessions), and
+      `cli/output.py` (save JSON/markdown, find saved case) — all unit-tested; main's
+      helpers now delegate. NEXT (one tested extraction per
       step): `_save_results`/markdown, analyze/pipeline rendering, then ui/app.py views.
 
 ---

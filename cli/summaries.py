@@ -43,3 +43,22 @@ def render_run_summary(mode: str, results: dict) -> str:
     if results.get("message"):
         lines.append(f"    Note      : {results['message']}")
     return "\n".join(lines)
+
+
+def render_sessions(sessions: list[dict]) -> str:
+    """Format a list of recent run sessions (from SessionManager.list_sessions())."""
+    bar = "=" * 60
+    lines = ["\n" + bar, "  QAX — Recent Sessions", bar]
+    if not sessions:
+        lines.append("  No sessions found. Run the agent first.")
+    else:
+        for s in sessions:
+            ts = str(s.get("timestamp", ""))[:19].replace("T", " ")
+            lines.append(f"  [{str(s.get('mode', '?')).upper():<12}] {s.get('session_id', '')}")
+            lines.append(f"    Time    : {ts}")
+            lines.append(f"    Files   : {s.get('files_processed', 0)}  |  Valid: {s.get('total_valid', 0)}")
+            if s.get("output_file"):
+                lines.append(f"    Output  : {s['output_file']}")
+            lines.append("")
+    lines.append(bar + "\n")
+    return "\n".join(lines)
