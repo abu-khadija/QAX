@@ -2344,54 +2344,15 @@ def _save_results(test_cases: list[dict], output_path: str | None) -> str:
 
 
 def _print_push_summary(push_result: dict) -> None:
-    """
-    Print a formatted Xray push summary to stdout.
-
-    Args:
-        push_result (dict): Result dict from XrayClient.push_batch().
-    """
-    summary = push_result.get("summary", {})
-    print(f"\n  Xray Push Summary:")
-    print(f"    Pushed : {summary.get('pushed_count', 0)}")
-    print(f"    Failed : {summary.get('failed_count', 0)}")
-    if push_result.get("pushed"):
-        print("    Jira Keys Created:")
-        for item in push_result["pushed"]:
-            print(f"      {item['test_case_id']} → {item['jira_key']}")
-    if push_result.get("failed"):
-        print("    Failed:")
-        for item in push_result["failed"]:
-            print(f"      {item['test_case_id']}: {item.get('error', 'Unknown error')[:60]}")
+    """Print a formatted Xray push summary (logic in cli/summaries, S8)."""
+    from cli.summaries import render_push_summary
+    print(render_push_summary(push_result))
 
 
 def _print_run_summary(mode: str, results: dict) -> None:
-    """
-    Print a short summary of a run_* method result.
-
-    Args:
-        mode (str): The run mode name.
-        results (dict): Results dict returned by the run method.
-    """
-    if results.get("error"):
-        print(f"\n  ✗ Run '{mode}' failed: {results['error']}")
-        return
-
-    total_valid = results.get("total_valid", results.get("total", 0))
-    duration = results.get("duration_seconds", 0)
-    output = results.get("output_file", "")
-
-    print(f"\n  ✓ Run '{mode}' complete")
-    if results.get("total_generated"):
-        print(f"    Generated : {results.get('total_generated', 0)}")
-    print(f"    Valid     : {total_valid}")
-    if results.get("pushed_count"):
-        print(f"    Pushed    : {results['pushed_count']}")
-    if duration:
-        print(f"    Duration  : {duration:.1f}s")
-    if output:
-        print(f"    Output    : {output}")
-    if results.get("message"):
-        print(f"    Note      : {results['message']}")
+    """Print a short summary of a run_* result (logic in cli/summaries, S8)."""
+    from cli.summaries import render_run_summary
+    print(render_run_summary(mode, results))
 
 
 def _print_sessions(sessions: list[dict]) -> None:
