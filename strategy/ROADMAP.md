@@ -24,11 +24,55 @@ without breaking anything. No number, no merge.
 - Filing to Jira/Xray: built, DRY_RUN default, waiting on real credentials.
 - UI: one-platform restructure done. CI PR-scan gate built. Pitch deck exists.
 - **PR #1 merged to main** (2026-10-13, merge commit 95322b2).
+- Scanner: **28 deterministic probes**; suite **348 passed**, 3 skipped; the gate (quick
+  + deep) is green. Work lands directly on `main` (owner's call; harness blocks PR merges).
 
 ---
 
-## ACTIVE WORKLIST — blind-spot backlog, ranked by risk
+## MASTER WORKLIST — the single ordered sequence (S + B merged)
 
+This is the source of truth for order; the per-item detail lives in the two sections
+below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each green
++ gated before the next.
+
+**DONE (2026-10-13 → 14):**
+1. ✅ B1 — deterministic CONFIRMED vs AI-leads split (reproducibility gate)
+2. ✅ B2 — per-stage output contract (silent-gap detection)
+3. ✅ S1 — DRY_RUN request-scoped + safe default (no env race) — *unblocks B6*
+4. ✅ S2 — scanner egress / token boundary
+5. ✅ S3 — web API auth + export live-gate
+6. ✅ S4 — authorized-target gate + mutating-probe labelling
+7. ✅ S5 — packaging: declare UI deps + manifest-contract test
+8. ✅ S6 — redacted replay-evidence artifact
+9. ✅ S7 — legacy "assert → PASS" → "not evaluated"
+10. ✅ S8 (security half) — escape UI subprocess output
+11. ✅ B3·first class — BFLA (OWASP API5)
+
+**REMAINING (in execution order):**
+12. ▶ **B3 — more probe classes** (coverage breadth; biggest product gap vs DAST).
+    One per step: **SSTI → file-upload → host-header/cache-poisoning → XXE → GraphQL**.
+    Continues opportunistically as B4 reveals gaps.
+13. **B5 — no-spec endpoint discovery** (widens reach to spec-less real apps; a
+    prerequisite for strong B4 targets).
+14. **B4 — 2–3 case studies on real, messy, non-cherry-picked OSS apps** (the
+    credibility wedge; publish honest scorecards + the S6 replay evidence).
+15. **B7 — business-logic bug probe** (hardest, highest-value class; after breadth).
+16. **S8 (refactor half)** — split the oversized `main.py` / `ui/app.py` behind the
+    service interfaces (maintainability; do when it starts slowing feature work).
+17. **B8 — moat / GTM** — lead the message on "proven, zero false positives" (when pitching).
+
+**Opportunistic (externally gated — do the moment the trigger arrives, not in line):**
+- **B6 — real Jira/Xray filing** as soon as the owner's trial creds land (S1 made it
+  safe). Fold the result into the next B4 case study ("found + filed to Jira").
+
+**Deferred parallel:** **B9 — IP / legal / solo-founder** (owner's choice; still
+existential — revisit before external distribution).
+
+---
+
+## Detail — blind-spot backlog (B) items
+
+(Ordered in the MASTER WORKLIST above; full descriptions here.)
 The owner's call (2026-10-13): QAX already beats the competition on some axes
 (prove-not-flag, 0-FP, deterministic, generate+file in one tool) — now close every
 axis where it is behind. These are the honest blind spots from the standing
@@ -105,7 +149,7 @@ Overlapping Phase-2/3 items are absorbed here.
 
 ---
 
-## SELF-HARDENING track (S) — from the 2026-10-14 implementation audit
+## Detail — self-hardening (S) items, from the 2026-10-14 implementation audit
 
 The audit (verified against source — every checked claim was accurate) exposed a
 whole category the B-backlog missed: **is QAX itself safe?** A security product that
@@ -114,9 +158,8 @@ dogfooded ourselves. These are real, mostly deployment/safety items (no P0). The
 (deterministic/AI split) and B2 (stage diagnostics) work was independently confirmed
 present by the audit.
 
-**Merged execution order (what to march through):** S1 → S2 → S7 → S5 → S6 → S4 →
-S3 → S8, then resume the B-track (more B3 probe classes, then B4…). S1 comes before
-B6 (real Jira filing) so an accidental live push is impossible.
+**Order lives in the MASTER WORKLIST above** (S1–S7 + S8-security done; S8-refactor
+is item 16). S1 came before B6 so an accidental live push is impossible.
 
 - [x] **S1 — DRY_RUN safety (DONE; gated B6).** `XrayClient(dry_run=...)` is now
       request-scoped — the explicit flag wins, else env with a SAFE default of **true**
@@ -171,9 +214,10 @@ B6 (real Jira filing) so an accidental live push is impossible.
 
 ---
 
-## Phase 1 — HARDEN (now, the chosen focus)
+## Phase 1 — HARDEN (original framing; now subsumed by the MASTER WORKLIST above)
 
-Goal: make quality provable and repeatable before adding surface.
+Goal: make quality provable and repeatable before adding surface. (Kept for history;
+the live order is the MASTER WORKLIST.)
 
 - [ ] **Merge PR #1** — land the service layer + the 7 fixes.
 - [x] **Golden regression target** (done) — `evals/targets/vuln_jwt_app.py` + truth
