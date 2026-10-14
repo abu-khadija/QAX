@@ -169,11 +169,13 @@ Overlapping Phase-2/3 items are absorbed here.
       exist in a trial project, with screenshots in `strategy/`. (Absorbs Phase-2
       Jira.)
 
-- [ ] **B7 — business-logic bugs unproven.** Risk: the hardest, highest-value class;
-      QAX only proves OWASP/injection/auth today. Task: pick one concrete logic-bug
-      pattern (e.g. negative-quantity / price-tamper / workflow-skip), build a
-      deterministic probe + a seeded fixture, and prove it. Done when: QAX confirms a
-      seeded business-logic bug, 0 FP, and it is in the gate.
+- [x] **B7 — business-logic bug probe (DONE).** `business_logic_probe`: a NEGATIVE
+      quantity/amount accepted AND stored on a create endpoint — the first deterministic
+      logic class, with a clean behavioural control (positive accepted + distinctive
+      negative accepted & echoed; a correct app rejects the negative). P2, mutating.
+      Seeded in the golden target (/orders; SECURE rejects qty<1); gate recall 11/11.
+      +2 tests. Closes the "logic bugs unproven" gap with one solid class (more logic
+      patterns — price-tamper, workflow-skip — can follow opportunistically).
 
 - [ ] **B8 — thin moat (strategic, not a code task).** Risk: the deterministic
       probes are replicable by a funded incumbent. Task (GTM): lean the whole
