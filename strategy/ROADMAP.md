@@ -136,9 +136,14 @@ B6 (real Jira filing) so an accidental live push is impossible.
       auth; export honours caller-supplied `dry_run:false` with server creds. Gates
       any non-loopback exposure (private beta). Done when: routes require auth and
       export cannot be forced live by the caller.
-- [ ] **S4 — authorized-target gate + active-probe safety.** No ownership/consent gate
-      before active (mutating) probing. Done when: a scan requires explicit
-      target-authorization, destructive probes are labelled, and cleanup is proven.
+- [x] **S4 — authorized-target gate + active-probe safety (DONE).** `main.py scan` now
+      REFUSES without `--authorized` (exit 2), naming the data-mutating probes that will
+      run — explicit ownership/permission confirmation before any active probing.
+      `execution/probes.MUTATING_PROBES` labels the writers (bola, mass-assignment,
+      stored-xss, persistence, injection, nosql, malformed-input). Cleanup is tracked +
+      reported (created/cleaned records); honest caveat kept — tracking is not a
+      guaranteed rollback. +2 unit tests. (Follow-up: the same consent gate for the web
+      entry lands with S3.)
 - [x] **S5 — packaging/install reproducible (DONE).** Declared streamlit/plotly/pandas
       in requirements.txt (labelled Web-UI section) + `tests/test_packaging.py`: a
       manifest-contract test that fails if the UI imports a third-party module not

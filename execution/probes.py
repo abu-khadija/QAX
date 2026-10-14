@@ -233,6 +233,17 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
     return out
 
 
+# Probes that WRITE to the target (create records / persist input) rather than only
+# reading. Surfaced so a scan can warn the operator exactly what will mutate the
+# target, and so an authorized-target gate can name them. (Read-only probes — sqli on
+# a path param, bfla, forged-token-replay, headers, CORS, excessive-data, etc. — are
+# not listed.)
+MUTATING_PROBES = frozenset({
+    "bola", "mass-assignment", "stored-xss", "persistence",
+    "injection", "nosql", "malformed-input",
+})
+
+
 # Path segments that denote a PRIVILEGED / admin-only function (OWASP API5 BFLA).
 _PRIVILEGED_SEGS = ("admin", "administrator", "manage", "management", "internal",
                     "sysadmin", "superuser", "console", "backoffice", "moderator")

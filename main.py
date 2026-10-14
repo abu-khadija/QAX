@@ -2502,7 +2502,22 @@ def run_scan_command() -> None:
                              "First run seeds it; later runs flag screens whose rendering changed.")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
+    parser.add_argument("--authorized", action="store_true",
+                        help="Confirm you OWN or are explicitly permitted to actively test this "
+                             "target. A scan runs active, data-MUTATING probes (it creates test "
+                             "records and sends adversarial input). Required — a scan refuses "
+                             "without it. Never run against a target you are not authorized to test.")
     args = parser.parse_args(sys.argv[2:])
+
+    # S4 — authorized-target gate: active probing mutates the target, so require an
+    # explicit ownership/permission confirmation before anything runs.
+    if not args.authorized:
+        from execution.probes import MUTATING_PROBES
+        print("\n  Refusing to scan: an active scan runs data-MUTATING probes "
+              f"({', '.join(sorted(MUTATING_PROBES))})\n  — it creates test records and sends "
+              "adversarial input to the target.\n  Re-run with --authorized to confirm you own "
+              "or are permitted to test this target.\n")
+        sys.exit(2)
 
     from services import scorecard as _scorecard
     from services import usage as _usage
