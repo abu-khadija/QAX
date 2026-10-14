@@ -59,8 +59,8 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     0 FP after a found+fixed cry-wolf; see strategy/CASE_STUDY_REALWORLD_DRF.md).
     DONE — 2 case studies (DRF + Go/Gin), 2 stacks, 0 FP on both.
 15. ✅ **B7 — business-logic bug probe (DONE)** — negative quantity/amount accepted+stored (P2).
-16. ▶ **S8 (refactor half)** — IN PROGRESS: incremental extraction from main.py
-    (cli/scan_render.py done, tested). Continue one tested extraction per step.
+16. ✅ **S8 (refactor half, main.py)** — 2679→2288 lines: cli/ presentation modules
+    + ONE generation path (GenerationService) for CLI/scan/pipeline. Left: ui/app.py.
 17. **B8 — moat / GTM** — lead the message on "proven, zero false positives" (when pitching).
     ✅ First slice DONE (2026-10-14): product homepage at `/` (app moved to `/app`),
     positioned per the Qodo study below; every claim maps to a gate number or a shipped
@@ -269,11 +269,15 @@ is item 16). S1 came before B6 so an accidental live push is impossible.
       it had — per-chunk cache keys (large files were analyzed on chunk 1 only when
       caching was on) and the size_lines/line_count key mismatch (always passed 0);
       (3) ported chunking + testability-skip + real include_deps INTO GenerationService
-      (so scan/pipeline/multi-source paths gain them). REMAINING final swap (own
-      session): have run_analyze_command call GenerationService and delete
-      _process_single_file — BLOCKED on parity: the service still lacks (a) screenshot
-      capture and (b) a passed-in GitAnalyzer for git-risk; add those first, since the
-      `analyze` CLI is not gate-covered. Then ui/app.py views.
+      (so scan/pipeline/multi-source paths gain them). ✅ SWAP DONE: parity added
+      (GenerationService gained screenshot capture + a validate=False mode; git risk
+      was already covered by include_git→SmartChecker), then run_analyze_command was
+      rewired to generate via GenerationService(validate=False) keeping its own
+      validate/report/auto-accept/push flow byte-for-byte; _process_single_file + 3
+      dead imports deleted. ONE generation path now serves CLI analyze + scan +
+      pipeline + multi-source. main.py 2679→2288 lines. Verified `analyze` end-to-end
+      (10 valid, 0 invalid) + gate green. NEXT S8 (lower priority, own session):
+      ui/app.py views (~2.3k lines).
       ✅ FIXED: the `.cs` folder-mode default (and a hard-coded "example3" → .ts map) is
       gone. Both folder paths (CLI + pipeline FolderInputAdapter) now auto-detect the
       folder's dominant source language (`core.code_reader.detect_dominant_extension`),
