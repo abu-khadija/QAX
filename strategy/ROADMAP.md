@@ -55,8 +55,9 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     as B4 reveals gaps.
 13. ✅ **B5 — no-spec endpoint discovery** (DONE) — probes common paths on spec-less
     apps; widens reach for B4.
-14. **B4 — 2–3 case studies on real, messy, non-cherry-picked OSS apps** (the
-    credibility wedge; publish honest scorecards + the S6 replay evidence).
+14. ▶ **B4 — real-app case studies** (IN PROGRESS: 1 done — MIT DRF RealWorld,
+    0 FP after a found+fixed cry-wolf; see strategy/CASE_STUDY_REALWORLD_DRF.md).
+    NEXT: a 2nd real app on a different stack.
 15. ✅ **B7 — business-logic bug probe (DONE)** — negative quantity/amount accepted+stored (P2).
 16. ▶ **S8 (refactor half)** — IN PROGRESS: incremental extraction from main.py
     (cli/scan_render.py done, tested). Continue one tested extraction per step.
@@ -149,7 +150,15 @@ Overlapping Phase-2/3 items are absorbed here.
       - B3 planned batch COMPLETE (6 classes). The track stays open — add more classes
         opportunistically as B4 reveals real-world gaps.
 
-- [ ] **B4 — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
+- [~] **B4 — evidence on real, non-cherry-picked apps (IN PROGRESS: 1 of ~2).**
+      First case study DONE: a real MIT Django-REST RealWorld backend, scanned
+      black-box on SQLite (`strategy/CASE_STUDY_REALWORLD_DRF.md`). It drove two real
+      QAX improvements: drf-yasg/drf-spectacular spec grounding, and a FALSE-POSITIVE
+      fix (public GET flagged via the spec's global security — now needs per-op
+      auth_explicit). Final: 0 confirmed, 0 FP, 1 legit P3 (no CSP) — QAX stays quiet
+      on a well-written app. NEXT: a second real app (ideally a different stack) for
+      the "≥2 case studies" bar.
+- [ ] **B4-orig — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,
       real OSS apps we did NOT pick for being vulnerable; publish honest scorecards
       (recall/FP/$/run) even when the result is "0 found, 0 FP". Done when:
