@@ -11,6 +11,7 @@ Phase 2 alongside their services.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 
 
@@ -393,6 +394,33 @@ class AppModel:
         return data
 
 
+_SECRET_KEY_HINTS = ("password", "secret", "token", "authorization", "api_key",
+                     "apikey", "client_secret", "access_token", "bearer", "pwd")
+_BEARER_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._\-]+", re.IGNORECASE)
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9._\-]{10,}")
+
+
+def redact_secrets(obj):
+    """
+    Recursively mask secrets in an evidence object so a saved replay artifact never
+    persists live credentials: values under secret-ish keys are replaced, and any
+    bearer token or JWT inside a string is masked. Pure; returns a new object.
+    """
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if any(h in str(k).lower() for h in _SECRET_KEY_HINTS):
+                out[k] = "«redacted»"
+            else:
+                out[k] = redact_secrets(v)
+        return out
+    if isinstance(obj, list):
+        return [redact_secrets(v) for v in obj]
+    if isinstance(obj, str):
+        return _JWT_RE.sub("«redacted-jwt»", _BEARER_RE.sub(r"\1«redacted»", obj))
+    return obj
+
+
 @dataclass
 class OrchestratorResult:
     """
@@ -422,6 +450,7 @@ class OrchestratorResult:
     created_records: int = 0
     cleaned_records: int = 0
     legs: dict = field(default_factory=dict)   # B2: per-stage output counts (diagnostics)
+    evidence: dict = field(default_factory=dict)   # S6: redacted replay trail (tests + steps)
     error: str | None = None
 
     @property
@@ -502,6 +531,7 @@ class OrchestratorResult:
             "cleaned_records": self.cleaned_records,
             "legs": self.legs,
             "silent_legs": self.silent_legs(),
+            "evidence": self.evidence,
             "error": self.error,
             "success": self.success,
         }

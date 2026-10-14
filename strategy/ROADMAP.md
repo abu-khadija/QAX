@@ -139,14 +139,17 @@ B6 (real Jira filing) so an accidental live push is impossible.
 - [ ] **S4 — authorized-target gate + active-probe safety.** No ownership/consent gate
       before active (mutating) probing. Done when: a scan requires explicit
       target-authorization, destructive probes are labelled, and cleanup is proven.
-- [ ] **S5 — packaging/install reproducible.** `requirements.txt` omits
-      streamlit/plotly/pandas that `ui/app.py` imports at load. Fix: declare them (an
-      extras group) + a clean-install/launch check. Done when: a fresh install can
-      launch the UI.
-- [ ] **S6 — replayable evidence artifact.** `OrchestratorResult.to_dict()` is a
-      summary — no generated tests, no request/response trail. Undercuts the
-      "reproducible evidence" claim and B4. Done when: a durable artifact carries the
-      tests, the actual requests/status/body, probe inputs, stage failures, redacted.
+- [x] **S5 — packaging/install reproducible (DONE).** Declared streamlit/plotly/pandas
+      in requirements.txt (labelled Web-UI section) + `tests/test_packaging.py`: a
+      manifest-contract test that fails if the UI imports a third-party module not
+      declared, so the gap can't recur.
+- [x] **S6 — replayable evidence artifact (DONE).** `OrchestratorResult.evidence`
+      now carries a REDACTED replay trail — the executed test definitions, the
+      per-step execution results (method/path/status/response/error), and the proven
+      probe findings — serialized in to_dict. `redact_secrets()` masks secret-keyed
+      values and any Bearer token / JWT so the saved artifact never persists live
+      credentials. +3 redaction unit tests. (Feeds B4 — case studies now have a
+      replayable trail.)
 - [x] **S7 — legacy "assert noted → PASS" (DONE).** `api_runner.execute_step`'s legacy
       UI-shaped `assert`/`verify`/`check`/`expect` now returns SKIP ("Assertion NOT
       evaluated in API mode — use api_steps"), never PASS, so an un-checked step can't

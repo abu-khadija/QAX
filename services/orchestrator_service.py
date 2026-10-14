@@ -363,10 +363,19 @@ class OrchestratorService:
             "deterministic_confirmed": sum(
                 1 for b in confirmed if str(b.get("source", "")) in ("probe", "coverage")),
         }
+        # S6: a durable, REDACTED replay trail — the executed test definitions and the
+        # per-step request/response outcomes — so a confirmed finding can be reproduced
+        # and audited independently (not just a summary). Secrets are masked.
+        from services.results import redact_secrets
+        evidence = {
+            "tests": redact_secrets(executable),
+            "execution": redact_secrets(getattr(execution, "results", []) or []),
+            "probes": redact_secrets([b for b in confirmed if str(b.get("source")) == "probe"]),
+        }
         result = OrchestratorResult(
             confirmed=confirmed, coverage=coverage, rounds=rounds,
             tests_run=len(executable), suspects=len(detection.findings),
-            ui_screens=ui_screens, legs=legs,
+            ui_screens=ui_screens, legs=legs, evidence=evidence,
             created_records=getattr(probe_result, "created_records", 0),
             cleaned_records=getattr(probe_result, "cleaned_records", 0))
         silent = result.silent_legs()
