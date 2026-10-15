@@ -1,18 +1,93 @@
 {
   "target": "QAX golden JWT target (evals/targets/vuln_jwt_app.py)",
   "source": "purpose-built: JWT signature not verified → forged tokens accepted across the protected surface",
-  "note": "Ground truth for the eval gate (deterministic quick scan). Recall/FP are scored over CONFIRMED CLAIMS (P1/P2) only — P3 leads (e.g. missing security headers) are reported but not scored, so they do NOT belong here. A finding matches an entry when every keyword in 'match' is a substring of (title + evidence + target), case-insensitive. These are the deterministic (zero-LLM) P1 probe findings expected every run.",
+  "note": "Ground truth for the eval gate (deterministic quick scan). Recall/FP are scored over CONFIRMED CLAIMS (P1/P2) only — P3 leads (e.g. missing security headers) are reported but not scored, so they do NOT belong here. A finding matches an entry when every keyword in 'match' is a substring of (title + evidence + target), case-insensitive. These are the deterministic (zero-LLM) P1 probe findings expected every run. The three spec-typed P2 classes on /tasks (boolean-false, single-element-array, long-input) are scored here; the two P3 ones (date-order, duplicate-rows) are checked by dedicated gate checks (typed probes fired / silent on the fixed app / actually exercised).",
   "expected": [
-    {"id": "jwt-alg-none",            "match": ["alg=none"]},
-    {"id": "jwt-unverified-signature","match": ["signature not verified"]},
-    {"id": "forged-token-replay",     "match": ["forged jwt accepted"]},
-    {"id": "bfla",                    "match": ["function-level authorization"]},
-    {"id": "ssti",                    "match": ["server-side template injection"]},
-    {"id": "reflected-xss",           "match": ["reflected xss"]},
-    {"id": "host-header-injection",   "match": ["host header reflected"]},
-    {"id": "xxe",                     "match": ["xml external entity"]},
-    {"id": "graphql-introspection",   "match": ["graphql introspection enabled"]},
-    {"id": "file-upload",             "match": ["unrestricted file upload"]},
-    {"id": "business-logic",          "match": ["negative", "accepted and stored"]}
+    {
+      "id": "jwt-alg-none",
+      "match": [
+        "alg=none"
+      ]
+    },
+    {
+      "id": "jwt-unverified-signature",
+      "match": [
+        "signature not verified"
+      ]
+    },
+    {
+      "id": "forged-token-replay",
+      "match": [
+        "forged jwt accepted"
+      ]
+    },
+    {
+      "id": "bfla",
+      "match": [
+        "function-level authorization"
+      ]
+    },
+    {
+      "id": "ssti",
+      "match": [
+        "server-side template injection"
+      ]
+    },
+    {
+      "id": "reflected-xss",
+      "match": [
+        "reflected xss"
+      ]
+    },
+    {
+      "id": "host-header-injection",
+      "match": [
+        "host header reflected"
+      ]
+    },
+    {
+      "id": "xxe",
+      "match": [
+        "xml external entity"
+      ]
+    },
+    {
+      "id": "graphql-introspection",
+      "match": [
+        "graphql introspection enabled"
+      ]
+    },
+    {
+      "id": "file-upload",
+      "match": [
+        "unrestricted file upload"
+      ]
+    },
+    {
+      "id": "business-logic",
+      "match": [
+        "negative",
+        "accepted and stored"
+      ]
+    },
+    {
+      "id": "boolean-false",
+      "match": [
+        "cannot be set to false"
+      ]
+    },
+    {
+      "id": "single-element-array",
+      "match": [
+        "single-value",
+        "works with two"
+      ]
+    },
+    {
+      "id": "long-input",
+      "match": [
+        "unhandled error on a 5000-character"
+      ]
+    }
   ]
 }

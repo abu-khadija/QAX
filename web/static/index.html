@@ -299,7 +299,7 @@ No token                    → HTTP 401
     </div>
     <div class="split">
       <div class="card">
-        <span class="badge-ok">CONFIRMED · 14</span>
+        <span class="badge-ok">CONFIRMED · 18</span>
         <ul class="list">
           <li><span class="sev">P1</span>Broken function-level authorization — <code>GET /admin/users</code></li>
           <li><span class="sev">P1</span>Forged JWT accepted — <code>GET /billing/invoices</code></li>
@@ -309,7 +309,7 @@ No token                    → HTTP 401
           <li><span class="sev p2">P2</span>Host header reflected into reset link — <code>/reset-link</code></li>
           <li><span class="sev p2">P2</span>GraphQL introspection enabled — <code>POST /graphql</code></li>
           <li><span class="sev p2">P2</span>Negative order quantity accepted and stored — <code>POST /orders</code></li>
-          <li class="faint">…and 6 more</li>
+          <li class="faint">…and 10 more</li>
         </ul>
       </div>
       <div class="card">
@@ -330,7 +330,7 @@ No token                    → HTTP 401
   <div class="wrap">
     <div class="sec-head">
       <div class="eyebrow">Coverage</div>
-      <h2 id="cov-h">34 deterministic probes, each with a built-in control</h2>
+      <h2 id="cov-h">40 deterministic probes, each with a built-in control</h2>
       <p class="lead">Every probe compares an attack request against a benign one and only reports a bug when the difference proves it. On a well-written app, that's how QAX stays quiet.</p>
     </div>
     <div class="chips" aria-label="Probe classes">
@@ -341,9 +341,9 @@ No token                    → HTTP 401
       <span class="chip">Reflected &amp; stored XSS</span><span class="chip">Path traversal</span><span class="chip">Unrestricted file upload</span>
       <span class="chip">Host-header injection</span><span class="chip">Open redirect</span><span class="chip">CORS</span>
       <span class="chip">GraphQL introspection</span><span class="chip">Exposed debugger / stack traces</span><span class="chip">Rate limiting</span>
-      <span class="chip">Security headers &amp; cookie flags</span><span class="chip">Malformed-input crashes</span><span class="chip">Business logic: negative quantities &amp; amounts</span>
+      <span class="chip">Security headers &amp; cookie flags</span><span class="chip">Malformed-input crashes</span><span class="chip">Business logic: negative quantities &amp; amounts</span><span class="chip">Stale access after a permission is revoked</span><span class="chip">A checkbox that can't be unticked</span><span class="chip">Multi-select that fails with one value</span><span class="chip">End date before start date</span><span class="chip">Very long input: crash or silent truncation</span><span class="chip">The same record listed twice</span>
     </div>
-    <p class="caption">Plus a browser UI tour (JS errors, failed requests, visual regression against a baseline) and dependency CVE and licence checks. Business logic is covered by a first check (negative quantities and amounts); broader logic and workflow bugs are on the roadmap.</p>
+    <p class="caption">Plus a browser UI tour (JS errors, failed requests, visual regression against a baseline) and dependency CVE and licence checks. Business logic is covered by a growing set of checks (negative amounts, stale access after revocation, date order, silent truncation, duplicated rows); open-ended workflow bugs that need a product oracle are still on the roadmap. When a check cannot run, for instance because a second user's token is missing, QAX says so instead of reporting a clean result.</p>
   </div>
 </section>
 
@@ -363,7 +363,7 @@ No token                    → HTTP 401
         <p>Paste a user story or a function and QAX drafts structured test cases with steps and expected results. They're drafts for a QA engineer to review, not a replacement for one.</p>
         <p><a href="/app#generate">Generate test cases →</a></p></div>
       <div class="card"><div class="ic">FILE</div><h3 style="margin-top:8px">Send to Jira, Xray, Zephyr or Excel <span class="status pre">dry run by default</span></h3>
-        <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server.</p></div>
+        <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server. Live filing has been exercised on a real Jira Cloud project: only fields the project actually has are sent, repeat scans do not file duplicates, and the evidence is attached.</p></div>
     </div>
   </div>
 </section>
@@ -377,12 +377,12 @@ No token                    → HTTP 401
       <p class="lead">Every change to QAX goes through a gate that scans a deliberately vulnerable app and a fixed copy of it. If it misses a planted bug or flags the fixed copy, the change can't merge.</p>
     </div>
     <div class="grid g4">
-      <div class="stat"><div class="n ok">11 / 11</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
+      <div class="stat"><div class="n ok">14 / 14</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
       <div class="stat"><div class="n ok">0</div><div class="l">false positives</div><div class="src">The same gate, plus a fixed copy of the target that must come back silent.</div></div>
       <div class="stat"><div class="n">2×</div><div class="l">identical confirmed list</div><div class="src">The gate scans twice and requires the same result.</div></div>
-      <div class="stat"><div class="n">3</div><div class="l">external stacks, 0 false alarms</div><div class="src">Well-written Node, Go and Java backends we didn't write. A small sample, and we say so.</div></div>
+      <div class="stat"><div class="n">5</div><div class="l">real apps, 0 false alarms</div><div class="src">Node, Go, Java, Django and Gitea (537 API operations) backends we didn't write. QAX raised false alarms on two of them first; we fixed the causes and wrote it up. Still a small sample.</div></div>
     </div>
-    <p class="caption">Measured October 2026. Case studies on larger real-world apps are in progress and will be published with their full scorecards, including what QAX missed.</p>
+    <p class="caption">Measured October 2026. Case studies on three of those apps (Django REST, Go/Gin, Gitea) are written up with their scorecards, including the false alarms QAX raised before we fixed them and what it could not test.</p>
   </div>
 </section>
 

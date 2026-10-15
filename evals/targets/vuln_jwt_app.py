@@ -9,6 +9,10 @@ the fixed scenario `evals/gate.py` scans on every change to prove QAX still:
   • flags missing security headers,
 and stays SILENT when the flaw is fixed (QAX_SECURE=1 — the no-false-positive control).
 
+/tasks (POST create + GET list) plants the five SPEC-TYPED classes mined from the owner's KB
+(boolean-false, single-element-array, date-order, long-input, duplicate-rows); SECURE
+handles each correctly so the same probes must go silent (the no-false-positive control).
+
 Endpoints: /me (control), /admin/users, /billing/invoices (protected, swept),
 /health (public), /auth/register + /auth/login (register is required before login),
 /openapi.json (so QAX grounds the exact surface regardless of source modelling).
@@ -197,6 +201,61 @@ def create_order():
     return jsonify({"id": 1, "item": body.get("item", "x"), "quantity": qty}), 201
 
 
+_TASKS: list = []
+
+
+@app.post("/tasks")
+def create_task():
+    """
+    A create endpoint carrying the five spec-typed defects (each fixed in SECURE mode):
+      • boolean-false       `done:false` is treated as a missing required field (422);
+      • single-element-array a 1-item `labels` is rejected (scalar-vs-array binding, 400);
+      • date-order          `ends_at` before `starts_at` is accepted and stored;
+      • long-input          a very long `title` crashes with an unhandled 500;
+    SECURE: false/1-item accepted, reversed dates 422, long title a clean 422.
+    """
+    body = request.get_json(silent=True) or {}
+    title = body.get("title")
+    if not isinstance(title, str) or not title:
+        return jsonify({"error": "title is required"}), 422
+    if body.get("done") is False and not SECURE:
+        return jsonify({"message": "The done field is required."}), 422          # implicit-required bool
+    labels = body.get("labels", [])
+    if isinstance(labels, list) and len(labels) == 1 and not SECURE:
+        return jsonify({"message": "labels must be an array"}), 400              # scalar-vs-array binding
+    s, e = body.get("starts_at"), body.get("ends_at")
+    if SECURE and isinstance(s, str) and isinstance(e, str) and e < s:
+        return jsonify({"error": "ends_at must not be before starts_at"}), 422
+    if len(title) > 1000:
+        if SECURE:
+            return jsonify({"error": "title is too long"}), 422
+        return jsonify({"error": "value too long for column"}), 500             # unhandled overflow
+    rec = {"id": len(_TASKS) + 1, "title": title, "done": body.get("done", True),
+           "labels": labels if isinstance(labels, list) else [], "starts_at": s, "ends_at": e}
+    _TASKS.append(rec)
+    return jsonify(rec), 201
+
+
+@app.get("/tasks")
+def list_tasks():
+    """
+    VULNERABLE: a join fan-out lists a task once PER LABEL, so a task with two labels
+    appears twice (same id). SECURE lists each task once. Honours ?limit= so QAX's
+    unpaginated-list probe stays quiet (this target is not about pagination).
+    """
+    rows: list = []
+    for t in _TASKS:
+        if SECURE or not t["labels"]:
+            rows.append(t)
+        else:
+            rows.extend(dict(t, label=lab) for lab in t["labels"])
+    try:
+        rows = rows[:max(0, int(request.args["limit"]))]
+    except (KeyError, ValueError):
+        pass
+    return jsonify(rows), 200
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -225,6 +284,18 @@ def spec():
             "/orders": {"post": {"responses": {"201": {"description": "ok"}},
                                  "requestBody": {"content": {"application/json": {"schema": {"properties": {
                                      "item": {"type": "string"}, "quantity": {"type": "integer"}}}}}}}},
+            "/tasks": {
+                "get": {"parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer"}}],
+                        "responses": {"200": {"description": "ok"}}},
+                "post": {"responses": {"201": {"description": "ok"}},
+                         "requestBody": {"content": {"application/json": {"schema": {
+                             "type": "object", "required": ["title"],
+                             "properties": {
+                                 "title": {"type": "string"},
+                                 "done": {"type": "boolean"},
+                                 "labels": {"type": "array", "items": {"type": "string"}},
+                                 "starts_at": {"type": "string", "format": "date-time"},
+                                 "ends_at": {"type": "string", "format": "date-time"}}}}}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
         },
     })

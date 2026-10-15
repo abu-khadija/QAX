@@ -34,6 +34,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+# The spec-typed probes planted on the golden target's /tasks endpoint.
+_TYPED_PROBES = {"boolean-false", "single-element-array", "date-order", "long-input", "duplicate-rows"}
+
 APP = str(Path(__file__).parent / "targets" / "vuln_jwt_app.py")
 TRUTH = str(Path(__file__).parent / "truth" / "golden-jwt.json")
 
@@ -158,6 +161,15 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
                    f"probes={sorted(p for p in probes if p)}"))
     checks.append(pipe_check)   # original pipeline's execute leg, verified E2E
 
+    # The five spec-typed probes must be proven on a RUNNING server, not just
+    # against fakes: each planted bug in /tasks fires, none is silently skipped.
+    typed_missing = sorted(_TYPED_PROBES - probes)
+    checks.append(("typed probes: all 5 fired on the vulnerable target", not typed_missing,
+                   f"fired={sorted(_TYPED_PROBES & probes)} missing={typed_missing or 'none'}"))
+    unexercised = [n for n in res.not_tested if n.get("probe") in _TYPED_PROBES]
+    checks.append(("typed probes: actually exercised (no 'could not run' gap)", not unexercised,
+                   f"gaps={[(n['probe'], n['kind']) for n in unexercised] or 'none'}"))
+
     # 2) Secure control — the SAME app with the flaw fixed must go silent (no FP).
     port = _free_port()
     proc = _boot(port, secure=True)
@@ -169,6 +181,9 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
                  if b.get("probe") in ("jwt-flaws", "forged-token-replay", "forge-jwt", "bfla")]
     checks.append(("secure control: auth probes silent (0)", len(auth_bugs) == 0,
                    f"auth findings on fixed app={len(auth_bugs)}"))
+    typed_fp = [b.get("probe") for b in sres.confirmed if b.get("probe") in _TYPED_PROBES]
+    checks.append(("secure control: typed probes silent (0)", not typed_fp,
+                   f"typed findings on fixed app={typed_fp or 0}"))
 
     # 3) Orchestration A/B — recall up, cost down, FP flat.
     from evals.orchestrator_ab import measure
