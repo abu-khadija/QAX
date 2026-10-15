@@ -241,6 +241,7 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
 MUTATING_PROBES = frozenset({
     "bola", "mass-assignment", "stored-xss", "persistence",
     "injection", "nosql", "malformed-input", "file-upload", "business-logic",
+    "access-revocation",
 })
 
 
@@ -657,6 +658,210 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
                           f"quantities/amounts are business-nonsensical (refund/credit abuse); a "
                           f"correct app rejects them."),
                 target=path))
+            break
+    return out
+
+
+# Path segments that mark a "membership / access grant" sub-resource — the thing an
+# owner grants to another user and can revoke. The access-revocation probe keys on these.
+_MEMBERSHIP_SEGS = ("collaborators", "collaborator", "members", "member", "access",
+                    "permissions", "sharing", "shares", "invites", "invitations")
+# Endpoints that return the CALLER's own identity, to learn user B's username.
+_WHOAMI_PATHS = ("/user", "/api/v1/user", "/users/me", "/user/me", "/me", "/api/me",
+                 "/account", "/profile", "/whoami")
+# Fields that carry a username/login in a whoami or collection response.
+_USERNAME_FIELDS = ("login", "username", "user_name", "handle", "slug", "name")
+
+
+def _whoami(sess, base: str, token, auth: dict | None) -> str | None:
+    """The caller's own username, read from a common identity endpoint (or None)."""
+    for p in _WHOAMI_PATHS:
+        try:
+            r = sess.get(f"{base}{p}", headers=_auth_headers(token, auth), timeout=10)
+        except Exception:
+            continue
+        if r.status_code != 200:
+            continue
+        try:
+            body = r.json()
+        except Exception:
+            continue
+        if isinstance(body, dict):
+            for f in _USERNAME_FIELDS:
+                if isinstance(body.get(f), str) and body[f].strip():
+                    return body[f].strip()
+    return None
+
+
+def _owned_resource(sess, base: str, token, auth: dict | None,
+                    params: list[str]) -> dict | None:
+    """
+    Concrete values for a resource A OWNS, to fill a grant/read path's params
+    (e.g. {owner}/{repo} from A's own repo list). Tries the caller's own listing
+    endpoints and matches each path param name to a field on the first item.
+    """
+    if not params:
+        return {}
+    for lp in ("/user/repos", "/api/v1/user/repos", "/user/projects",
+               "/user/repositories", "/repos", "/projects"):
+        try:
+            r = sess.get(f"{base}{lp}", headers=_auth_headers(token, auth), timeout=10)
+        except Exception:
+            continue
+        if r.status_code != 200:
+            continue
+        try:
+            items = r.json()
+        except Exception:
+            continue
+        if isinstance(items, dict):
+            items = items.get("data") or items.get("items") or items.get("results") or []
+        if not (isinstance(items, list) and items and isinstance(items[0], dict)):
+            continue
+        item = items[0]
+        vals: dict = {}
+        for prm in params:
+            v = _field_for_param(item, prm)
+            if v is None:
+                break
+            vals[prm] = v
+        if len(vals) == len(params):
+            return vals
+    return None
+
+
+def _field_for_param(item: dict, param: str) -> str | None:
+    """Pick the value for a path param from a resource item (owner→owner.login, repo→name…)."""
+    p = param.lower()
+    if p in ("owner", "username", "user", "org"):
+        owner = item.get("owner")
+        if isinstance(owner, dict):
+            for f in _USERNAME_FIELDS:
+                if isinstance(owner.get(f), str):
+                    return owner[f]
+        for f in _USERNAME_FIELDS:
+            if isinstance(item.get(f), str):
+                return item[f]
+    if p in ("repo", "repository", "name", "slug", "project"):
+        for f in ("name", "slug", "full_name"):
+            if isinstance(item.get(f), str):
+                return item[f].split("/")[-1]
+    if p in ("id", "repo_id", "project_id") and item.get("id") is not None:
+        return str(item["id"])
+    v = item.get(param)
+    return str(v) if isinstance(v, (str, int)) else None
+
+
+def _fill(path: str, values: dict) -> str:
+    """Substitute {name} params in a path from `values`."""
+    out = path
+    for k, v in values.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
+
+
+def access_revocation_probe(model, base_url: str, *, session: requests.Session | None = None,
+                            auth: dict | None = None, limit: int = 3) -> list[ProbeFinding]:
+    """
+    Broken access-revocation — a business-logic flaw OWASP-adjacent to BFLA/BOLA but
+    about STALE permission: after an owner REVOKES a user's access to a resource, that
+    user must no longer reach it. Apps that cache permissions, or only remove the
+    membership row without invalidating access, leak here.
+
+    Two-user control (needs a supplied second identity, token_b): owner A grants user B
+    on a resource A owns, then revokes B. The probe fires ONLY when every control step
+    succeeds — B gets access on grant (2xx), the revoke is accepted (2xx) — yet B STILL
+    reaches the resource after revocation (2xx). Any control failing → silent (can't
+    prove it). A correct app returns 403/404 to B after revoke and stays quiet. P1.
+    No model calls. Mutating: grants/revokes a membership; both sides are our own test
+    identities and the grant is always revoked again.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    out: list[ProbeFinding] = []
+    tok_a = (auth or {}).get("token")
+    tok_b = (auth or {}).get("token_b")
+    if not (tok_a and tok_b):
+        return out   # needs two real identities; self-registration can't make B an owner's grantee
+
+    # Grant/revoke pairs: PUT (grant) + DELETE (revoke) on the SAME membership path
+    # whose last segment is the member identity ({collaborator}/{username}/...).
+    eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
+    def has(method, path):
+        return any(str(e.get("method", "")).upper() == method
+                   and str(e.get("path", "")) == path for e in eps)
+    pairs = []
+    for e in eps:
+        if str(e.get("method", "")).upper() != "PUT":
+            continue
+        path = str(e.get("path", ""))
+        m = re.search(r"\{([^}]+)\}$", path.rstrip("/"))
+        if not m:
+            continue
+        segs = [s for s in path.split("/") if s]
+        if not any(s.lower() in _MEMBERSHIP_SEGS for s in segs):
+            continue
+        if has("DELETE", path):
+            pairs.append((path, m.group(1)))
+    if not pairs:
+        return out
+
+    b_user = _whoami(sess, base, tok_b, auth)
+    if not b_user:
+        return out
+
+    seen: set = set()
+    for grant_path, member_param in pairs[:limit]:
+        # The resource B gains access to: the path up to the membership segment.
+        segs = grant_path.split("/")
+        cut = next((i for i, s in enumerate(segs) if s.lower() in _MEMBERSHIP_SEGS), None)
+        if cut is None:
+            continue
+        resource_path = "/".join(segs[:cut]) or "/"
+        if resource_path in seen or not has("GET", resource_path):
+            continue
+        seen.add(resource_path)
+        res_params = re.findall(r"\{([^}]+)\}", resource_path)
+        values = _owned_resource(sess, base, tok_a, auth, res_params)
+        if values is None:
+            continue
+        res_url = base + _fill(resource_path, values)
+        grant_url = base + _fill(grant_path, {**values, member_param: b_user})
+        ha, hb = _auth_headers(tok_a, auth), _auth_headers(tok_b, auth)
+
+        def code(method, url, headers, **kw):
+            try:
+                return sess.request(method, url, headers=headers, timeout=15, **kw).status_code
+            except Exception:
+                return None
+
+        def is2xx(c):
+            return isinstance(c, int) and 200 <= c < 300
+
+        # 1) A grants B.  2) B must now reach the resource.  3) A revokes B.
+        if not is2xx(code("PUT", grant_url, ha, json={"permission": "read"})):
+            continue
+        granted_2xx = is2xx(code("GET", res_url, hb))
+        revoked = code("DELETE", grant_url, ha)
+        if not is2xx(revoked):
+            # couldn't revoke → leave the grant cleaned up, then skip (control failed)
+            code("DELETE", grant_url, ha)
+            continue
+        if not granted_2xx:
+            continue   # grant never actually gave B access → nothing to prove about revocation
+        # 4) After revoke, B must be blocked. Still 2xx == stale access == the bug.
+        after = code("GET", res_url, hb)
+        if is2xx(after):
+            out.append(ProbeFinding(
+                probe="access-revocation",
+                title=f"Access not revoked on {resource_path}",
+                exploited=True, severity="P1",
+                evidence=(f"User B kept read access to {resource_path} AFTER user A revoked them "
+                          f"(DELETE {grant_path} → {revoked}). The control held: B had no need of "
+                          f"access except the grant, the grant returned 2xx, and the revoke returned "
+                          f"2xx — yet B still reads the resource (HTTP {after}). Revoking access does "
+                          f"not actually remove it (stale/cached permission)."),
+                target=resource_path))
             break
     return out
 

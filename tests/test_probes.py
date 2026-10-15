@@ -1471,3 +1471,81 @@ def test_business_logic_detects_negative_quantity_stored():
 def test_business_logic_quiet_when_negative_rejected():
     from execution.probes import business_logic_probe
     assert business_logic_probe(_bl_model(), "http://x", session=_BlSession("secure")) == []
+
+
+# ── Access revocation (business logic): stale access after an owner revokes ─────
+
+def _revoke_model():
+    from services.results import AppModel
+    return AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/repos/{owner}/{repo}", "auth_required": True},
+        {"method": "PUT", "path": "/repos/{owner}/{repo}/collaborators/{collaborator}", "auth_required": True},
+        {"method": "DELETE", "path": "/repos/{owner}/{repo}/collaborators/{collaborator}", "auth_required": True},
+    ])
+
+
+class _RevokeSession:
+    """
+    Two-user collaboration API. mode 'secure' blocks B after revoke; mode 'stale'
+    keeps B's access. Reads the Bearer token to tell user A ('A') from user B ('B').
+    """
+    def __init__(self, mode="secure"):
+        self.mode, self.granted, self.calls = mode, False, []
+
+    def _who(self, headers):
+        return (headers or {}).get("Authorization", "").replace("Bearer ", "")
+
+    def get(self, url, headers=None, timeout=None):
+        who = self._who(headers)
+        if url.endswith("/user"):                                   # whoami
+            return MagicMock(status_code=200, json=lambda: {"login": "bob" if who == "B" else "alice"})
+        if url.endswith("/user/repos"):                             # A's owned resource
+            return MagicMock(status_code=200, json=lambda: [{"owner": {"login": "alice"}, "name": "secret"}])
+        if url.endswith("/repos/alice/secret"):                     # B reads the resource
+            if who != "B":
+                return MagicMock(status_code=200, json=lambda: {})
+            ok = self.granted or self.mode == "stale"
+            return MagicMock(status_code=200 if ok else 404, json=lambda: {})
+        return MagicMock(status_code=404, json=lambda: {})
+
+    def request(self, method, url, headers=None, timeout=None, **kw):
+        self.calls.append((method, url))
+        if method == "GET":
+            return self.get(url, headers=headers)
+        if url.endswith("/collaborators/bob"):
+            if method == "PUT":
+                self.granted = True
+                return MagicMock(status_code=204, json=lambda: {})
+            if method == "DELETE":
+                self.granted = False                                 # row removed...
+                return MagicMock(status_code=204, json=lambda: {})
+        return MagicMock(status_code=404, json=lambda: {})
+
+
+def test_access_revocation_fires_on_stale_access():
+    from execution.probes import access_revocation_probe
+    out = access_revocation_probe(_revoke_model(), "http://x",
+                                  session=_RevokeSession("stale"), auth={"token": "A", "token_b": "B"})
+    assert len(out) == 1 and out[0].probe == "access-revocation" and out[0].severity == "P1"
+    assert out[0].target == "/repos/{owner}/{repo}"
+
+
+def test_access_revocation_silent_when_revoke_works():
+    from execution.probes import access_revocation_probe
+    assert access_revocation_probe(_revoke_model(), "http://x",
+                                   session=_RevokeSession("secure"), auth={"token": "A", "token_b": "B"}) == []
+
+
+def test_access_revocation_needs_two_tokens():
+    from execution.probes import access_revocation_probe
+    assert access_revocation_probe(_revoke_model(), "http://x",
+                                   session=_RevokeSession("stale"), auth={"token": "A"}) == []
+
+
+def test_access_revocation_silent_without_grant_revoke_pair():
+    from execution.probes import access_revocation_probe
+    from services.results import AppModel
+    # Only a GET membership listing — no PUT/DELETE grant pair → nothing to test.
+    m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/repos/{owner}/{repo}/collaborators"}])
+    assert access_revocation_probe(m, "http://x", session=_RevokeSession("stale"),
+                                   auth={"token": "A", "token_b": "B"}) == []

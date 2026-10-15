@@ -90,6 +90,14 @@ _MAP = {
         "fix": "Validate/cast every field to its expected scalar type before querying; "
                "reject dict/operator values; enforce a request schema.",
     },
+    "access-revocation": {
+        "why": "Revoking a user's access does not actually remove it — the app deletes the "
+               "membership row but the user still reaches the resource (cached/stale permission). "
+               "A removed collaborator or ex-employee keeps reading private data.",
+        "fix": "On revoke, invalidate every derived permission: drop cached ACLs, revoke the "
+               "user's sessions/tokens for that resource, and re-check ownership on each request "
+               "rather than trusting a prior grant.",
+    },
     "bola": {
         "why": "Objects are returned by id/key with no ownership check, so any logged-in "
                "user can read or change another user's data (IDOR/BOLA).",
@@ -325,6 +333,8 @@ _QA = {
              "User input MUST be rendered as data — the response MUST contain the literal expression, never its evaluated result."),
     "bfla": ("as an ORDINARY (non-admin) user, against an admin-namespaced function",
              "An admin function MUST return 403 to a non-admin user."),
+    "access-revocation": ("as user B whose access user A just REVOKED, re-requesting the resource",
+                          "After access is revoked, the user MUST be blocked (403/404) — the prior grant must not linger."),
     "bola": ("as user B, reading/modifying an object created by user A",
              "A user MUST NOT read or modify another user's object (403/404)."),
     "sqli": ("with SQL metacharacters / a boolean or time-based payload in a parameter",

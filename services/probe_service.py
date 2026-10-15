@@ -257,6 +257,13 @@ class ProbeService:
         except Exception as exc:
             logger.error("bola probe failed: %s", exc)
 
+        # Access revocation — two-user control: after A revokes B, is B still in?
+        try:
+            from execution.probes import access_revocation_probe
+            findings.extend(access_revocation_probe(model, base_url, session=shared, auth=auth))
+        except Exception as exc:
+            logger.error("access_revocation probe failed: %s", exc)
+
         # Excessive data exposure — credentials/secrets returned in a response body.
         try:
             findings.extend(excessive_data_probe(model, base_url, session=shared, auth=read_auth))
