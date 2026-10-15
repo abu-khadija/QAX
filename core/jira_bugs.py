@@ -52,24 +52,41 @@ def _module_of(target: str) -> str:
     return "App"
 
 
+def _sentences(text: str) -> list[str]:
+    """Split plain text into sentences (good enough for the short guidance strings here)."""
+    t = " ".join(str(text or "").split())
+    return [x.strip() for x in re.split(r"(?<=[.!?])\s+", t) if x.strip()]
+
+
 def _first_sentence(text: str) -> str:
     t = str(text or "").strip()
     m = re.search(r"^(.+?[.!?])(\s|$)", t)
     return (m.group(1) if m else t)[:240]
 
 
-def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None) -> dict:
+def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
+                   base_url: str | None = None, client_safe: bool = False,
+                   reproduced: tuple[int, int] | None = None) -> dict:
     """
-    Map a QAX confirmed finding to a Jira Bug in the owner's COMPACT security-bug
-    format (_bug_report_templates.md, Format 2):
-    Summary · Severity (with a one-line reason) · Environment · Component ·
-    Steps to Reproduce · Expected (a MUST rule) · Actual (evidence block) ·
+    Map a QAX confirmed finding to a Jira Bug covering the owner's 13 mandatory fields
+    in the compact security-bug layout:
+    Summary · Severity (+ one-line business reason) · Environment · Location ·
+    Reproducibility · Workaround · Steps to Reproduce (step 1 = a direct URL) ·
+    Expected (a MUST rule) · Actual (evidence block) · Console Errors · Attachments ·
     Security Impact · Fix Recommendation · Regression Test · Notes (data safety).
 
     The caller enriches `b` with `remediation` (why/fix) and `qa` (how/expected/
     data_safety) from services.remediation — this module stays dependency-free.
-    The summary carries [P#] because a team-managed Bug screen may have no
-    priority field; the fingerprint uses title + target only (stable across scans).
+
+    base_url: the scanned app's origin, so step 1 is a real, copy-pasteable URL.
+    reproduced: (hits, attempts) when the caller MEASURED it (e.g. a re-verify pass);
+        otherwise the report states only what is known — one scan run (
+        "never repeat a number you didn't measure").
+    client_safe: a filed ticket is read by developers and possibly the
+        client, so it must read like a plain manual bug report: no tool name anywhere
+        in the body or labels (the de-dup fingerprint label loses its tool prefix too).
+    The summary carries [P#] because a team-managed Bug screen may have no priority
+    field; the fingerprint uses title + target only (stable across scans).
     """
     sev = str(b.get("severity") or "P3").upper()
     rem = b.get("remediation") or {}
@@ -82,7 +99,8 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None) -> di
     module = _module_of(target or path)
     reason = _first_sentence(rem.get("why", "")) or "Proven by a real request against the running app."
     env = environment or "the scanned application"
-    fp = fingerprint(title, target)
+    fp = fingerprint(title, target, client_safe=client_safe)
+    url = (base_url.rstrip("/") + path) if base_url and str(path).startswith("/") else path
 
     how = str(qa.get("how") or "")
     lead, _, observe = how.partition(" and ")
@@ -91,52 +109,95 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None) -> di
         # look — there is no injected condition, so no control request to send.
         lead = "" if how.startswith("and ") else lead
         look = (how[4:] if how.startswith("and ") else observe).strip()
-        steps = [f"Send {method} {path}{(' ' + lead) if lead else ''}.",
+        steps = [f"Send {method} {url}{(' ' + lead) if lead else ''}.",
                  look[:1].upper() + look[1:] + ".",
                  "Compare with the Expected Result below."]
     else:
-        steps = [f"Send {method} {path} {how or 'as described under Actual Result'}.",
-                 f"Send the same {method} {path} request WITHOUT that condition (control).",
+        steps = [f"Send {method} {url} {how or 'as described under Actual Result'}.",
+                 f"Send the same {method} {url} request WITHOUT that condition (control).",
                  "Compare the two responses: the difference shown under Actual Result is the defect."]
+
+    # Reproducibility — only what was measured.
+    if reproduced:
+        repro = f"Reproduced {reproduced[0]}/{reproduced[1]} attempts on {env}."
+    else:
+        repro = (f"Reproduced 1/1 attempts on {env}. Not yet re-run on other environments — "
+                 "repeat the steps above to confirm on yours.")
+    # Summary = what happened + (only if there is more than the Severity reason already
+    # says) what it means. The same sentence must not appear three times in one ticket.
+    why_sents = _sentences(rem.get("why", ""))
+    summary_parts = [_first_sentence(b.get("evidence", "")), why_sents[1] if len(why_sents) > 1 else ""]
+    summary = " ".join(x for x in summary_parts if x) or title
+
     blocks = [
+        ("h", "Summary"), ("p", [(summary, False)]),
         ("p", [("Severity: ", True), (f"{sev} / {_SEV_NAME.get(sev, '')} — {reason}", False)]),
         ("p", [("Environment: ", True), (env, False)]),
-        ("p", [("Component: ", True), (f"{module} — {method} {path}", False)]),
-        ("p", [("Found by: ", True), (f"QAX deterministic probe '{probe}' — reproduced with a real "
-                                      f"request and a control, zero-false-positive layer", False)]),
+        ("p", [("Location: ", True), (f"{module} — {method} {path}", False)]),
+        ("p", [("Reproducibility: ", True), (repro, False)]),
+        ("p", [("Workaround: ", True), ("None known — not assessed. See Fix Recommendation for "
+                                        "the permanent fix.", False)]),
+    ]
+    if not client_safe:
+        blocks.append(("p", [("Found by: ", True), (f"QAX deterministic probe '{probe}' — reproduced with a "
+                                                    f"real request and a control, zero-false-positive layer", False)]))
+    blocks += [
         ("h", "Steps to Reproduce"), ("ol", steps),
         ("h", "Expected Result"),
         ("p", [(qa.get("expected") or "The request should be rejected or handled safely.", False)]),
         ("h", "Actual Result"), ("code", str(b.get("evidence", "") or "(no evidence captured)")),
+        ("h", "Console Errors"),
+        ("p", [("N/A — API-level finding; no browser was involved. The raw behaviour is under "
+                "Actual Result.", False)]),
+        ("h", "Screenshot/Attachments"),
+        ("p", [("N/A — pure network finding, nothing visual to capture. "
+                + ("The full evidence is attached as a text file." if not client_safe else
+                   "The request/response evidence is attached as a text file."), False)]),
     ]
-    if rem.get("why"):
+    if len(why_sents) > 1:      # a one-sentence "why" is already the Severity reason — don't repeat it
         blocks += [("h", "Security Impact"), ("p", [(rem["why"], False)])]
     if rem.get("fix"):
         blocks += [("h", "Fix Recommendation"), ("p", [(rem["fix"], False)])]
-    blocks += [
-        ("h", "Regression Test"),
-        ("p", [(f"QAX re-checks this on every scan (probe '{probe}'). Once fixed, re-run a quick "
-                f"scan: the probe must stay silent. Fingerprint label: {fp}.", False)]),
-    ]
+    if client_safe:
+        regression = (f"After the fix, repeat the steps above: the request must now be rejected or "
+                      f"handled safely. Reference: {fp}.")
+    else:
+        regression = (f"QAX re-checks this on every scan (probe '{probe}'). Once fixed, re-run a quick "
+                      f"scan: the probe must stay silent. Fingerprint label: {fp}.")
+    blocks += [("h", "Regression Test"), ("p", [(regression, False)])]
     if qa.get("data_safety"):
         blocks += [("h", "Notes"), ("p", [(qa["data_safety"], False)])]
 
-    plain = "\n".join(
+    text = "\n".join(
         (str(x) if k in ("h", "code") else
          "\n".join(f"{n}. {t}" for n, t in enumerate(x, 1)) if k == "ol" else
          "".join(t for t, _ in x))
         for k, x in blocks)
-    labels = ["qax", "security", f"severity-{sev.lower()}"]
+    labels = ["security", f"severity-{sev.lower()}"] if client_safe else \
+             ["qax", "security", f"severity-{sev.lower()}"]
     if probe and probe != "sec":
         labels.append(_label(probe))
+
+    # The evidence file attached to the issue ("filing isn't done until
+    # evidence is attached"). Secrets are masked before it leaves the machine.
+    evidence_lines = [f"{title}", f"Location: {method} {url}", f"Environment: {env}", "",
+                      "Evidence:", str(b.get("evidence", "") or "(none captured)"), "",
+                      "Steps to reproduce:"] + [f"  {n}. {t}" for n, t in enumerate(steps, 1)]
+    try:
+        from services.results import redact_secrets
+        evidence_text = redact_secrets("\n".join(evidence_lines))
+    except Exception:
+        evidence_text = "\n".join(evidence_lines)
     return {
         "test_case_id": f"QAX-{probe.upper().replace(' ', '-')}-{i + 1}",
         "title": f"[{sev}] [{module}] {title} ({probe})",
         "severity": sev,
-        "description": plain,
+        "description": text,
         "adf": _adf_blocks(blocks),
         "labels": labels,
         "fingerprint": fp,
+        "evidence_text": evidence_text,
+        "evidence_filename": f"evidence-{_label(probe)}-{fp[-8:]}.txt",
     }
 
 
@@ -167,10 +228,13 @@ def _adf_blocks(blocks: list) -> dict:
             [{"type": "paragraph", "content": [{"type": "text", "text": " "}]}]}
 
 
-def fingerprint(title: str, target: str = "") -> str:
-    """Stable Jira label for a finding: same bug on a later scan → same label."""
+def fingerprint(title: str, target: str = "", *, client_safe: bool = False) -> str:
+    """
+    Stable Jira label for a finding: same bug on a later scan → same label. Client-safe
+    tickets drop the tool prefix (the digest is the same, so each mode de-dups within itself).
+    """
     digest = hashlib.sha1(f"{title.strip().lower()}|{target.strip().lower()}".encode()).hexdigest()
-    return f"qax-fp-{digest[:12]}"
+    return f"fp-{digest[:12]}" if client_safe else f"qax-fp-{digest[:12]}"
 
 
 def _label(s: str) -> str:
@@ -321,7 +385,8 @@ class JiraBugFiler:
                     res["preview"] = payload
                 return res
             if self.dry_run:
-                res.update(success=True, jira_key=f"DRY-RUN-BUG-{bid}", preview=payload)
+                res.update(success=True, jira_key=f"DRY-RUN-BUG-{bid}", preview=payload,
+                           would_attach=bug.get("evidence_filename"))
                 return res
             if not self.configured():
                 res["error"] = "Jira credentials are not configured (JIRA_BASE_URL/EMAIL/API_TOKEN/PROJECT_KEY)."
@@ -331,12 +396,33 @@ class JiraBugFiler:
                                   headers={"Accept": "application/json",
                                            "Content-Type": "application/json"}, timeout=30)
             if r.status_code in (200, 201):
-                res.update(success=True, jira_key=(r.json() or {}).get("key"))
+                key = (r.json() or {}).get("key")
+                res.update(success=True, jira_key=key)
+                if key and bug.get("evidence_text"):
+                    # filing isn't done until the evidence is attached.
+                    res["attachment"] = self._attach(key, bug.get("evidence_filename") or "evidence.txt",
+                                                     bug["evidence_text"])
             else:
                 res["error"] = f"HTTP {r.status_code}: {r.text[:300]}"
         except Exception as exc:
             res["error"] = str(exc)
         return res
+
+    def _attach(self, key: str, filename: str, text: str) -> bool:
+        """
+        Attach a text evidence file to an issue (best-effort — a failed attachment never
+        fails the filing; the caller sees `attachment: False`). Never raises.
+        """
+        try:
+            r = self.session.post(
+                f"{self.base_url}/rest/api/3/issue/{key}/attachments",
+                files={"file": (filename, str(text).encode("utf-8"), "text/plain")},
+                auth=(self.email, self.token),
+                headers={"X-Atlassian-Token": "no-check", "Accept": "application/json"}, timeout=30)
+            return r.status_code in (200, 201)
+        except Exception as exc:
+            logger.warning("QAX JiraBugFiler: could not attach evidence to %s: %s", key, exc)
+            return False
 
     def file_many(self, bugs: list) -> dict:
         """File a batch. Adapter-shaped result plus per-bug detail (never raises)."""

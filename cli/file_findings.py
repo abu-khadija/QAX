@@ -37,15 +37,19 @@ def enrich(finding: dict) -> dict:
     return b
 
 
-def environment_of(result: dict, override: str | None = None) -> str:
-    """The Environment line for the report, from the scan result (or --env)."""
+def environment_of(result: dict, override: str | None = None, client_safe: bool = False) -> str:
+    """
+    The Environment line for the report, from the scan result (or --env). Client-safe
+    tickets never name the tool, so the "QAX quick scan" qualifier is dropped there.
+    """
     if override:
         return override
     url = result.get("target_url")
     if not url:
-        return "the scanned application (re-run qax scan with --out to record its URL)"
+        return "the scanned application" + ("" if client_safe else
+                                             " (re-run qax scan with --out to record its URL)")
     bits = [str(url)]
-    if result.get("scan_mode"):
+    if result.get("scan_mode") and not client_safe:
         bits.append(f"QAX {result['scan_mode']} scan")
     if result.get("scanned_at"):
         bits.append(str(result["scanned_at"]))
@@ -64,9 +68,10 @@ def render_results(out: dict, *, dry_run: bool, project: str) -> str:
         elif not r.get("success"):
             status = f"✗  failed: {r.get('error')}"
         elif dry_run:
-            status = "◌  would create Bug"
+            status = "◌  would create Bug" + (f" (+ attach {r['would_attach']})" if r.get("would_attach") else "")
         else:
-            status = f"✓  created {r.get('jira_key')}"
+            ev = {True: " · evidence attached", False: " · ⚠ evidence NOT attached"}.get(r.get("attachment"), "")
+            status = f"✓  created {r.get('jira_key')}{ev}"
         lines.append(f"  {status}")
         if summary:
             lines.append(f"     {summary}")
@@ -90,6 +95,9 @@ def run(argv: list[str]) -> int:
     p.add_argument("--include-leads", action="store_true",
                    help="Also file AI leads (non-deterministic). Off by default.")
     p.add_argument("--show-payload", action="store_true", help="Print the full JSON payload(s).")
+    p.add_argument("--client-safe", action="store_true",
+                   help="Write the ticket so it reads like a plain manual bug report: no tool name in "
+                        "the body or labels (for tickets a developer or client will read).")
     p.add_argument("--env", default=None,
                    help='Environment line for the report, e.g. "Gitea 28.1.0 @ http://127.0.0.1:3200 (local test)".')
     args = p.parse_args(argv)
@@ -113,8 +121,9 @@ def run(argv: list[str]) -> int:
         print("\n  Jira is not configured — set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, "
               "JIRA_PROJECT_KEY in .env.\n")
         return 1
-    env = environment_of(result, args.env)
-    bugs = [finding_to_bug(enrich(b), i, environment=env) for i, b in enumerate(findings)]
+    env = environment_of(result, args.env, client_safe=args.client_safe)
+    bugs = [finding_to_bug(enrich(b), i, environment=env, base_url=result.get("target_url"),
+                           client_safe=args.client_safe) for i, b in enumerate(findings)]
     out = filer.file_many(bugs)
     print(render_results(out, dry_run=not args.live, project=filer.project_key))
     if skipped:

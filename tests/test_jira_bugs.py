@@ -35,8 +35,11 @@ class FakeJira:
                              json=lambda: {"fields": [{"fieldId": f} for f in self.screen]})
         return MagicMock(status_code=404, json=lambda: {})
 
-    def post(self, url, json=None, auth=None, headers=None, timeout=None):
+    def post(self, url, json=None, auth=None, headers=None, timeout=None, files=None):
         self.posts.append(url)
+        if url.endswith("/attachments"):
+            self.attached = getattr(self, "attached", []) + [(url, files, headers)]
+            return MagicMock(status_code=200, json=lambda: [{"id": "1"}])
         if url.endswith("/search/jql"):
             issues = [{"key": self.existing}] if self.existing else []
             return MagicMock(status_code=200, json=lambda: {"issues": issues})
@@ -155,9 +158,9 @@ def _enriched():
 def test_bug_follows_compact_format_sections():
     bug = finding_to_bug(_enriched(), environment="Gitea 28.1.0 @ http://127.0.0.1:3200")
     d = bug["description"]
-    for section in ("Severity: P2 / High —", "Environment: Gitea 28.1.0", "Component: Admin — GET /api/v1/admin/orgs",
+    for section in ("Severity: P2 / High —", "Environment: Gitea 28.1.0", "Location: Admin — GET /api/v1/admin/orgs",
                     "Steps to Reproduce", "Expected Result", "MUST", "Actual Result",
-                    "Security Impact", "Fix Recommendation", "Regression Test", "Notes"):
+                    "Fix Recommendation", "Regression Test", "Notes"):
         assert section in d, section
     assert "Read-only reproduction" in d                     # data-safety note (non-negotiable #7)
     assert "forged Host / X-Forwarded-Host" in d             # probe-specific repro condition
@@ -170,14 +173,15 @@ def test_bug_adf_uses_headings_list_and_code_block():
     assert "heading" in kinds and "orderedList" in kinds and "codeBlock" in kinds
     code = next(n for n in adf["content"] if n["type"] == "codeBlock")
     assert "evil.invalid" in code["content"][0]["text"]       # evidence verbatim in the block
-    bold = adf["content"][0]["content"][0]
+    first_para = next(n for n in adf["content"] if n["type"] == "paragraph" and n["content"][0].get("marks"))
+    bold = first_para["content"][0]
     assert bold["text"] == "Severity: " and bold["marks"] == [{"type": "strong"}]
 
 
 def test_payload_sends_rich_adf_description():
     res = _filer(True, FakeJira()).file(finding_to_bug(_enriched()))
-    assert res["preview"]["fields"]["description"]["content"][0]["type"] == "paragraph"
-    assert any(n["type"] == "heading" for n in res["preview"]["fields"]["description"]["content"])
+    kinds = [n["type"] for n in res["preview"]["fields"]["description"]["content"]]
+    assert "paragraph" in kinds and "heading" in kinds
 
 
 def test_mutating_probe_gets_disposable_records_note():
@@ -203,3 +207,87 @@ def test_observation_with_actor_keeps_actor_in_step():
     d = finding_to_bug(f)["description"]
     assert "1. Send GET /api/users/me as an ordinary user." in d
     assert "2. Inspect the response fields." in d
+
+
+# ── The 13 mandatory fields, client-safe mode, evidence attachment ──
+
+def test_bug_covers_the_13_fields_with_a_direct_url_step_one():
+    bug = finding_to_bug(_enriched(), environment="Gitea 28.1.0 local", base_url="http://127.0.0.1:3200")
+    d = bug["description"]
+    for needed in ("Summary", "Severity: P2 / High —", "Environment: Gitea 28.1.0 local",
+                   "Location: Admin — GET /api/v1/admin/orgs", "Reproducibility: Reproduced 1/1 attempts",
+                   "Workaround: None known — not assessed", "Steps to Reproduce", "Expected Result",
+                   "Actual Result", "Console Errors", "Screenshot/Attachments"):
+        assert needed in d, needed
+    assert "1. Send GET http://127.0.0.1:3200/api/v1/admin/orgs " in d      # step 1 = a direct URL
+
+
+def test_reproducibility_states_only_what_was_measured():
+    assert "Reproduced 1/1 attempts" in finding_to_bug(_enriched())["description"]
+    measured = finding_to_bug(_enriched(), environment="E", reproduced=(3, 3))["description"]
+    assert "Reproduced 3/3 attempts on E." in measured and "Not yet re-run" not in measured
+
+
+def test_client_safe_names_no_tool_anywhere():
+    bug = finding_to_bug(_enriched(), environment="staging, Chrome", base_url="http://app.test", client_safe=True)
+    for blob in (bug["description"], " ".join(bug["labels"]), bug["fingerprint"], bug["title"]):
+        assert "qax" not in blob.lower().replace("qax1", "").replace("qaxev", "") or "evil.invalid" in blob
+    assert "Found by" not in bug["description"] and "re-checks this on every scan" not in bug["description"]
+    assert bug["fingerprint"].startswith("fp-") and "qax" not in bug["labels"]
+    # The default (non client-safe) ticket still carries the tool attribution.
+    normal = finding_to_bug(_enriched())
+    assert "Found by: QAX" in normal["description"] and "qax" in normal["labels"]
+
+
+def test_client_safe_fingerprint_dedupes_within_its_own_mode():
+    from core.jira_bugs import fingerprint
+    a, b = fingerprint("T", "/x"), fingerprint("T", "/x", client_safe=True)
+    assert a == "qax-fp-" + b[3:] and a != b
+
+
+def test_live_filing_attaches_a_redacted_evidence_file():
+    jira = FakeJira()
+    f = _enriched(); f["evidence"] = "token Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdef leaked"
+    res = _filer(False, jira).file(finding_to_bug(f))
+    assert res["success"] and res["attachment"] is True
+    url, files, headers = jira.attached[0]
+    assert url.endswith("/rest/api/3/issue/SCRUM-1/attachments") and headers["X-Atlassian-Token"] == "no-check"
+    name, payload, mime = files["file"]
+    assert name.startswith("evidence-") and name.endswith(".txt") and mime == "text/plain"
+    assert b"eyJhbGciOiJIUzI1NiJ9" not in payload            # the JWT was masked before upload
+
+
+def test_failed_attachment_never_fails_the_filing():
+    class _NoAttach(FakeJira):
+        def post(self, url, **k):
+            if url.endswith("/attachments"):
+                raise RuntimeError("boom")
+            return super().post(url, **k)
+    res = _filer(False, _NoAttach()).file(finding_to_bug(_enriched()))
+    assert res["success"] is True and res["jira_key"] == "SCRUM-1" and res["attachment"] is False
+
+
+def test_dry_run_announces_the_attachment_but_uploads_nothing():
+    jira = FakeJira()
+    res = _filer(True, jira).file(finding_to_bug(_enriched()))
+    assert res["would_attach"].startswith("evidence-") and not getattr(jira, "attached", [])
+
+
+def test_same_sentence_is_not_repeated_across_sections():
+    one = finding_to_bug(_enriched())["description"]                 # host-header: a ONE-sentence "why"
+    assert "Security Impact" not in one                              # it is already the Severity reason
+    assert one.count("so an attacker can poison password-reset emails") == 1   # only in the Severity reason
+    two = {**_FINDING, "probe": "boolean-false", "title": "Boolean 'x' cannot be set to false on POST /things",
+           "target": "/things", "evidence": "POST /things with x=true was accepted, but x=false was rejected."}
+    from services.remediation import qa_for, remediation_for
+    two["remediation"], two["qa"] = remediation_for(two), qa_for(two)
+    d = finding_to_bug(two)["description"]
+    assert "Security Impact" in d                                    # multi-sentence why → impact adds info
+
+
+def test_client_safe_environment_never_names_the_tool():
+    from cli.file_findings import environment_of
+    r = {"target_url": "http://app.test", "scan_mode": "quick", "scanned_at": "2026-10-15 10:00 UTC"}
+    assert environment_of(r, client_safe=True) == "http://app.test / 2026-10-15 10:00 UTC"
+    assert "QAX" in environment_of(r)
+    assert "qax" not in environment_of({}, client_safe=True).lower()

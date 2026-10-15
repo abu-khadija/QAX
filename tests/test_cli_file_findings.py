@@ -60,3 +60,15 @@ def test_render_live_shows_summary_not_internal_id():
     text = render_results(out, dry_run=False, project="SCRUM")
     assert "created SCRUM-5" in text and "[P2] [Admin] Host header reflected" in text
     assert "QAX-X-1" not in text
+
+
+def test_render_shows_evidence_attachment_status():
+    live_ok = {"results": [{"success": True, "jira_key": "SCRUM-9", "attachment": True, "summary": "s"}],
+               "exported_count": 1, "duplicate_count": 0, "failed_count": 0}
+    live_no = {"results": [{"success": True, "jira_key": "SCRUM-9", "attachment": False, "summary": "s"}],
+               "exported_count": 1, "duplicate_count": 0, "failed_count": 0}
+    dry = {"results": [{"success": True, "jira_key": "DRY", "would_attach": "evidence-x.txt", "summary": "s"}],
+           "exported_count": 1, "duplicate_count": 0, "failed_count": 0}
+    assert "evidence attached" in render_results(live_ok, dry_run=False, project="P")
+    assert "evidence NOT attached" in render_results(live_no, dry_run=False, project="P")
+    assert "attach evidence-x.txt" in render_results(dry, dry_run=True, project="P")
