@@ -173,7 +173,7 @@ Overlapping Phase-2/3 items are absorbed here.
       - B3 planned batch COMPLETE (6 classes). The track stays open — add more classes
         opportunistically as B4 reveals real-world gaps.
 
-- [~] **B4 — evidence on real, non-cherry-picked apps (IN PROGRESS: 1 of ~2).**
+- [x] **B4 — evidence on real, non-cherry-picked apps (DONE: 3 real apps, 3 stacks, 0 FP — DRF, Go/Gin, Gitea; bar was >=2).**
       First case study DONE: a real MIT Django-REST RealWorld backend, scanned
       black-box on SQLite (`strategy/CASE_STUDY_REALWORLD_DRF.md`). It drove two real
       QAX improvements: drf-yasg/drf-spectacular spec grounding, and a FALSE-POSITIVE
@@ -193,7 +193,7 @@ Overlapping Phase-2/3 items are absorbed here.
       **G2** setup-failed coverage tests render `[SETUP]` not ❌FAIL; **G3** validation
       asserts only spec-`required` fields. **B4 bar exceeded: 3 real apps, 3 stacks,
       0 false positives on all three.**
-- [ ] **B4-orig — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
+- [x] **B4-orig (absorbed into B4 above — DONE).** Risk was: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,
       real OSS apps we did NOT pick for being vulnerable; publish honest scorecards
       (recall/FP/$/run) even when the result is "0 found, 0 FP". Done when:
