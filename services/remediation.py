@@ -90,6 +90,41 @@ _MAP = {
         "fix": "Validate/cast every field to its expected scalar type before querying; "
                "reject dict/operator values; enforce a request schema.",
     },
+    "boolean-false": {
+        "why": "A checkbox/flag that can be turned ON but not OFF: the framework treats a non-"
+               "nullable boolean as implicitly 'required', so `false` is rejected (or crashes). The "
+               "setting becomes permanent and every other edit in the same save is lost.",
+        "fix": "Make the boolean optional/defaulted or suppress the implicit-required rule for value "
+               "types (e.g. a nullable bool, or `[JsonRequired]`/`Required` off), and bind `false` "
+               "explicitly. Check sibling boolean fields — the same binding rule applies.",
+    },
+    "single-element-array": {
+        "why": "A multi-select that works with two values fails with exactly one: the single value "
+               "arrives as a scalar and is not bound to the collection. Users hit it the first time "
+               "they pick only one option.",
+        "fix": "Bind the field as a collection regardless of how many values arrive (accept a "
+               "scalar and wrap it, or enforce an array in the client). Add a one-value regression "
+               "test for every multi-select.",
+    },
+    "date-order": {
+        "why": "An end date earlier than its start date is accepted and stored, producing "
+               "nonsensical intervals that break scheduling, reporting and any duration maths.",
+        "fix": "Validate server-side that end >= start (return 422 with a clear message) — do not "
+               "rely on the date-picker UI. Apply the same rule to every start/end pair.",
+    },
+    "long-input": {
+        "why": "A very long value either crashes the server (unhandled overflow, a 5xx) or is "
+               "silently cut while the app reports success — the user loses text without knowing.",
+        "fix": "Enforce a documented max length (reject with a 4xx and a clear message, or truncate "
+               "WITH a visible notice). Align the DB column size, the API validation and the UI.",
+    },
+    "duplicate-rows": {
+        "why": "The same record appears more than once in a collection (usually a join fan-out), "
+               "so lists, counts and 'assigned to me' views are wrong and users act on duplicates.",
+        "fix": "De-duplicate at the query (DISTINCT / group by the entity id, or an EXISTS "
+               "sub-query instead of a join) and add a test that a record with N related rows is "
+               "listed once.",
+    },
     "access-revocation": {
         "why": "Revoking a user's access does not actually remove it — the app deletes the "
                "membership row but the user still reaches the resource (cached/stale permission). "
@@ -333,6 +368,16 @@ _QA = {
              "User input MUST be rendered as data — the response MUST contain the literal expression, never its evaluated result."),
     "bfla": ("as an ORDINARY (non-admin) user, against an admin-namespaced function",
              "An admin function MUST return 403 to a non-admin user."),
+    "boolean-false": ("with a boolean field set to true, then the identical request with it set to false",
+                      "A boolean MUST accept both true and false; unticking a flag MUST save."),
+    "single-element-array": ("with a multi-value field holding 2 items, then the identical request with exactly 1",
+                             "A multi-value field MUST accept any number of items within its limits, including one."),
+    "date-order": ("with an ordered date pair, then with the end date BEFORE the start date",
+                   "The server MUST reject an end date earlier than the start date (422)."),
+    "long-input": ("with a short value, then a 5,000-character value in the same free-text field",
+                   "Oversized input MUST be rejected with a clean 4xx or stored in full — never a 5xx and never silently cut."),
+    "duplicate-rows": ("and compare the ids in the returned list",
+                       "Every record MUST appear exactly once in a collection response."),
     "access-revocation": ("as user B whose access user A just REVOKED, re-requesting the resource",
                           "After access is revoked, the user MUST be blocked (403/404) — the prior grant must not linger."),
     "bola": ("as user B, reading/modifying an object created by user A",

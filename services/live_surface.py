@@ -160,6 +160,7 @@ def endpoints_from_spec(spec: dict) -> list[dict]:
                 "query_params": _query_params(op, item, spec),
                 "request_fields": _request_fields(op, spec),
                 "required_fields": _required_request_fields(op, spec),
+                "request_field_types": _request_field_types(op, spec),
                 "response_fields": _response_fields(op, spec),
             })
     return out
@@ -198,6 +199,55 @@ def _request_fields(op: dict, spec: dict) -> list[str]:
         if isinstance(param, dict) and param.get("in") == "body":
             return _schema_fields(param.get("schema") or {}, spec)
     return []
+
+
+def _schema_field_types(schema: dict, spec: dict) -> dict:
+    """
+    {field: {type, format, readOnly, enum, min_items, items_type, max_length}} for the
+    top-level properties of a (possibly $ref'd) object schema. Only keys the spec
+    actually states are present, so absence means "unknown", never a guess. Nested
+    objects are typed "object" but not descended into (probes build flat bodies).
+    """
+    if not isinstance(schema, dict):
+        return {}
+    if "$ref" in schema:
+        schema = _resolve(schema["$ref"], spec)
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return {}
+    out: dict = {}
+    for name, ps in props.items():
+        if not isinstance(ps, dict):
+            continue
+        if "$ref" in ps:
+            ps = _resolve(ps["$ref"], spec)
+        info = {"type": ps.get("type"), "format": ps.get("format"),
+                "readOnly": True if ps.get("readOnly") else None,
+                "enum": ps.get("enum") if isinstance(ps.get("enum"), list) else None,
+                "min_items": ps.get("minItems"), "max_length": ps.get("maxLength")}
+        if ps.get("type") == "array":
+            items = ps.get("items") or {}
+            if isinstance(items, dict):
+                if "$ref" in items:
+                    items = _resolve(items["$ref"], spec)
+                info["items_type"] = items.get("type")
+                if isinstance(items.get("enum"), list):
+                    info["items_enum"] = items["enum"]
+        out[str(name)] = {k: v for k, v in info.items() if v is not None}
+    return out
+
+
+def _request_field_types(op: dict, spec: dict) -> dict:
+    """Types of the request-body fields (OpenAPI 3 requestBody or Swagger 2 body parameter)."""
+    body = (op.get("requestBody") or {}).get("content") or {}   # OpenAPI 3
+    for media in body.values():
+        types = _schema_field_types((media or {}).get("schema") or {}, spec)
+        if types:
+            return types
+    for param in op.get("parameters") or []:                    # Swagger 2
+        if isinstance(param, dict) and param.get("in") == "body":
+            return _schema_field_types(param.get("schema") or {}, spec)
+    return {}
 
 
 def _schema_required(schema: dict, spec: dict) -> list[str]:

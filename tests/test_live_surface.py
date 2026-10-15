@@ -188,3 +188,25 @@ def test_discover_endpoints_finds_live_commons_excludes_known_and_dead():
     assert "/health" not in paths     # already modelled → skipped
     assert "/users" not in paths      # 404 → not live → excluded
     assert all(d["method"] == "GET" and d["source"] == "discovered" for d in disc)
+
+
+def test_endpoints_record_request_field_types_swagger2():
+    spec = {"swagger": "2.0", "paths": {"/things": {"post": {"parameters": [
+        {"in": "body", "name": "body", "schema": {"$ref": "#/definitions/Thing"}}]}}},
+        "definitions": {"Thing": {"type": "object", "properties": {
+            "title": {"type": "string", "maxLength": 50},
+            "active": {"type": "boolean"},
+            "labels": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "starts_at": {"type": "string", "format": "date-time"},
+            "id": {"type": "integer", "readOnly": True},
+            "kind": {"type": "string", "enum": ["a", "b"]}}}}}
+    t = endpoints_from_spec(spec)[0]["request_field_types"]
+    assert t["active"] == {"type": "boolean"}
+    assert t["labels"] == {"type": "array", "min_items": 1, "items_type": "string"}
+    assert t["starts_at"] == {"type": "string", "format": "date-time"}
+    assert t["id"]["readOnly"] is True and t["kind"]["enum"] == ["a", "b"]
+    assert t["title"]["max_length"] == 50
+
+
+def test_request_field_types_empty_without_a_body_schema():
+    assert endpoints_from_spec({"openapi": "3.0.0", "paths": {"/x": {"get": {}}}})[0]["request_field_types"] == {}

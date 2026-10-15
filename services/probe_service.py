@@ -265,6 +265,21 @@ class ProbeService:
         except Exception as exc:
             logger.error("access_revocation probe failed: %s", exc)
 
+        # Spec-typed probes: boolean false, single-element array, date order,
+        # very long text, duplicate rows. Each is control-gated and says why if skipped.
+        try:
+            from execution.typed_probes import (boolean_false_probe, date_order_probe,
+                                                duplicate_rows_probe, long_input_probe,
+                                                single_element_array_probe)
+            for _typed in (boolean_false_probe, single_element_array_probe, date_order_probe,
+                           long_input_probe, duplicate_rows_probe):
+                try:
+                    findings.extend(_typed(model, base_url, session=shared, auth=read_auth))
+                except Exception as exc:
+                    logger.error("%s failed: %s", _typed.__name__, exc)
+        except Exception as exc:
+            logger.error("typed probes unavailable: %s", exc)
+
         # Excessive data exposure — credentials/secrets returned in a response body.
         try:
             findings.extend(excessive_data_probe(model, base_url, session=shared, auth=read_auth))

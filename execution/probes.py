@@ -265,6 +265,8 @@ MUTATING_PROBES = frozenset({
     "bola", "mass-assignment", "stored-xss", "persistence",
     "injection", "nosql", "malformed-input", "file-upload", "business-logic",
     "access-revocation",
+    # typed_probes.py — the four that write (duplicate-rows is read-only)
+    "boolean-false", "single-element-array", "date-order", "long-input",
 })
 
 
