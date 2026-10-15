@@ -2091,6 +2091,18 @@ def run_file_findings_command() -> None:
     from cli.file_findings import run as _run_file_findings
     sys.exit(_run_file_findings(sys.argv[2:]))
 
+def run_verify_fixes_command() -> None:
+    """
+    Handle the 'verify-fixes' subcommand — are the bugs QAX filed actually fixed? Compares
+    the QAX-filed Jira tickets with a fresh scan (FIXED / STILL REPRODUCES / COULD NOT TEST).
+    Read-only unless --apply. Logic lives in cli/verify_fixes.py.
+
+    Called when sys.argv[1] == "verify-fixes".
+    """
+    from cli.verify_fixes import run as _run_verify_fixes
+    sys.exit(_run_verify_fixes(sys.argv[2:]))
+
+
 def run_scan_command() -> None:
     """
     Handle the 'scan' subcommand — a deep, autonomous security + QA scan.
@@ -2244,9 +2256,13 @@ def run_scan_command() -> None:
         try:
             # Record WHAT was scanned, so a finding filed later (file-findings) can
             # state its environment — a bug report without one is not reproducible.
+            from core.build_fingerprint import build_fingerprint
             _out = {**result.to_dict(), "target_url": args.url,
                     "scan_mode": "quick" if args.quick else "deep",
-                    "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+                    "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                    # Which build was scanned — so a later verify-fixes can tell "not fixed" from
+                    # "not redeployed" (None = no stable component, i.e. unknown).
+                    "build": build_fingerprint(args.url)}
             Path(args.out).write_text(json.dumps(_out, indent=2, ensure_ascii=False),
                                       encoding="utf-8")
             print(f"  Full result written to {args.out}\n")
@@ -2294,13 +2310,14 @@ def main() -> None:
         "pipeline":         run_pipeline_command,
         "scan":             run_scan_command,
         "file-findings":    run_file_findings_command,
+        "verify-fixes":     run_verify_fixes_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

@@ -1719,3 +1719,27 @@ def test_result_types_carry_the_leftover_ledger():
     left = [{"collection": "/x", "key": "k", "why": "w"}]
     assert ProbeResult(leftover=left).leftover == left
     assert OrchestratorResult(left_on_target=left).to_dict()["left_on_target"] == left
+
+
+# ── A probe that CRASHES is a coverage gap (not a clean result) ─────────────────
+
+def test_a_crashing_probe_lands_in_the_not_tested_ledger(monkeypatch):
+    import execution.probes as P
+    from services.context import QAXContext
+    from services.probe_service import ProbeService
+
+    def boom(*a, **k):
+        raise RuntimeError("kaboom")
+    monkeypatch.setattr(P, "bfla_probe", boom)
+    # Nothing listens on port 1: every other probe fails fast and quietly.
+    res = ProbeService(QAXContext(anthropic_key="k", project="")).run(
+        AppModel(root="/x", endpoints=[{"method": "GET", "path": "/admin/users"}]), "http://127.0.0.1:1")
+    crashed = [s for s in res.skipped if s["probe"] == "bfla"]
+    assert crashed and crashed[0]["kind"] == "error" and "kaboom" in crashed[0]["reason"]
+
+
+def test_an_erroring_probe_counts_as_a_coverage_gap():
+    from services.results import OrchestratorResult
+    r = OrchestratorResult(not_tested=[{"probe": "x", "reason": "the probe crashed: e", "kind": "error"},
+                                       {"probe": "y", "reason": "n/a", "kind": "not-applicable"}])
+    assert [g["probe"] for g in r.coverage_gaps] == ["x"]

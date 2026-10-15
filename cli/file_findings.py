@@ -123,7 +123,7 @@ def run(argv: list[str]) -> int:
         return 1
     env = environment_of(result, args.env, client_safe=args.client_safe)
     bugs = [finding_to_bug(enrich(b), i, environment=env, base_url=result.get("target_url"),
-                           client_safe=args.client_safe,
+                           client_safe=args.client_safe, build=result.get("build"),
                            reproduced=tuple(b["reproduced"]) if b.get("reproduced") else None)
             for i, b in enumerate(findings)]
     out = filer.file_many(bugs)

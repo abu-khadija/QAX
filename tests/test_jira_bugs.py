@@ -291,3 +291,9 @@ def test_client_safe_environment_never_names_the_tool():
     assert environment_of(r, client_safe=True) == "http://app.test / 2026-10-15 10:00 UTC"
     assert "QAX" in environment_of(r)
     assert "qax" not in environment_of({}, client_safe=True).lower()
+
+
+def test_ticket_carries_a_parseable_build_line():
+    bug = finding_to_bug(_enriched(), environment="E", build={"id": "7f3a9c1b2d4e", "version": "28.1.0"})
+    assert "Build: 7f3a9c1b2d4e (28.1.0)" in bug["description"]
+    assert "Build:" not in finding_to_bug(_enriched(), environment="E")["description"]      # unknown → no line

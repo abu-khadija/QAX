@@ -469,7 +469,7 @@ class OrchestratorResult:
     @property
     def coverage_gaps(self) -> list:
         """The not-tested entries that are REAL gaps (a missing prerequisite), not n/a."""
-        return [n for n in (self.not_tested or []) if n.get("kind") == "missing-prerequisite"]
+        return [n for n in (self.not_tested or []) if n.get("kind") in ("missing-prerequisite", "error")]
 
     def silent_legs(self) -> list:
         """

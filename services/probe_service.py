@@ -78,6 +78,7 @@ class ProbeService:
                                        persistence_probe, rate_limit_probe, search_robustness_probe,
                                        security_headers_probe, sqli_probe, unpaginated_list_probe)
 
+        from execution.probes import _skip
         prog.emit("probe", "start", "running active probes")
         findings = []
         # One shared HTTP session for all probes: reuses the connection pool, and carries
@@ -113,12 +114,14 @@ class ProbeService:
                     findings.append(f)
             except Exception as exc:
                 logger.error("forge_jwt probe failed: %s", exc)
+                _skip(shared, "forge-jwt", f"the probe crashed: {exc}", kind="error")
 
         # JWT validation flaws (alg=none, signature not verified) — needs a token.
         try:
             findings.extend(jwt_flaws_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("jwt_flaws probe failed: %s", exc)
+            _skip(shared, "jwt-flaws", f"the probe crashed: {exc}", kind="error")
 
         # Forged-token replay: once a token is forgeable, sweep EVERY other protected
         # endpoint with a forged token (a flaw proven on one endpoint unlocks them all).
@@ -127,6 +130,7 @@ class ProbeService:
             findings.extend(forged_token_replay_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("forged_token_replay probe failed: %s", exc)
+            _skip(shared, "forged-token-replay", f"the probe crashed: {exc}", kind="error")
 
         # BFLA (OWASP API5) — an ordinary user reaching an admin-namespaced function.
         try:
@@ -134,42 +138,49 @@ class ProbeService:
             findings.extend(bfla_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("bfla probe failed: %s", exc)
+            _skip(shared, "bfla", f"the probe crashed: {exc}", kind="error")
 
         # SQLi (path params) — error-based, with a benign-vs-quote control.
         try:
             findings.extend(sqli_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("sqli probe failed: %s", exc)
+            _skip(shared, "sqli", f"the probe crashed: {exc}", kind="error")
 
         # Injection via query params and request bodies (same control).
         try:
             findings.extend(injection_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("injection probe failed: %s", exc)
+            _skip(shared, "injection", f"the probe crashed: {exc}", kind="error")
 
         # NoSQL (operator) injection on write endpoints whose body feeds a query.
         try:
             findings.extend(nosql_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("nosql probe failed: %s", exc)
+            _skip(shared, "nosql", f"the probe crashed: {exc}", kind="error")
 
         # Malformed input → unhandled 500 / debug disclosure on write endpoints.
         try:
             findings.extend(malformed_input_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("malformed_input probe failed: %s", exc)
+            _skip(shared, "malformed-input", f"the probe crashed: {exc}", kind="error")
 
         # Path traversal / local file read via a path param (proven by an OS-file signature).
         try:
             findings.extend(path_traversal_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("path_traversal probe failed: %s", exc)
+            _skip(shared, "path-traversal", f"the probe crashed: {exc}", kind="error")
 
         # Command injection — a param that feeds a shell command (proven by echo/sleep).
         try:
             findings.extend(command_injection_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("command_injection probe failed: %s", exc)
+            _skip(shared, "command-injection", f"the probe crashed: {exc}", kind="error")
 
         # SSRF — a URL param the server fetches (proven by an out-of-band callback).
         try:
@@ -177,6 +188,7 @@ class ProbeService:
             findings.extend(ssrf_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("ssrf probe failed: %s", exc)
+            _skip(shared, "ssrf", f"the probe crashed: {exc}", kind="error")
 
         # Reflected XSS — markup reflected unencoded into an HTML response.
         try:
@@ -184,6 +196,7 @@ class ProbeService:
             findings.extend(xss_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("xss probe failed: %s", exc)
+            _skip(shared, "xss", f"the probe crashed: {exc}", kind="error")
 
         # SSTI — a template expression in a query param evaluated server-side (RCE-class).
         try:
@@ -191,6 +204,7 @@ class ProbeService:
             findings.extend(ssti_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("ssti probe failed: %s", exc)
+            _skip(shared, "ssti", f"the probe crashed: {exc}", kind="error")
 
         # Host-header injection — forged Host used to build a URL (reset/cache poisoning).
         try:
@@ -198,6 +212,7 @@ class ProbeService:
             findings.extend(host_header_injection_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("host_header_injection probe failed: %s", exc)
+            _skip(shared, "host-header-injection", f"the probe crashed: {exc}", kind="error")
 
         # XXE — external-entity file read on an XML endpoint (proven by /etc/passwd).
         try:
@@ -205,6 +220,7 @@ class ProbeService:
             findings.extend(xxe_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("xxe probe failed: %s", exc)
+            _skip(shared, "xxe", f"the probe crashed: {exc}", kind="error")
 
         # GraphQL introspection left enabled — full schema/attack-surface disclosure.
         try:
@@ -212,6 +228,7 @@ class ProbeService:
             findings.extend(graphql_introspection_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("graphql_introspection probe failed: %s", exc)
+            _skip(shared, "graphql-introspection", f"the probe crashed: {exc}", kind="error")
 
         # Unrestricted file upload — upload HTML, retrieve it, prove it serves as HTML.
         try:
@@ -219,6 +236,7 @@ class ProbeService:
             findings.extend(file_upload_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("file_upload probe failed: %s", exc)
+            _skip(shared, "file-upload", f"the probe crashed: {exc}", kind="error")
 
         # Business logic — a negative quantity/amount accepted and stored on a create.
         try:
@@ -226,6 +244,7 @@ class ProbeService:
             findings.extend(business_logic_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("business_logic probe failed: %s", exc)
+            _skip(shared, "business-logic", f"the probe crashed: {exc}", kind="error")
 
         # Stored XSS — markup written then rendered unencoded on read-back (P1).
         try:
@@ -233,30 +252,35 @@ class ProbeService:
             findings.extend(stored_xss_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("stored_xss probe failed: %s", exc)
+            _skip(shared, "stored-xss", f"the probe crashed: {exc}", kind="error")
 
         # Mass assignment — registration binds a client-supplied privileged field.
         try:
             findings.extend(mass_assignment_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("mass_assignment probe failed: %s", exc)
+            _skip(shared, "mass-assignment", f"the probe crashed: {exc}", kind="error")
 
         # Open redirect — a redirect param bounces to an attacker-controlled host.
         try:
             findings.extend(open_redirect_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("open_redirect probe failed: %s", exc)
+            _skip(shared, "open-redirect", f"the probe crashed: {exc}", kind="error")
 
         # Rate limiting — no brute-force throttling/lockout on login (P3 lead).
         try:
             findings.extend(rate_limit_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("rate_limit probe failed: %s", exc)
+            _skip(shared, "rate-limit", f"the probe crashed: {exc}", kind="error")
 
         # BOLA — two-user control: can user B read user A's object by its key?
         try:
             findings.extend(bola_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("bola probe failed: %s", exc)
+            _skip(shared, "bola", f"the probe crashed: {exc}", kind="error")
 
         # Access revocation — two-user control: after A revokes B, is B still in?
         try:
@@ -264,6 +288,7 @@ class ProbeService:
             findings.extend(access_revocation_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("access_revocation probe failed: %s", exc)
+            _skip(shared, "access-revocation", f"the probe crashed: {exc}", kind="error")
 
         # Spec-typed probes: boolean false, single-element array, date order,
         # very long text, duplicate rows. Each is control-gated and says why if skipped.
@@ -277,6 +302,8 @@ class ProbeService:
                     findings.extend(_typed(model, base_url, session=shared, auth=read_auth))
                 except Exception as exc:
                     logger.error("%s failed: %s", _typed.__name__, exc)
+                    _skip(shared, _typed.__name__.replace("_probe", "").replace("_", "-"),
+                          f"the probe crashed: {exc}", kind="error")
         except Exception as exc:
             logger.error("typed probes unavailable: %s", exc)
 
@@ -285,6 +312,7 @@ class ProbeService:
             findings.extend(excessive_data_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("excessive_data probe failed: %s", exc)
+            _skip(shared, "excessive-data", f"the probe crashed: {exc}", kind="error")
 
         # Crash-fuzz — oversized inputs on auth endpoints. Only when there is a real
         # API surface (an empty/UI-only model would fuzz a guessed path and misread
@@ -294,36 +322,42 @@ class ProbeService:
                 findings.extend(crash_fuzz_probe(model, base_url, session=shared))
             except Exception as exc:
                 logger.error("crash_fuzz probe failed: %s", exc)
+                _skip(shared, "crash-fuzz", f"the probe crashed: {exc}", kind="error")
 
         # Error-handling — unknown routes should 404, not 5xx (control: a nonsense path).
         try:
             findings.extend(error_handling_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("error_handling probe failed: %s", exc)
+            _skip(shared, "error-handling", f"the probe crashed: {exc}", kind="error")
 
         # Cookie flags — a login cookie missing HttpOnly/Secure (no-ops on bearer APIs).
         try:
             findings.extend(cookie_flags_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("cookie_flags probe failed: %s", exc)
+            _skip(shared, "cookie-flags", f"the probe crashed: {exc}", kind="error")
 
         # Debug disclosure — an interactive debugger / stack trace on an error.
         try:
             findings.extend(debug_disclosure_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("debug_disclosure probe failed: %s", exc)
+            _skip(shared, "debug-disclosure", f"the probe crashed: {exc}", kind="error")
 
         # CORS — does the app reflect an arbitrary Origin (trusts any site)?
         try:
             findings.extend(cors_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("cors probe failed: %s", exc)
+            _skip(shared, "cors", f"the probe crashed: {exc}", kind="error")
 
         # Response security headers (HSTS / clickjacking / MIME-sniff / CSP).
         try:
             findings.extend(security_headers_probe(model, base_url, session=shared))
         except Exception as exc:
             logger.error("security_headers probe failed: %s", exc)
+            _skip(shared, "security-headers", f"the probe crashed: {exc}", kind="error")
 
         # Persistence — a field saved with a 2xx "success" that is blank on read-back
         # (silent data loss, the QA field manual's highest-value class).
@@ -331,24 +365,28 @@ class ProbeService:
             findings.extend(persistence_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("persistence probe failed: %s", exc)
+            _skip(shared, "persistence", f"the probe crashed: {exc}", kind="error")
 
         # Auth error handling — a forbidden request that 5xx's instead of a clean 401/403.
         try:
             findings.extend(auth_error_probe(model, base_url, session=shared, auth=auth))
         except Exception as exc:
             logger.error("auth_error probe failed: %s", exc)
+            _skip(shared, "auth-error", f"the probe crashed: {exc}", kind="error")
 
         # Search robustness — a search/filter param that 405/5xx's on an ordinary character.
         try:
             findings.extend(search_robustness_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("search_robustness probe failed: %s", exc)
+            _skip(shared, "search-robustness", f"the probe crashed: {exc}", kind="error")
 
         # Unpaginated list — a collection that returns an unbounded array (no pagination).
         try:
             findings.extend(unpaginated_list_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("unpaginated_list probe failed: %s", exc)
+            _skip(shared, "unpaginated-list", f"the probe crashed: {exc}", kind="error")
 
         # Clean up the disposable records we created (best-effort, only our own data).
         created = len(getattr(shared, "_qax_created", []) or [])

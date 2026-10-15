@@ -66,7 +66,8 @@ def _first_sentence(text: str) -> str:
 
 def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
                    base_url: str | None = None, client_safe: bool = False,
-                   reproduced: tuple[int, int] | None = None) -> dict:
+                   reproduced: tuple[int, int] | None = None,
+                   build: dict | None = None) -> dict:
     """
     Map a QAX confirmed finding to a Jira Bug covering the owner's 13 mandatory fields
     in the compact security-bug layout:
@@ -79,6 +80,9 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
     data_safety) from services.remediation — this module stays dependency-free.
 
     base_url: the scanned app's origin, so step 1 is a real, copy-pasteable URL.
+    build: the scanned app's build fingerprint (core.build_fingerprint) — written as a
+        parseable "Build: <id> (<version>)" line so `verify-fixes` can later tell a fix that
+        shipped from a build that never changed.
     reproduced: (hits, attempts) when the caller MEASURED it (e.g. a re-verify pass);
         otherwise the report states only what is known — one scan run (
         "never repeat a number you didn't measure").
@@ -133,6 +137,11 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
         ("h", "Summary"), ("p", [(summary, False)]),
         ("p", [("Severity: ", True), (f"{sev} / {_SEV_NAME.get(sev, '')} — {reason}", False)]),
         ("p", [("Environment: ", True), (env, False)]),
+    ]
+    if build and build.get("id"):
+        from core.build_fingerprint import describe
+        blocks.append(("p", [("Build: ", True), (describe(build), False)]))
+    blocks += [
         ("p", [("Location: ", True), (f"{module} — {method} {path}", False)]),
         ("p", [("Reproducibility: ", True), (repro, False)]),
         ("p", [("Workaround: ", True), ("None known — not assessed. See Fix Recommendation for "
