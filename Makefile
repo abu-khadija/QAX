@@ -1,6 +1,6 @@
 PY := ./.venv-exec/bin/python
 
-.PHONY: eval eval-deep test gate
+.PHONY: eval eval-deep eval-mutants test gate
 
 ## Run the full test suite.
 test:
@@ -15,3 +15,8 @@ gate eval:
 ## official deep scorecard and the deep-feature engagement checks (items 3/5/6).
 eval-deep:
 	$(PY) -m evals.gate --deep
+
+## Coverage map of the gate itself: kill each probe in turn, see which ones the golden
+## target would NOT notice dying (zero-LLM, ~7 min).
+eval-mutants:
+	$(PY) -m evals.mutants
