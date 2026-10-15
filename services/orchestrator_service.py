@@ -323,7 +323,7 @@ class OrchestratorService:
         if deep:
             round2_tests: list[dict] = []
             repaired = self._repair_setup(
-                self._setup_broken_tests(execution, executable), model)
+                self._setup_broken_tests(execution, executable), model, auth=auth)
             round2_tests.extend(repaired)
             unresolved = self._unresolved_suspects(
                 getattr(detection, "findings", []), confirmed,
@@ -1025,33 +1025,48 @@ class OrchestratorService:
         headers = step.get("headers") or {}
         return any(str(k).lower() == "authorization" for k in headers)
 
-    def _repair_setup(self, broken: list[dict], model: AppModel) -> list[dict]:
+    def _repair_setup(self, broken: list[dict], model: AppModel,
+                      auth: dict | None = None) -> list[dict]:
         """
         Rebuild each setup-broken test with a KNOWN-GOOD auth preamble (the same
         register→login→save-token steps the coverage templates use successfully) in
         front of its original attack tail, and re-run that — instead of asking the
         LLM to regenerate the whole attack, which can repeat the same setup mistake.
         Deterministic; returns [] when no auth recipe can be derived.
+
+        When ``auth`` carries a supplied token, the known-good "preamble" is the
+        seeded token itself: register/login steps are stripped (on a token-only
+        API they're what broke) and the attack runs with `use_auth: token`, NO
+        new preamble. Coverage templates are skipped in that mode — they already
+        ran with the seeded tokens, so re-running them can't change the outcome.
         """
         from core.auth_recipe import derive_auth_recipe
         from services.coverage_goals import _auth_steps
         recipe = derive_auth_recipe(model)
-        if not recipe:
+        supplied = bool(auth and (auth.get("token") or auth.get("token_b")))
+        if not recipe and not supplied:
             return []
         repaired: list[dict] = []
         for t in broken:
-            tail = self._attack_tail(t.get("api_steps") or [], recipe)
+            if supplied and t.get("attack") == "coverage-template":
+                continue
+            steps = t.get("api_steps") or []
+            tail = self._attack_tail(steps, recipe) if recipe else list(steps)
             if not tail:
                 continue  # nothing but setup — no attack to replay
-            preamble = _auth_steps(recipe, model, "rp", "token", 1)
+            preamble = [] if supplied else _auth_steps(recipe, model, "rp", "token", 1)
             start = len(preamble) + 1
             new_tail = []
+            attached = False
             for i, s in enumerate(tail):
                 ns = dict(s)
                 ns["step_number"] = start + i
                 if "use_auth" not in ns and not self._has_auth_header(ns):
                     ns["use_auth"] = "token"   # attach the repaired token to the attack
+                    attached = True
                 new_tail.append(ns)
+            if supplied and len(tail) == len(steps) and not attached:
+                continue  # identical to round 1 — re-running is pure waste
             repaired.append({**t,
                              "test_case_id": f"{t.get('test_case_id', 'RT')}-rep",
                              "title": f"[setup-repaired] {t.get('title', '')}".strip(),

@@ -460,6 +460,48 @@ def test_repair_setup_skips_test_with_no_attack_tail():
     assert svc._repair_setup(broken, m) == []
 
 
+# Gitea follow-up: on a token-only API, a supplied token IS the good preamble.
+
+def _repair_model():
+    return AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/auth/register", "request_fields": ["email", "password"]},
+        {"method": "POST", "path": "/auth/login", "request_fields": ["email", "password"]},
+        {"method": "GET", "path": "/orders/{id}"},
+    ])
+
+
+def test_repair_setup_supplied_strips_auth_and_adds_no_preamble():
+    from services.context import QAXContext
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    broken = [{"test_case_id": "RT-9", "title": "IDOR orders",
+               "api_steps": [{"step_number": 1, "method": "POST", "path": "/auth/login", "body": {}},
+                             {"step_number": 2, "method": "GET", "path": "/orders/7"}]}]
+    out = svc._repair_setup(broken, _repair_model(), auth={"token": "T"})
+    assert len(out) == 1
+    steps = out[0]["api_steps"]
+    assert [s["path"] for s in steps] == ["/orders/7"]          # no register/login at all
+    assert steps[0]["step_number"] == 1 and steps[0]["use_auth"] == "token"
+
+
+def test_repair_setup_supplied_skips_coverage_templates():
+    from services.context import QAXContext
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    broken = [{"test_case_id": "COV-IDOR-0001", "attack": "coverage-template",
+               "api_steps": [{"step_number": 1, "method": "POST", "path": "/orders", "use_auth": "token_a"},
+                             {"step_number": 2, "method": "GET", "path": "/orders/{{rid}}", "use_auth": "token_b"}]}]
+    assert svc._repair_setup(broken, _repair_model(), auth={"token": "T", "token_b": "B"}) == []
+
+
+def test_repair_setup_supplied_skips_identical_rerun():
+    from services.context import QAXContext
+    svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
+    # Already authenticated, no register/login to strip → re-running changes nothing.
+    broken = [{"test_case_id": "RT-2", "api_steps": [
+        {"step_number": 1, "method": "POST", "path": "/orders", "use_auth": "token"},
+        {"step_number": 2, "method": "GET", "path": "/orders/1", "use_auth": "token"}]}]
+    assert svc._repair_setup(broken, _repair_model(), auth={"token": "T"}) == []
+
+
 # ── B1: deterministic CONFIRMED vs non-deterministic AI leads, stable ordering ──
 
 def test_result_splits_deterministic_from_ai_leads():
