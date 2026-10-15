@@ -28,6 +28,7 @@ Never prints, never calls sys.exit(); failures are captured in the result.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -220,7 +221,7 @@ class OrchestratorService:
                 # still gets generated coverage — not just probes.
                 functional_attempted = True
                 egen, endpoint_groups = self._generate_from_endpoints(
-                    model, max_router_files, max_endpoints, prog)
+                    model, max_router_files, max_endpoints, prog, auth=auth)
                 tests.extend(egen)
                 functional_count += len(egen)
             for fpath in chosen_routers:
@@ -235,7 +236,8 @@ class OrchestratorService:
                     logger.warning("orchestrator generation failed for %s: %s", fpath, exc)
             try:
                 rt = RedTeamService(self.context).generate(model, detection, progress=prog)
-                tests.extend(rt.test_cases)
+                tests.extend(self._normalize_supplied_auth(rt.test_cases)
+                             if auth and (auth.get("token") or auth.get("token_b")) else rt.test_cases)
             except Exception as exc:
                 logger.warning("orchestrator red-team failed: %s", exc)
             # B2: a generation leg that was attempted but produced nothing is exactly
@@ -331,7 +333,8 @@ class OrchestratorService:
             if unresolved:
                 try:
                     rt2 = RedTeamService(self.context).generate(model, unresolved, progress=prog)
-                    round2_tests.extend(rt2.test_cases)
+                    round2_tests.extend(self._normalize_supplied_auth(rt2.test_cases)
+                                        if auth and (auth.get("token") or auth.get("token_b")) else rt2.test_cases)
                 except Exception as exc:
                     logger.warning("round 2 red-team failed: %s", exc)
             if round2_tests:
@@ -680,7 +683,19 @@ class OrchestratorService:
     # ── Fallback generation: no router files → generate from the endpoint surface ──
 
     @staticmethod
-    def _group_endpoints(model: AppModel) -> list[tuple[str, list]]:
+    def _is_prefix_seg(seg: str) -> bool:
+        """A mount/version path segment (api, rest, v1, v2 …) — not a resource name."""
+        s = str(seg).lower()
+        return s in ("api", "rest") or bool(re.fullmatch(r"v\d+(?:\.\d+)?", s))
+
+    @staticmethod
+    def _endpoint_risk(e: dict) -> int:
+        """Per-endpoint risk for budgeting inside a group: writes + auth weigh more."""
+        return (2 if str(e.get("method", "")).upper() in ("POST", "PUT", "DELETE", "PATCH") else 0) \
+            + (1 if e.get("auth_required") else 0)
+
+    @classmethod
+    def _group_endpoints(cls, model: AppModel) -> list[tuple[str, list]]:
         """
         Group the model's endpoints by their source file (when known) else by the
         first non-parameter path segment (/api/orders/{id} → "orders"), ranked
@@ -693,7 +708,12 @@ class OrchestratorService:
                 continue
             key = str(e.get("file") or e.get("source") or "").strip()
             if not key:
-                segs = [s for s in str(e.get("path", "")).split("/") if s and not s.startswith("{")]
+                # Skip mount/version prefixes (/api, /rest, /v1 …) so the key is the
+                # resource. Without this every path of a /api/v1-mounted app (Gitea:
+                # 537 ops) fell into ONE "api" group → one oversized prompt that
+                # truncated and covered only the alphabetically-first slice.
+                segs = [s for s in str(e.get("path", "")).split("/")
+                        if s and not s.startswith("{") and not cls._is_prefix_seg(s)]
                 key = segs[0] if segs else "api"
             groups.setdefault(key, []).append(e)
 
@@ -722,22 +742,38 @@ class OrchestratorService:
         return "test"
 
     @classmethod
-    def _endpoints_as_spec(cls, key: str, eps: list) -> str:
+    def _endpoints_as_spec(cls, key: str, eps: list, *, supplied: bool = False) -> str:
         """
         Render an endpoint group as a directive spec GenerationService can turn into
         concrete api_steps. A terse path list makes the model return little or nothing;
         an explicit instruction + a per-endpoint example body + the auth flow makes it
         reliably emit real, assertable tests.
+
+        With ``supplied`` (the caller pre-seeded auth tokens), the model is told NOT
+        to invent a register/login flow — on a token-only API (Gitea) that invented
+        flow 401s at step 1 and every generated test is noise — and to reference the
+        seeded identities via `use_auth` instead.
         """
         from core.auth_recipe import field_names
+        if supplied:
+            auth_rule = (
+                "# AUTH IS PRE-PROVISIONED: do NOT write any register, login, sign-up, "
+                "or user-creation-as-setup steps. For an endpoint marked [auth required], "
+                "set \"use_auth\": \"token\" on the step (the primary identity); to act "
+                "as a SECOND, different user (ownership / IDOR checks) set "
+                "\"use_auth\": \"token_b\". Never use any other use_auth value. Also add a "
+                "no-token case (no use_auth) that must be rejected (401/403).")
+        else:
+            auth_rule = (
+                "# For an endpoint marked [auth required], first register then log in to "
+                "obtain a bearer token and send it as Authorization: Bearer <token>; also "
+                "add a no-token case that must be rejected (401/403).")
         lines = [
             f"# API endpoints for module '{key}' (no router source file — generated "
             "from the live/model surface).",
             "# Write API test cases (api_steps) for EACH endpoint below: send the shown "
-            "request body and assert the expected outcome. For an endpoint marked "
-            "[auth required], first register then log in to obtain a bearer token and "
-            "send it as Authorization: Bearer <token>; also add a no-token case that "
-            "must be rejected (401/403).",
+            "request body and assert the expected outcome.",
+            auth_rule,
             "",
         ]
         for e in eps:
@@ -758,8 +794,35 @@ class OrchestratorService:
                 lines.append("  success: 200 OK with the resource(s).")
         return "\n".join(lines)
 
+    @classmethod
+    def _budget_groups(cls, ranked: list[tuple[str, list]], max_files: int,
+                       max_endpoints: int) -> list[tuple[str, list]]:
+        """
+        Spend the endpoint budget across the highest-risk groups, BREADTH-first: each
+        group gets at most an even share (≥5) of its highest-risk endpoints, so one
+        huge group can neither blow the budget nor starve the others. Before this a
+        single oversized group (Gitea's 537 ops) went whole into one prompt.
+        """
+        files = max(1, max_files)
+        per_group = max(5, (max_endpoints or 0) // files) if max_endpoints else None
+        chosen: list[tuple[str, list]] = []
+        used = 0
+        for key, eps in ranked:
+            if len(chosen) >= files:
+                break
+            take = sorted(eps, key=cls._endpoint_risk, reverse=True)
+            if per_group:
+                remaining = max_endpoints - used
+                if remaining <= 0:
+                    break
+                take = take[:min(per_group, remaining)]
+            chosen.append((key, take))
+            used += len(take)
+        return chosen
+
     def _generate_from_endpoints(self, model: AppModel, max_files: int,
-                                 max_endpoints: int, prog: ProgressReporter) -> tuple[list, list]:
+                                 max_endpoints: int, prog: ProgressReporter,
+                                 auth: dict | None = None) -> tuple[list, list]:
         """
         Generate functional API tests directly from the endpoint surface, grouped by
         file/collection, honouring the same endpoint budget. Returns (test_cases,
@@ -770,17 +833,9 @@ class OrchestratorService:
         ranked = self._group_endpoints(model)
         if not ranked:
             return [], []
-        # Budget the groups the same way routers are budgeted: highest-risk-first
-        # until the endpoint budget is spent, bounded by the file ceiling.
-        chosen: list[tuple[str, list]] = []
-        used = 0
-        for key, eps in ranked:
-            if len(chosen) >= max(1, max_files):
-                break
-            if chosen and max_endpoints and used + len(eps) > max_endpoints:
-                break
-            chosen.append((key, eps))
-            used += len(eps)
+        supplied = bool(auth and (auth.get("token") or auth.get("token_b")))
+        chosen = self._budget_groups(ranked, max_files, max_endpoints)
+        used = sum(len(eps) for _, eps in chosen)
 
         prog.emit("orchestrate", "info",
                   f"no router files — generating from the endpoint surface: "
@@ -790,7 +845,7 @@ class OrchestratorService:
         out: list = []
         covered: list[str] = []
         for key, eps in chosen:
-            spec = self._endpoints_as_spec(key, eps)
+            spec = self._endpoints_as_spec(key, eps, supplied=supplied)
             cases: list = []
             # One retry: generation from a synthesised spec is occasionally empty
             # (LLM non-determinism on a short input); a single retry makes the
@@ -810,9 +865,52 @@ class OrchestratorService:
                     logger.warning("endpoint-group generation failed for %s: %s", key, exc)
                     break
             if cases:
-                out.extend(cases)
+                out.extend(self._normalize_supplied_auth(cases) if supplied else cases)
                 covered.append(key)   # record coverage only when tests were produced
         return out, covered
+
+    _SEEDED_TOKENS = ("token", "token_a", "token_b")
+    _AUTH_FLOW_SEGS = ("login", "signin", "sign-in", "sign_in", "register",
+                       "signup", "sign-up", "sign_up", "logout")
+
+    @classmethod
+    def _normalize_supplied_auth(cls, tests: list[dict]) -> list[dict]:
+        """
+        Deterministic safety net for generated tests when auth tokens are supplied
+        (the prompt asks for this, but the LLM doesn't always comply):
+          • drop steps that hit an auth-flow path (login/register/sign-up…) — with
+            pre-seeded tokens they're never needed, and on a token-only API they 404
+            or 401 and abort the test before its real assertion;
+          • map any invented token variable (`admin_token`, `user_token`, True …) to
+            a seeded one — "token_b" when its name says second/other/attacker user,
+            else the primary "token" — so the header is actually sent.
+        Steps are renumbered. A test left with no steps is dropped.
+        """
+        out: list[dict] = []
+        for t in tests:
+            steps = t.get("api_steps")
+            if not steps:
+                out.append(t)
+                continue
+            kept = []
+            for s in steps:
+                segs = [x.lower() for x in str(s.get("path", "")).split("?")[0].split("/") if x]
+                if any(seg in cls._AUTH_FLOW_SEGS for seg in segs):
+                    continue
+                ns = dict(s)
+                ua = ns.get("use_auth")
+                if ua and ua not in cls._SEEDED_TOKENS:
+                    name = str(ua).lower()
+                    ns["use_auth"] = ("token_b" if any(k in name for k in
+                                      ("_b", "second", "other", "attacker", "victim", "user2", "b_"))
+                                      else "token")
+                kept.append(ns)
+            if not kept:
+                continue
+            for i, s in enumerate(kept, 1):
+                s["step_number"] = i
+            out.append({**t, "api_steps": kept})
+        return out
 
     # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
     _FAMILY_SWEEP_LIMIT = 50

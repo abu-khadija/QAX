@@ -96,6 +96,36 @@ Both findings **verified by hand against Gitea**:
   briefly wrong, the deterministic-template verdict never escalated a setup failure,
   and the headline findings stayed clean once the probe FP was fixed.
 
+## Deep scan (generation + red-team), same day
+
+Ran the deep scan with the same tokens (cost ~$0.36, 4 LLM calls, 185 s). The
+**Anthropic credit balance ran out mid-run** — Critic and round-2 red-team failed
+with "credit balance too low". QAX degraded as designed: no crash, the same 2
+deterministic findings, **0 false positives**. But the 19 generated-test FAILs were
+never judged, so "0 AI leads" there means *unjudged*, not *clean*.
+
+Hand triage of all 19: **every one is a bad test, not a Gitea bug** — two more gaps:
+
+- **G4 — oversized single group.** The no-router fallback keyed groups by the first
+  path segment, which is `api` for every Gitea path → all 537 ops in ONE prompt →
+  `max_tokens` truncation → 11 salvaged tests, all on `/admin/*` (alphabetically
+  first). The budget let the first group in whole. **Fix:** skip mount/version
+  prefixes (`api`, `rest`, `vN`) so groups are resources (`repos`, `admin`, `orgs` …),
+  and budget breadth-first (each group ≤ an even share of `--max-endpoints`, its
+  riskiest endpoints first).
+- **G5 — generated tests invent an auth flow.** The endpoint prompt literally said
+  "first register then log in", and the red-team did the same: tests created a user
+  via `/admin/users` with no token, logged in at non-existent `/auth/login` /
+  `/user/login`, and used never-set vars (`admin_token`) → 401 at step 1. **Fix:**
+  with supplied tokens the prompt forbids register/login steps and names the seeded
+  identities (`use_auth: "token"` / `"token_b"`); plus a deterministic safety net
+  (`_normalize_supplied_auth`) that drops auth-flow steps and maps invented token
+  vars onto the seeded ones, for both generated and red-team tests.
+- Round-2 setup repair also honours supplied tokens now (no register/login preamble).
+
+**Not yet re-validated live** — needs Anthropic credits. Next deep run should show
+the generated tests spread across resource groups and reaching their assertions.
+
 ## Changes (all with tests)
 
 - `services/live_surface.py` — `/swagger.v1.json` discovery; `required_fields` from

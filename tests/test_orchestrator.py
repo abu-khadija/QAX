@@ -365,7 +365,7 @@ def test_group_endpoints_by_segment_ranks_by_risk():
     ])
     groups = OrchestratorService._group_endpoints(m)
     keys = [k for k, _ in groups]
-    assert keys[0] == "api"            # grouped by first non-param segment; "api" segment wins
+    assert keys[0] == "orders"         # the /api mount prefix is skipped → keyed by resource
     # a model that groups by file keeps distinct keys
     m2 = AppModel(root="/x", endpoints=[
         {"method": "GET", "path": "/orders/{id}", "file": "orders.py"},
@@ -387,10 +387,13 @@ def test_generate_from_endpoints_budgets_and_calls_generation(monkeypatch):
     from services.results import GenerationResult
     calls = []
 
+    specs = {}
+
     class FakeGS:
         def __init__(self, *a, **k): pass
         def generate(self, source, options=None):
             calls.append(source)
+            specs[source] = options.content
             return GenerationResult(source=source, test_cases=[{"test_case_id": source}])
     monkeypatch.setattr(G, "GenerationService", FakeGS)
 
@@ -400,8 +403,68 @@ def test_generate_from_endpoints_budgets_and_calls_generation(monkeypatch):
     svc = OrchestratorService(QAXContext(anthropic_key="k", project=""))
     from services.progress import NullProgressReporter
     tests, covered = svc._generate_from_endpoints(m, max_files=4, max_endpoints=10, prog=NullProgressReporter())
-    assert covered == ["orders.py"]       # dense group taken; health skipped by budget (always keep 1)
+    # Breadth-first: the dense group is CAPPED (≤5 of its 30), leaving budget for health.
+    assert covered == ["orders.py", "health.py"]
+    assert specs["endpoints://orders.py"].count("Endpoint: ") == 5
     assert tests and tests[0]["test_case_id"].startswith("endpoints://")
+
+
+# Gitea follow-up (deep scan): every path under /api/v1 fell into one "api" group of
+# 537 ops → one oversized prompt → truncated → only /admin/* covered.
+
+def test_group_endpoints_skips_api_and_version_prefixes():
+    m = AppModel(root="/x", endpoints=[
+        {"method": "GET", "path": "/api/v1/repos/{owner}/{repo}"},
+        {"method": "GET", "path": "/api/v1/admin/users"},
+        {"method": "GET", "path": "/rest/v2.1/orgs"},
+    ])
+    assert set(dict(OrchestratorService._group_endpoints(m))) == {"repos", "admin", "orgs"}
+
+
+def test_budget_groups_never_sends_one_huge_group_whole():
+    big = [{"method": "GET", "path": f"/repos/{i}"} for i in range(500)]
+    ranked = [("repos", big), ("admin", [{"method": "GET", "path": "/admin/x"}])]
+    chosen = OrchestratorService._budget_groups(ranked, max_files=4, max_endpoints=40)
+    assert len(chosen[0][1]) == 10            # 40 // 4 per group, not 500
+    assert [k for k, _ in chosen] == ["repos", "admin"]
+    assert sum(len(e) for _, e in chosen) <= 40
+
+
+def test_budget_groups_prefers_risky_endpoints_within_a_group():
+    eps = ([{"method": "GET", "path": f"/r/{i}"} for i in range(10)]
+           + [{"method": "DELETE", "path": "/r/{id}", "auth_required": True}])
+    chosen = OrchestratorService._budget_groups([("r", eps)], max_files=4, max_endpoints=20)
+    assert chosen[0][1][0]["method"] == "DELETE"
+
+
+def test_endpoints_as_spec_supplied_forbids_invented_login():
+    eps = [{"method": "GET", "path": "/admin/users", "auth_required": True}]
+    self_reg = OrchestratorService._endpoints_as_spec("admin", eps)
+    supplied = OrchestratorService._endpoints_as_spec("admin", eps, supplied=True)
+    assert "register then log in" in self_reg
+    assert "do NOT write any register, login" in supplied and '"token_b"' in supplied
+    assert "register then log in" not in supplied
+
+
+def test_normalize_supplied_auth_drops_login_and_maps_invented_tokens():
+    tests = [{"test_case_id": "G1", "api_steps": [
+        {"step_number": 1, "method": "POST", "path": "/api/v1/user/login", "body": {}},
+        {"step_number": 2, "method": "GET", "path": "/api/v1/admin/users", "use_auth": "admin_token"},
+        {"step_number": 3, "method": "GET", "path": "/api/v1/repos/a/b", "use_auth": "attacker_token"},
+        {"step_number": 4, "method": "GET", "path": "/api/v1/admin/users"},           # no-token case kept
+    ]}]
+    out = OrchestratorService._normalize_supplied_auth(tests)
+    steps = out[0]["api_steps"]
+    assert [s["path"] for s in steps] == ["/api/v1/admin/users", "/api/v1/repos/a/b", "/api/v1/admin/users"]
+    assert [s.get("use_auth") for s in steps] == ["token", "token_b", None]
+    assert [s["step_number"] for s in steps] == [1, 2, 3]
+
+
+def test_normalize_supplied_auth_drops_test_that_was_only_login():
+    tests = [{"test_case_id": "G2", "api_steps": [
+        {"step_number": 1, "method": "POST", "path": "/auth/register"},
+        {"step_number": 2, "method": "POST", "path": "/auth/login"}]}]
+    assert OrchestratorService._normalize_supplied_auth(tests) == []
 
 
 # ── item 3: setup repair re-runs broken tests with a known-good preamble ───────
