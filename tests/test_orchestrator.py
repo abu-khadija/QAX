@@ -614,3 +614,35 @@ def test_silent_legs_flags_built_but_unexecuted_tests():
     r = OrchestratorResult(legs={"functional_attempted": False, "functional_generated": 0,
                                  "templates_injected": 4, "tests_executed": 0})
     assert any("execution" in s for s in r.silent_legs())
+
+
+# Gitea deep-scan follow-up: a setup step that expects success but lost its token.
+
+def test_normalize_supplied_auth_gives_a_bare_setup_step_the_seeded_token():
+    tests = [{"test_case_id": "G3", "api_steps": [
+        {"step_number": 1, "method": "POST", "path": "/api/v1/admin/users", "expected_status": 201},
+        {"step_number": 2, "method": "GET", "path": "/api/v1/admin/users", "use_auth": "token_b",
+         "expected_status": [403]}]}]
+    steps = OrchestratorService._normalize_supplied_auth(tests)[0]["api_steps"]
+    assert steps[0]["use_auth"] == "token"          # the create can only have meant to succeed
+    assert steps[1]["use_auth"] == "token_b"        # untouched
+
+
+def test_normalize_supplied_auth_leaves_the_final_bare_step_as_the_no_token_probe():
+    tests = [{"test_case_id": "G4", "api_steps": [
+        {"step_number": 1, "method": "GET", "path": "/api/v1/repos/a/b", "expected_status": 401}]}]
+    steps = OrchestratorService._normalize_supplied_auth(tests)[0]["api_steps"]
+    assert "use_auth" not in steps[0]               # deliberate unauthenticated request
+
+
+def test_normalize_supplied_auth_does_not_touch_bare_setup_steps_that_expect_rejection():
+    tests = [{"test_case_id": "G5", "api_steps": [
+        {"step_number": 1, "method": "POST", "path": "/x", "expected_status": [401, 403]},
+        {"step_number": 2, "method": "GET", "path": "/x/1", "use_auth": "token", "expected_status": 200}]}]
+    assert "use_auth" not in OrchestratorService._normalize_supplied_auth(tests)[0]["api_steps"][0]
+
+
+def test_expects_success_parses_ints_strings_and_lists():
+    f = OrchestratorService._expects_success
+    assert f({"expected_status": 201}) and f({"expected_status": "200"}) and f({"expected_status": [200, 204]})
+    assert not f({"expected_status": [200, 404]}) and not f({"expected_status": 401}) and not f({})

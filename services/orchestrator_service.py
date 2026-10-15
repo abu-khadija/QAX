@@ -911,10 +911,31 @@ class OrchestratorService:
                 kept.append(ns)
             if not kept:
                 continue
+            # A SETUP step (not the last) that expects success but carries no auth can only
+            # have been meant to succeed — the model dropped the token with the login it
+            # invented (seen on Gitea: `POST /admin/users` sent bare → 401 at step 1, so the
+            # test never reached its real assertion). Give it the primary seeded identity.
+            # The LAST step is left alone: a bare final step is the deliberate "no token" probe.
+            for s in kept[:-1]:
+                if not s.get("use_auth") and not cls._has_auth_header(s) and cls._expects_success(s):
+                    s["use_auth"] = "token"
             for i, s in enumerate(kept, 1):
                 s["step_number"] = i
             out.append({**t, "api_steps": kept})
         return out
+
+    @staticmethod
+    def _expects_success(step: dict) -> bool:
+        """True when a step's expected_status is a 2xx (int, numeric string, or a list of them)."""
+        exp = step.get("expected_status")
+        vals = exp if isinstance(exp, (list, tuple)) else [exp]
+        nums = []
+        for v in vals:
+            try:
+                nums.append(int(v))
+            except (TypeError, ValueError):
+                pass
+        return bool(nums) and all(200 <= n < 300 for n in nums)
 
     # Probe classes where a confirmed bug implies siblings worth sweeping exhaustively.
     _FAMILY_SWEEP_LIMIT = 50
