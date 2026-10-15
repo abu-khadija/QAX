@@ -140,3 +140,150 @@ def test_all_templates_groups_applicable_goals():
 def test_no_goals_when_nothing_applies():
     empty = AppModel(endpoints=[{"method": "GET", "path": "/health"}])
     assert cg.all_templates(empty) == {}
+
+
+# ── supplied-token mode (Gitea, 2026-10-15): run the authenticated coverage ───
+#    layer against apps QAX can't self-register into, by using supplied tokens.
+
+def test_validation_template_supplied_skips_register_login():
+    # With supplied=True the auth'd create posts directly with the seeded `token`
+    # and prepends NO register/login (which would 404 on a token-only API).
+    tpls = cg.validation_templates(_model(), supplied=True)
+    steps = tpls[0]["api_steps"]
+    assert len(steps) == 1
+    assert steps[0]["method"] == "POST" and steps[0]["path"] == "/todos"
+    assert steps[0]["use_auth"] == "token" and steps[0]["body"] == {"title": ""}
+
+
+def test_idor_template_supplied_skips_registration():
+    tpls = cg.idor_templates(_model(), supplied=True)
+    assert tpls
+    steps = tpls[0]["api_steps"]
+    # Only create(token_a) + attack(token_b) — no four register/login steps.
+    assert len(steps) == 2
+    assert steps[0]["use_auth"] == "token_a" and steps[1]["use_auth"] == "token_b"
+    assert steps[1]["expected_status"] == [403, 404]
+
+
+def test_all_templates_threads_supplied_flag():
+    g_self = cg.all_templates(_model())
+    g_supp = cg.all_templates(_model(), supplied=True)
+    # self-register path prepends steps; supplied path does not → fewer steps.
+    assert (len(g_supp["broken-authz"][0]["api_steps"])
+            < len(g_self["broken-authz"][0]["api_steps"]))
+
+
+# ── G3: only assert on a field the spec marks REQUIRED ────────────────────────
+
+def test_validation_skips_endpoint_with_no_required_field():
+    # Spec lists request fields but marks none required → don't cry "missing
+    # validation" on a field the API legitimately accepts empty.
+    model = AppModel(endpoints=[
+        {"method": "POST", "path": "/orgs", "request_fields": ["description", "website"],
+         "required_fields": []},
+    ])
+    assert cg.validation_templates(model) == []
+
+
+def test_validation_uses_required_field_not_first_field():
+    model = AppModel(endpoints=[
+        {"method": "POST", "path": "/orgs",
+         "request_fields": ["description", "username"], "required_fields": ["username"]},
+    ])
+    tpls = cg.validation_templates(model)
+    assert tpls and tpls[0]["api_steps"][-1]["body"] == {"username": ""}
+
+
+def test_validation_falls_back_when_no_required_info():
+    # Source-only model (no required_fields key) keeps the old behaviour.
+    model = AppModel(endpoints=[
+        {"method": "POST", "path": "/items", "request_fields": ["title"]},
+    ])
+    tpls = cg.validation_templates(model)
+    assert tpls and tpls[0]["api_steps"][-1]["body"] == {"title": ""}
+
+
+# ── runner: supplied auth scheme/header + seeded token variables (G1) ─────────
+
+class _CaptureSession:
+    """Records the headers of the last request; returns a 200."""
+    def __init__(self):
+        self.headers = {}
+        self.last_headers = None
+
+    def request(self, method, url, json=None, headers=None, timeout=None):
+        from unittest.mock import MagicMock
+        self.last_headers = headers or {}
+        return MagicMock(status_code=200, text="{}", json=lambda: {})
+
+
+def _runner_with_session():
+    r = APIRunner()
+    r.setup(base_url="http://localhost:8911", auth_scheme="token",
+            seed_variables={"token": "SEEDED"})
+    r.session = _CaptureSession()
+    return r
+
+
+def test_runner_applies_supplied_scheme_to_seeded_token():
+    r = _runner_with_session()
+    r.execute_api_step({"step_number": 1, "method": "GET", "path": "/x",
+                        "use_auth": "token", "expected_status": [200]},
+                       dict(r.seed_variables))
+    assert r.session.last_headers.get("Authorization") == "token SEEDED"
+
+
+def test_runner_empty_scheme_sends_raw_token():
+    r = APIRunner()
+    r.setup(base_url="http://localhost:8911", auth_scheme="", auth_header="X-API-Key")
+    r.session = _CaptureSession()
+    r.execute_api_step({"step_number": 1, "method": "GET", "path": "/x",
+                        "use_auth": "token", "expected_status": [200]}, {"token": "K"})
+    assert r.session.last_headers.get("X-API-Key") == "K"
+
+
+def test_runner_seeds_variables_into_every_test_case():
+    r = APIRunner()
+    r.setup(base_url="http://localhost:8911", auth_scheme="token",
+            seed_variables={"token": "SEEDED", "token_b": "B"})
+    r.session = _CaptureSession()
+    res = r.execute_test_case({"test_case_id": "T1", "title": "t", "api_steps": [
+        {"step_number": 1, "method": "GET", "path": "/x", "use_auth": "token_b",
+         "expected_status": [200]}]})
+    assert res["status"] == "PASS"
+    assert r.session.last_headers.get("Authorization") == "token B"
+
+
+# ── G2: a coverage template that fails at SETUP is inconclusive, not a FAIL ────
+
+def test_coverage_setup_failure_classifier():
+    tc = {"attack": "coverage-template", "api_steps": [
+        {"step_number": 1}, {"step_number": 2}]}
+    setup_fail = {"steps": [{"step_number": 1, "status": "FAIL"}]}
+    assert_fail = {"steps": [{"step_number": 2, "status": "FAIL"}]}
+    assert APIRunner._is_coverage_setup_failure(tc, setup_fail) is True
+    assert APIRunner._is_coverage_setup_failure(tc, assert_fail) is False
+    # a non-coverage test is never a "setup failure"
+    assert APIRunner._is_coverage_setup_failure({"attack": "redteam"}, setup_fail) is False
+
+
+def test_setup_failed_coverage_test_not_counted_as_failed():
+    # One coverage template whose create (step 1 of 2) fails → batch reports it
+    # under `setup`, not `failed`; pass_rate ignores it.
+    r = APIRunner()
+    r.setup(base_url="http://localhost:8911")
+
+    class _FailFirst:
+        headers = {}
+        def request(self, method, url, json=None, headers=None, timeout=None):
+            from unittest.mock import MagicMock
+            # the create step (POST) fails; nothing else should run after a FAIL
+            return MagicMock(status_code=403, text="forbidden", json=lambda: {})
+    r.session = _FailFirst()
+    batch = r.execute_batch([{"test_case_id": "C1", "title": "cov", "attack": "coverage-template",
+                              "api_steps": [
+                                  {"step_number": 1, "method": "POST", "path": "/a",
+                                   "expected_status": [201], "use_auth": "token_a"},
+                                  {"step_number": 2, "method": "GET", "path": "/a/1",
+                                   "expected_status": [403, 404], "use_auth": "token_b"}]}])
+    assert batch["setup"] == 1 and batch["failed"] == 0

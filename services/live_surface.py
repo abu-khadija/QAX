@@ -53,6 +53,8 @@ _SPEC_PATHS = [
     # Django ecosystems: drf-yasg serves the spec at /swagger/?format=openapi,
     # drf-spectacular at /api/schema/ (found scanning a real DRF app, 2026-10-14).
     "/swagger/?format=openapi", "/api/schema/", "/api/schema", "/schema/",
+    # Gitea/Gogs serve their Swagger 2.0 spec here (found scanning Gitea, 2026-10-15).
+    "/swagger.v1.json",
 ]
 
 
@@ -157,6 +159,7 @@ def endpoints_from_spec(spec: dict) -> list[dict]:
                 "auth_explicit": bool(auth_explicit),
                 "query_params": _query_params(op, item, spec),
                 "request_fields": _request_fields(op, spec),
+                "required_fields": _required_request_fields(op, spec),
                 "response_fields": _response_fields(op, spec),
             })
     return out
@@ -194,6 +197,33 @@ def _request_fields(op: dict, spec: dict) -> list[str]:
     for param in op.get("parameters") or []:
         if isinstance(param, dict) and param.get("in") == "body":
             return _schema_fields(param.get("schema") or {}, spec)
+    return []
+
+
+def _schema_required(schema: dict, spec: dict) -> list[str]:
+    """The `required` property names of a (possibly $ref'd) object schema."""
+    if not isinstance(schema, dict):
+        return []
+    if "$ref" in schema:
+        schema = _resolve(schema["$ref"], spec)
+    req = schema.get("required")
+    return [str(x) for x in req] if isinstance(req, list) else []
+
+
+def _required_request_fields(op: dict, spec: dict) -> list[str]:
+    """
+    Names of the request-body fields the spec marks `required`. Empty means the
+    body has no required field (every field is optional) — distinct from a body
+    with no field info at all, which simply has no requestBody/body parameter.
+    """
+    body = (op.get("requestBody") or {}).get("content") or {}   # OpenAPI 3
+    for media in body.values():
+        schema = (media or {}).get("schema") or {}
+        if schema:
+            return _schema_required(schema, spec)
+    for param in op.get("parameters") or []:                    # Swagger 2
+        if isinstance(param, dict) and param.get("in") == "body":
+            return _schema_required(param.get("schema") or {}, spec)
     return []
 
 

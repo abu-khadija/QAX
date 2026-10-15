@@ -1238,20 +1238,33 @@ class _BflaSession:
 
 def test_bfla_detects_ordinary_user_reaching_admin():
     from execution.probes import bfla_probe
-    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token": _VALID_JWT})
+    # The ORDINARY user is the secondary (token_b), never the primary token.
+    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token_b": _VALID_JWT})
     assert len(out) == 1 and out[0].probe == "bfla" and out[0].severity == "P1"
     assert out[0].target == "/admin/users"
 
 
 def test_bfla_quiet_when_role_enforced():
     from execution.probes import bfla_probe
-    assert bfla_probe(_bfla_model(), "http://x", session=_BflaSession("secure"), auth={"token": _VALID_JWT}) == []
+    assert bfla_probe(_bfla_model(), "http://x", session=_BflaSession("secure"), auth={"token_b": _VALID_JWT}) == []
 
 
 def test_bfla_ignores_public_admin_path():
     from execution.probes import bfla_probe
-    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token": _VALID_JWT})
+    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token_b": _VALID_JWT})
     assert all(f.target != "/admin/public" for f in out)   # no-token 200 → not access-controlled
+
+
+def test_bfla_never_uses_privileged_primary_token():
+    """
+    Regression (Gitea, 2026-10-15): the primary --token is routinely a privileged
+    admin/service token. BFLA must NOT treat it as an ordinary user — doing so made
+    every admin endpoint return 2xx and fabricated 12 P1s on a perfectly secure app.
+    With only a primary token (and no self-registration available), BFLA stays silent.
+    """
+    from execution.probes import bfla_probe
+    out = bfla_probe(_bfla_model(), "http://x", session=_BflaSession("vuln"), auth={"token": _VALID_JWT})
+    assert out == []
 
 
 # ── SSTI: template expression evaluated server-side (differential control) ──────

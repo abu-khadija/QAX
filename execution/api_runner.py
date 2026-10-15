@@ -64,17 +64,40 @@ class APIRunner:
         self.session                = None
         self.auth_token: str | None = None
         self.timeout:    int        = 30
+        # Scheme/header for the `use_auth` token on each step. Default Bearer in the
+        # Authorization header; overridden per run for APIs that use another scheme
+        # (e.g. Gitea/GitHub `token <sha1>`, or an API key with scheme="" / header="X-API-Key").
+        self.auth_scheme: str       = "Bearer"
+        self.auth_header: str       = "Authorization"
+        # Variables pre-seeded into every test case's store (e.g. a user-supplied
+        # token under `token`/`token_a`/`token_b` so coverage templates that would
+        # otherwise self-register can run against an app QAX can't register into).
+        self.seed_variables: dict   = {}
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
-    def setup(self, base_url: str | None = None) -> None:
+    def setup(self, base_url: str | None = None, *,
+              auth_scheme: str | None = None, auth_header: str | None = None,
+              seed_variables: dict | None = None) -> None:
         """
         Initialise the HTTP session with JSON content-type defaults.
 
         Args:
             base_url (str | None): Override for APP_BASE_URL env var.
                                     Must include scheme, e.g. "https://api.example.com".
+            auth_scheme (str | None): Scheme prefix for the `use_auth` token
+                                    (default "Bearer"; "" sends the raw token value).
+            auth_header (str | None): Header name for the `use_auth` token
+                                    (default "Authorization").
+            seed_variables (dict | None): Variables pre-seeded into every test
+                                    case's store (e.g. supplied auth tokens).
         """
+        if auth_scheme is not None:
+            self.auth_scheme = auth_scheme
+        if auth_header:
+            self.auth_header = auth_header
+        if seed_variables:
+            self.seed_variables = dict(seed_variables)
         try:
             import requests
             self.base_url = (base_url or self.base_url).rstrip("/")
@@ -467,7 +490,7 @@ class APIRunner:
             token_var = auth if isinstance(auth, str) else "token"
             tok = variables.get(token_var)
             if tok:
-                headers["Authorization"] = f"Bearer {tok}"
+                headers[self.auth_header] = f"{self.auth_scheme} {tok}".strip()
 
         t0 = time.time()
         try:
@@ -607,7 +630,9 @@ class APIRunner:
         if api_steps:
             # Real HTTP execution, with a per-test-case variable store so steps
             # can chain (e.g. save a token on login, reuse it on the next call).
-            variables = {"random": uuid.uuid4().hex[:8]}
+            # Pre-seeded variables (e.g. a user-supplied token) are available to
+            # every step; a step that saves its own `token` still overrides them.
+            variables = {"random": uuid.uuid4().hex[:8], **self.seed_variables}
             for step in api_steps:
                 r = self.execute_api_step(step, variables)
                 step_results.append(r)
@@ -670,7 +695,7 @@ class APIRunner:
         """
         t0      = time.time()
         results = []
-        passed  = failed = errors = 0
+        passed  = failed = errors = setup = 0
 
         logger.info(
             "QAX APIRunner: executing %d test case(s) in API mode", len(test_cases)
@@ -680,23 +705,39 @@ class APIRunner:
             r = self.execute_test_case(tc)
             results.append(r)
 
+            # A coverage template that fails BEFORE its final assertion step
+            # (e.g. couldn't create the resource it was going to attack) is
+            # INCONCLUSIVE, not a real failure — the security property was never
+            # exercised. Don't render it as ❌ or count it as failed; that's the
+            # difference between "QAX proved a bug" and "QAX couldn't set the test up".
+            setup_failed = (r["status"] in ("FAIL", "ERROR")
+                            and self._is_coverage_setup_failure(tc, r))
+
             if r["status"] == "PASS":
                 passed += 1
+                icon, label = "✅", "PASS"
+            elif setup_failed:
+                setup += 1
+                icon, label = "◌", "SETUP"
             elif r["status"] == "FAIL":
                 failed += 1
+                icon, label = "❌", "FAIL"
             else:
                 errors += 1
+                icon, label = "❌", r["status"]
 
-            icon = "✅" if r["status"] == "PASS" else "❌"
-            print(f"  {icon} [{r['status']}] {r['title'][:55]}")
+            print(f"  {icon} [{label}] {r['title'][:55]}")
 
-            if stop_on_fail and r["status"] == "FAIL":
+            if stop_on_fail and r["status"] == "FAIL" and not setup_failed:
                 logger.info("QAX APIRunner: stopping batch on first FAIL")
                 break
 
         total    = len(test_cases)
         duration = round(time.time() - t0, 2)
-        rate     = round(passed / total * 100 if total else 0, 1)
+        # Inconclusive (setup-failed) tests don't count toward the pass rate —
+        # they neither proved nor disproved the property.
+        scored   = passed + failed + errors
+        rate     = round(passed / scored * 100 if scored else 0, 1)
 
         logger.info(
             "QAX APIRunner: batch done — %d passed, %d failed in %.1fs",
@@ -708,8 +749,27 @@ class APIRunner:
             "passed":         passed,
             "failed":         failed,
             "errors":         errors,
+            "setup":          setup,
             "pass_rate":      rate,
             "duration_total": duration,
             "results":        results,
             "mode":           "api",
         }
+
+    @staticmethod
+    def _is_coverage_setup_failure(test_case: dict, result: dict) -> bool:
+        """
+        True when a coverage-template test failed at a SETUP step rather than at
+        its final assertion — the security property was never actually exercised,
+        so it is inconclusive, not a proven failure. Mirrors the guard in
+        OrchestratorService._confirmed_from_templates so display and verdict agree.
+        """
+        if test_case.get("attack") != "coverage-template":
+            return False
+        steps = test_case.get("api_steps") or []
+        if not steps:
+            return False
+        last_no = steps[-1].get("step_number")
+        fstep = next((s for s in (result.get("steps") or [])
+                      if s.get("status") in ("FAIL", "ERROR")), None)
+        return bool(fstep and fstep.get("step_number") != last_no)

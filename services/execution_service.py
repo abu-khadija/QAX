@@ -59,6 +59,7 @@ class ExecutionService:
         base_url: str | None = None,
         headless: bool = True,
         stop_on_fail: bool = False,
+        auth: dict | None = None,
         progress: ProgressReporter | None = None,
     ) -> ExecutionResult:
         """
@@ -72,6 +73,10 @@ class ExecutionService:
                 project config / test steps when not given here.
             headless (bool): Run the browser without a window (UI mode).
             stop_on_fail (bool): Stop after the first FAIL/ERROR.
+            auth (dict | None): Supplied auth for api runs — {token, token_b,
+                header, scheme}. Pre-seeds token/token_a/token_b into every
+                test's variable store and sets the runner's auth scheme/header,
+                so coverage templates run against apps QAX can't self-register into.
             progress (ProgressReporter | None): Progress sink.
 
         Returns:
@@ -91,9 +96,9 @@ class ExecutionService:
 
         try:
             if run_mode == "api":
-                return self._run_api(test_cases, base_url, stop_on_fail, prog)
+                return self._run_api(test_cases, base_url, stop_on_fail, prog, auth)
             if run_mode == "both":
-                return self._run_both(test_cases, base_url, headless, stop_on_fail, prog)
+                return self._run_both(test_cases, base_url, headless, stop_on_fail, prog, auth)
             return self._run_ui(test_cases, headless, stop_on_fail, prog)
         except Exception as exc:  # never crash a face
             logger.error("ExecutionService failed (mode=%s): %s", run_mode, exc)
@@ -104,14 +109,28 @@ class ExecutionService:
 
     def _run_api(
         self, test_cases: list[dict], base_url: str | None,
-        stop_on_fail: bool, prog: ProgressReporter,
+        stop_on_fail: bool, prog: ProgressReporter, auth: dict | None = None,
     ) -> ExecutionResult:
         """Run the HTTP APIRunner against base_url. See execute() for args."""
         from execution.api_runner import APIRunner
 
         prog.emit("execute", "start", f"api run ({len(test_cases)} case(s))")
         runner = APIRunner()
-        runner.setup(base_url=base_url)
+        scheme = header = None
+        seed: dict = {}
+        if auth:
+            scheme = auth.get("scheme")
+            header = auth.get("header")
+            # One supplied identity seeds `token` and `token_a`; a second seeds
+            # `token_b` (the userB side of an IDOR/ownership check).
+            tok = auth.get("token")
+            if tok:
+                seed["token"] = tok
+                seed["token_a"] = tok
+            if auth.get("token_b"):
+                seed["token_b"] = auth["token_b"]
+        runner.setup(base_url=base_url, auth_scheme=scheme, auth_header=header,
+                     seed_variables=seed)
         try:
             batch = runner.execute_batch(test_cases, stop_on_fail=stop_on_fail)
         finally:
@@ -166,10 +185,10 @@ class ExecutionService:
 
     def _run_both(
         self, test_cases: list[dict], base_url: str | None, headless: bool,
-        stop_on_fail: bool, prog: ProgressReporter,
+        stop_on_fail: bool, prog: ProgressReporter, auth: dict | None = None,
     ) -> ExecutionResult:
         """Run API then UI and combine the two batch results."""
-        api = self._run_api(test_cases, base_url, stop_on_fail, prog)
+        api = self._run_api(test_cases, base_url, stop_on_fail, prog, auth)
         ui = self._run_ui(test_cases, headless, stop_on_fail, prog)
         combined = {
             "api": api.raw,

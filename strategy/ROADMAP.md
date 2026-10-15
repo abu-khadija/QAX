@@ -158,8 +158,18 @@ Overlapping Phase-2/3 items are absorbed here.
       auth_explicit). Final: 0 confirmed, 0 FP, 1 legit P3 (no CSP) — QAX stays quiet
       on a well-written app. Second case study DONE: a spec-less MIT Go/Gin RealWorld backend
       (strategy/CASE_STUDY_REALWORLD_GO.md) — 0 confirmed, 0 FP, 1 P3; drove a wider
-      spec-less discovery (B5 now probes /api/<resource>). **B4 bar met: 2 real apps,
-      2 stacks, 0 false positives on both.**
+      spec-less discovery (B5 now probes /api/<resource>). **Third case study DONE
+      (2026-10-15): Gitea 28.1.0** (MIT, Go, SQLite, 537 ops, token-only auth,
+      privilege-tiered admin API — `strategy/CASE_STUDY_REALWORLD_GITEA.md`). First
+      LARGE, token-authed, privilege-tiered real app. Final **0 FP + 2 real findings**
+      (host-header injection P2, CSP P3, both hand-verified). Drove 5 fixes: Gitea
+      spec-path discovery; **G1** supplied `--token`/`--token-b` now flow into the
+      coverage layer (was silently self-registering → no-op on token-only APIs);
+      **a 12× P1 BFLA false-positive cascade** (BFLA was using the privileged primary
+      token as its "ordinary user") — now uses a provably-ordinary identity only;
+      **G2** setup-failed coverage tests render `[SETUP]` not ❌FAIL; **G3** validation
+      asserts only spec-`required` fields. **B4 bar exceeded: 3 real apps, 3 stacks,
+      0 false positives on all three.**
 - [ ] **B4-orig — no evidence on messy, real, non-cherry-picked apps.** Risk: all proof
       is on small/known-vulnerable or seeded targets. Task: run QAX on 2–3 large,
       real OSS apps we did NOT pick for being vulnerable; publish honest scorecards

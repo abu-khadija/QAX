@@ -48,6 +48,27 @@ def _create_field(model, create_path: str) -> str:
     return "title"
 
 
+def _required_create_field(endpoint: dict, model, create_path: str) -> str | None:
+    """
+    The REQUIRED field to send empty for a validation test, or None to skip.
+
+    When the endpoint carries a `required_fields` list (spec-grounded), pick a
+    required one (prefer a title/name-like field); an empty list means the spec
+    marks nothing required → return None (don't assert). When the key is absent
+    (source-only model with no spec), fall back to the first create field so
+    those apps still get a validation test.
+    """
+    if "required_fields" in endpoint:
+        req = field_names(endpoint.get("required_fields"))
+        if not req:
+            return None
+        for pref in ("title", "name", "label", "text"):
+            if pref in req:
+                return pref
+        return req[0]
+    return _create_field(model, create_path)
+
+
 def _auth_steps(recipe: dict, model, tag: str, token_var: str, start: int) -> list[dict]:
     """Register + login one user, saving their token under `token_var`."""
     from core.auth_recipe import register_body
@@ -117,10 +138,15 @@ def auth_bypass_templates(model, recipe: dict | None = None, cap: int = 8) -> li
     return out
 
 
-def idor_templates(model, recipe: dict | None = None, cap: int = 6) -> list[dict]:
+def idor_templates(model, recipe: dict | None = None, cap: int = 6,
+                   *, supplied: bool = False) -> list[dict]:
     """
     Two-user tests: userB must not reach a resource userA created. One per
     single-resource protected endpoint (GET/PUT/DELETE/PATCH with a path param).
+
+    When ``supplied`` is True the caller pre-seeds token_a/token_b, so no
+    register→login preamble is emitted — the create+attack run directly with
+    the seeded identities (lets this layer work on apps QAX can't register into).
     """
     recipe = recipe or derive_auth_recipe(model)
     owned = [e for e in getattr(model, "endpoints", [])
@@ -134,13 +160,17 @@ def idor_templates(model, recipe: dict | None = None, cap: int = 6) -> list[dict
         collection = _collection_of(path)
         create_field = _create_field(model, collection)
 
-        steps = _auth_steps(recipe, model, "a", "token_a", 1) + _auth_steps(recipe, model, "b", "token_b", 3)
+        if supplied:
+            steps, n = [], 1
+        else:
+            steps = _auth_steps(recipe, model, "a", "token_a", 1) + _auth_steps(recipe, model, "b", "token_b", 3)
+            n = 5
         # userA creates a resource
-        steps.append({"step_number": 5, "method": "POST", "path": collection,
+        steps.append({"step_number": n, "method": "POST", "path": collection,
                       "body": {create_field: "owned by A"}, "expected_status": [200, 201],
                       "use_auth": "token_a", "save": {"rid": "id"}})
         # userB attacks it — the secure response is 403 or 404, never 2xx
-        attack = {"step_number": 6, "method": method,
+        attack = {"step_number": n + 1, "method": method,
                   "path": path.replace("{" + _param_name(path) + "}", "{{rid}}") if _param_name(path) else path,
                   "expected_status": [403, 404], "use_auth": "token_b"}
         if method in ("PUT", "PATCH"):
@@ -154,8 +184,20 @@ def idor_templates(model, recipe: dict | None = None, cap: int = 6) -> list[dict
     return out
 
 
-def validation_templates(model, recipe: dict | None = None, cap: int = 6) -> list[dict]:
-    """One test per create endpoint: an empty required field must be rejected."""
+def validation_templates(model, recipe: dict | None = None, cap: int = 6,
+                         *, supplied: bool = False) -> list[dict]:
+    """
+    One test per create endpoint: an empty REQUIRED field must be rejected.
+
+    Only a field the spec marks required is asserted — a spec that lists its
+    request fields but marks this one optional (e.g. `description`) is skipped,
+    so we don't cry "missing validation" on a field the API legitimately
+    accepts empty. When the model carries no required-field info (source-only,
+    no spec), the first create field is used as before.
+
+    When ``supplied`` is True the caller pre-seeds `token`, so no register→login
+    preamble is emitted for auth'd creates — the POST runs with the seeded token.
+    """
     recipe = recipe or derive_auth_recipe(model)
     creates = [e for e in getattr(model, "endpoints", [])
                if isinstance(e, dict) and str(e.get("method", "")).upper() == "POST"
@@ -164,18 +206,23 @@ def validation_templates(model, recipe: dict | None = None, cap: int = 6) -> lis
     out = []
     for e in creates[:cap]:
         path = str(e.get("path", ""))
-        create_field = _create_field(model, path)
+        create_field = _required_create_field(e, model, path)
+        if create_field is None:
+            continue  # no required field to assert on — skip rather than cry wolf
         # Only register+login when the create endpoint actually requires auth.
         # A no-auth app (or a public create) has no login flow — prepending one
         # 404s at setup and the validation assertion never runs. Post directly then.
-        if e.get("auth_required"):
+        if e.get("auth_required") and not supplied:
             steps = _auth_steps(recipe, model, "v", "token", 1)
             steps.append({"step_number": 3, "method": "POST", "path": path,
                           "body": {create_field: ""}, "expected_status": [422, 400],
                           "use_auth": "token"})
         else:
-            steps = [{"step_number": 1, "method": "POST", "path": path,
-                      "body": {create_field: ""}, "expected_status": [422, 400]}]
+            step = {"step_number": 1, "method": "POST", "path": path,
+                    "body": {create_field: ""}, "expected_status": [422, 400]}
+            if e.get("auth_required"):   # supplied: use the seeded token
+                step["use_auth"] = "token"
+            steps = [step]
         out.append({
             "test_case_id": f"COV-VAL-{len(out)+1:04d}",
             "title": f"Coverage: POST {path} rejects empty '{create_field}'",
@@ -190,9 +237,16 @@ def _param_name(path: str) -> str:
     return m.group(1) if m else ""
 
 
-def all_templates(model, recipe: dict | None = None) -> dict:
+def all_templates(model, recipe: dict | None = None, *, supplied: bool = False) -> dict:
     """
     Build every deterministic coverage template, grouped by goal.
+
+    Args:
+        supplied: True when the caller pre-seeds auth tokens into execution
+            (token/token_a/token_b). The templates then skip their own
+            register→login preamble and rely on the seeded tokens, so the
+            authenticated coverage layer runs against apps QAX can't
+            self-register into (external IdP, token-only APIs like Gitea).
 
     Returns:
         {goal: [test_case, ...]} for the goals that apply to this app.
@@ -200,7 +254,7 @@ def all_templates(model, recipe: dict | None = None) -> dict:
     recipe = recipe or derive_auth_recipe(model)
     groups = {
         "auth-bypass": auth_bypass_templates(model, recipe),
-        "broken-authz": idor_templates(model, recipe),
-        "validation": validation_templates(model, recipe),
+        "broken-authz": idor_templates(model, recipe, supplied=supplied),
+        "validation": validation_templates(model, recipe, supplied=supplied),
     }
     return {g: tests for g, tests in groups.items() if tests}

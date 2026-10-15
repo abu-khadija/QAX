@@ -277,8 +277,17 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
     def is2xx(c) -> bool:
         return isinstance(c, int) and 200 <= c < 300
 
-    token = _resolve_token(sess, base, recipe, model,
-                           f"bfla_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+    # BFLA's whole control rests on the token belonging to an ORDINARY user.
+    # The primary supplied --token is routinely a privileged/admin/service token
+    # (the one a user hands QAX to "let it in"), so using it would make every
+    # admin endpoint return 2xx and fabricate a P1 on a perfectly secure app.
+    # Use a PROVABLY-ordinary identity only: a freshly self-registered user
+    # (ordinary by construction), else the documented secondary token_b (userB,
+    # the lower-privilege user by convention). NEVER the primary supplied token.
+    token = _auth_token(sess, base, recipe, model,
+                        f"bfla_{uuid.uuid4().hex[:8]}@example.com")
+    if not token:
+        token = (auth or {}).get("token_b")
     if not token:
         return out
 

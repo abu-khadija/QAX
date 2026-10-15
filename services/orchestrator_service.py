@@ -248,7 +248,7 @@ class OrchestratorService:
             prog.emit("orchestrate", "info", "quick scan — probes + deterministic coverage only")
 
         # 5) Coverage loop: check the high-value goals; fill gaps with templates.
-        coverage = self._measure_and_fill(model, tests, prog)
+        coverage = self._measure_and_fill(model, tests, prog, auth=auth)
         # Honesty: record which routers got functional generation and which were
         # skipped for budget, so the report never implies a router was tested when
         # it wasn't. Deep mode only (quick scan does no functional generation).
@@ -272,7 +272,7 @@ class OrchestratorService:
                       "(no api_steps) — nothing will run.")
         prog.emit("orchestrate", "step", f"executing {len(executable)} test(s)")
         execution = ExecutionService(self.context).execute(
-            executable, mode="api", base_url=base_url)
+            executable, mode="api", base_url=base_url, auth=auth)
         investigation = None
         # The deterministic coverage templates carry their own verdict
         # (_confirmed_from_templates, with calibrated severities). Don't let the LLM
@@ -340,7 +340,8 @@ class OrchestratorService:
                               f"round 2 — {len(repaired)} setup-repaired + "
                               f"{len(round2_tests) - len(repaired)} re-attack test(s)")
                     exe2 = ExecutionService(self.context).execute(
-                        [t for t in round2_tests if t.get("api_steps")], mode="api", base_url=base_url)
+                        [t for t in round2_tests if t.get("api_steps")], mode="api",
+                        base_url=base_url, auth=auth)
                     gen2 = [t for t in round2_tests if t.get("attack") != "coverage-template"]
                     crit2 = CriticService(self.context).review(exe2, gen2)
                     inv2 = InvestigatorService(self.context).investigate(crit2, gen2, base_url=base_url)
@@ -398,10 +399,14 @@ class OrchestratorService:
     # ── Coverage ──────────────────────────────────────────────────────────────
 
     def _measure_and_fill(self, model: AppModel, tests: list[dict],
-                          prog: ProgressReporter) -> dict:
+                          prog: ProgressReporter, auth: dict | None = None) -> dict:
         """
         Derive high-value goals from the model, check them against the generated
         tests, and inject a deterministic template for any critical gap.
+
+        When ``auth`` carries a supplied token, the authenticated coverage
+        templates skip their own register→login preamble and run with the
+        seeded token(s) — so this layer works on apps QAX can't register into.
         """
         coverage: dict = {}
 
@@ -423,7 +428,8 @@ class OrchestratorService:
         # so they're covered every run regardless of what generation happened to do.
         from core.auth_recipe import derive_auth_recipe
         from services.coverage_goals import all_templates
-        for goal, tpls in all_templates(model, derive_auth_recipe(model)).items():
+        supplied = bool(auth and (auth.get("token") or auth.get("token_b")))
+        for goal, tpls in all_templates(model, derive_auth_recipe(model), supplied=supplied).items():
             tests.extend(tpls)
             coverage[goal] = "template"
             prog.emit("orchestrate", "info",

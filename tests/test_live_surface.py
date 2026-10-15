@@ -139,6 +139,37 @@ def test_endpoints_from_spec_no_base_unchanged():
     assert [e["path"] for e in endpoints_from_spec(spec)] == ["/books/v1"]
 
 
+def test_endpoints_record_required_fields_swagger2():
+    # Swagger 2 body param: `required` on the schema drives validation coverage.
+    spec = {
+        "swagger": "2.0", "basePath": "/api/v1",
+        "paths": {"/orgs": {"post": {"parameters": [
+            {"in": "body", "name": "body", "schema": {
+                "type": "object",
+                "properties": {"username": {"type": "string"},
+                               "description": {"type": "string"}},
+                "required": ["username"]}}]}}},
+    }
+    e = endpoints_from_spec(spec)[0]
+    assert set(e["request_fields"]) == {"username", "description"}
+    assert e["required_fields"] == ["username"]
+
+
+def test_endpoints_required_fields_empty_when_none_required():
+    spec = {"openapi": "3.0.0", "paths": {"/markdown": {"post": {
+        "requestBody": {"content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {"Context": {"type": "string"}}}}}}}}}}
+    e = endpoints_from_spec(spec)[0]
+    assert e["request_fields"] == ["Context"] and e["required_fields"] == []
+
+
+def test_gitea_spec_path_is_discovered():
+    # Gitea/Gogs serve their Swagger 2.0 spec at /swagger.v1.json.
+    from services.live_surface import _SPEC_PATHS
+    assert "/swagger.v1.json" in _SPEC_PATHS
+
+
 # ── B5: spec-less discovery of live common paths ────────────────────────────────
 
 class _DiscoverySession:
