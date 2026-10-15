@@ -462,6 +462,11 @@ class OrchestratorResult:
         return self.error is None
 
     @property
+    def unstable_findings(self) -> list:
+        """Probe hits a re-verify run could NOT reproduce in every pass — flaky, so never confirmed."""
+        return [n for n in (self.not_tested or []) if n.get("kind") == "unstable"]
+
+    @property
     def coverage_gaps(self) -> list:
         """The not-tested entries that are REAL gaps (a missing prerequisite), not n/a."""
         return [n for n in (self.not_tested or []) if n.get("kind") == "missing-prerequisite"]
@@ -569,6 +574,9 @@ class ProbeFinding:
     severity: str = "P3"
     evidence: str = ""
     target: str = ""
+    # [hits, passes] when a re-verify run MEASURED reproducibility (KB: "Reproduced X/X");
+    # None means it was observed once and nothing more is claimed.
+    reproduced: list | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

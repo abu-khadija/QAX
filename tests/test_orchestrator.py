@@ -646,3 +646,91 @@ def test_expects_success_parses_ints_strings_and_lists():
     f = OrchestratorService._expects_success
     assert f({"expected_status": 201}) and f({"expected_status": "200"}) and f({"expected_status": [200, 204]})
     assert not f({"expected_status": [200, 404]}) and not f({"expected_status": 401}) and not f({})
+
+
+# ── --reverify: confirm only what reproduces in EVERY pass (measured X/X) ──────────
+
+def _pf(probe="host-header-injection", target="/a", title="T", exploited=True):
+    from services.results import ProbeFinding
+    return ProbeFinding(probe=probe, title=title, exploited=exploited, target=target, severity="P2")
+
+
+class _FakeProbeService:
+    """Returns a scripted ProbeResult per call (pass 2, 3, …). Counts calls."""
+    script: list = []
+    calls = 0
+
+    def __init__(self, *_a, **_k):
+        pass
+
+    def run(self, *_a, **_k):
+        i = type(self).calls
+        type(self).calls += 1
+        item = type(self).script[i]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def _svc():
+    from services.context import QAXContext
+    return OrchestratorService(QAXContext(anthropic_key="k", project=""))
+
+
+def _first(findings, **kw):
+    from services.results import ProbeResult
+    return ProbeResult(findings=findings, **kw)
+
+
+def _reverify(monkeypatch, first, later, passes_extra):
+    import services.probe_service as PS
+    from services.progress import NullProgressReporter
+    _FakeProbeService.script, _FakeProbeService.calls = later, 0
+    monkeypatch.setattr(PS, "ProbeService", _FakeProbeService)
+    return _svc()._reverify(first, AppModel(root="/x"), "http://x", None, passes_extra, NullProgressReporter())
+
+
+def test_reverify_stamps_a_measured_reproducibility_when_it_fires_every_pass(monkeypatch):
+    first = _first([_pf()])
+    out = _reverify(monkeypatch, first, [_first([_pf()]), _first([_pf()])], 2)
+    assert [f.reproduced for f in out.findings] == [[3, 3]]
+    assert out.skipped == []                                   # nothing unstable
+
+
+def test_reverify_drops_a_flaky_finding_and_reports_it_as_unstable(monkeypatch):
+    first = _first([_pf(title="stable"), _pf(probe="long-input", title="flaky")])
+    out = _reverify(monkeypatch, first, [_first([_pf(title="stable")]), _first([_pf(title="stable")])], 2)
+    assert [f.title for f in out.findings] == ["stable"]
+    unstable = [n for n in out.skipped if n["kind"] == "unstable"]
+    assert len(unstable) == 1 and unstable[0]["probe"] == "long-input"
+    assert "fired in 1 of 3 passes" in unstable[0]["reason"]
+
+
+def test_reverify_leaves_non_exploited_findings_alone(monkeypatch):
+    first = _first([_pf(), _pf(probe="x", title="attempted", exploited=False)])
+    out = _reverify(monkeypatch, first, [_first([_pf()])], 1)
+    assert {f.title for f in out.findings} == {"T", "attempted"}
+
+
+def test_reverify_failure_keeps_the_first_pass(monkeypatch):
+    first = _first([_pf()])
+    out = _reverify(monkeypatch, first, [RuntimeError("boom")], 1)
+    assert out is first and first.findings[0].reproduced is None      # nothing claimed that wasn't measured
+
+
+def test_reverify_merges_footprint_and_dedupes_ledgers(monkeypatch):
+    gap = {"probe": "bola", "reason": "r", "kind": "missing-prerequisite"}
+    left = {"collection": "/c", "key": "k", "why": "w"}
+    first = _first([_pf()], created_records=3, cleaned_records=2, skipped=[gap], leftover=[left])
+    out = _reverify(monkeypatch, first, [_first([_pf()], created_records=3, cleaned_records=3,
+                                               skipped=[gap], leftover=[left])], 1)
+    assert (out.created_records, out.cleaned_records) == (6, 5)
+    assert out.skipped.count(gap) == 1 and out.leftover == [left]
+
+
+def test_unify_carries_the_measured_number_into_the_confirmed_finding():
+    f = _pf(); f.reproduced = [3, 3]
+    from services.results import ProbeResult
+    confirmed = OrchestratorService._unify(None, ProbeResult(findings=[f]))
+    assert confirmed[0]["reproduced"] == [3, 3]
+    assert "reproduced" not in OrchestratorService._unify(None, ProbeResult(findings=[_pf()]))[0]

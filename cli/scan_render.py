@@ -28,7 +28,8 @@ def render_scan_result(result) -> str:
         lines.append(f"\n  🐞 CONFIRMED (deterministic, 0-FP): {len(det)}   ·   "
                      f"AI leads (may vary): {len(ai)}")
         for b in det:
-            lines.append(f"    [{b.get('severity') or 'P?'}] {b.get('title', '')}  ({b.get('source', '')})")
+            repro = f"  ⟨reproduced {b['reproduced'][0]}/{b['reproduced'][1]}⟩" if b.get("reproduced") else ""
+            lines.append(f"    [{b.get('severity') or 'P?'}] {b.get('title', '')}  ({b.get('source', '')}){repro}")
             if b.get("evidence"):
                 lines.append(f"        {str(b['evidence'])[:150]}")
         for b in ai:
@@ -49,6 +50,13 @@ def render_scan_result(result) -> str:
         lines.append("\n  ⚠ NOT TESTED — these checks could not run (a quiet result here means "
                      "\"unknown\", not \"safe\"):")
         lines.extend(_render_gaps(gaps))
+
+    unstable = list(getattr(result, "unstable_findings", []) or [])
+    if unstable:
+        lines.append(f"\n  ⚠ UNSTABLE — {len(unstable)} probe hit(s) did NOT reproduce on re-verification, so "
+                     f"they are NOT confirmed:")
+        for u in unstable:
+            lines.append(f"    · {u.get('probe')} {u.get('target')} — {u.get('reason')}")
 
     left = list(getattr(result, "left_on_target", []) or [])
     if left:

@@ -2135,6 +2135,10 @@ def run_scan_command() -> None:
                         help="Header name for the token (default: Authorization).")
     parser.add_argument("--auth-scheme", default="Bearer",
                         help="Scheme prefix for the token (default: Bearer; use '' for a raw value / API key).")
+    parser.add_argument("--reverify", type=int, default=0, metavar="N",
+                        help="Re-run the probes N more times and CONFIRM only findings that fire "
+                             "in every pass (the rest are reported as unstable). Gives the bug "
+                             "report a measured 'Reproduced N+1/N+1'. Default 0 (off); 1-2 is typical.")
     parser.add_argument("--tour", action="store_true",
                         help="Also tour the live UI in a real browser and fold what it sees "
                              "(uncaught JS errors, failed API calls) into the findings. Needs "
@@ -2206,6 +2210,7 @@ def run_scan_command() -> None:
         auth=_auth,
         tour=args.tour,
         visual_baseline=args.visual_baseline,
+        reverify=max(0, int(args.reverify or 0)),
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

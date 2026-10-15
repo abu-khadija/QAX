@@ -72,3 +72,11 @@ def test_render_shows_evidence_attachment_status():
     assert "evidence attached" in render_results(live_ok, dry_run=False, project="P")
     assert "evidence NOT attached" in render_results(live_no, dry_run=False, project="P")
     assert "attach evidence-x.txt" in render_results(dry, dry_run=True, project="P")
+
+
+def test_measured_reproducibility_reaches_the_ticket():
+    from core.jira_bugs import finding_to_bug
+    from cli.file_findings import enrich
+    b = enrich({"title": "t", "probe": "host-header-injection", "reproduced": [3, 3]})
+    bug = finding_to_bug(b, 0, environment="E", reproduced=tuple(b["reproduced"]))
+    assert "Reproduced 3/3 attempts on E." in bug["description"] and "Not yet re-run" not in bug["description"]

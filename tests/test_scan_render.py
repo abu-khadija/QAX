@@ -74,3 +74,17 @@ def test_render_caps_a_long_leftover_list_and_is_silent_when_nothing_is_left():
     many = [{"collection": "/c", "key": f"k{i}", "why": "w"} for i in range(20)]
     assert "and 8 more" in render_scan_result(OrchestratorResult(left_on_target=many))
     assert "LEFT ON THE TARGET" not in render_scan_result(OrchestratorResult())
+
+
+def test_render_shows_measured_reproducibility_and_the_unstable_section():
+    from cli.scan_render import render_scan_result
+    from services.results import OrchestratorResult
+    r = OrchestratorResult(
+        confirmed=[{"source": "probe", "probe": "bola", "severity": "P1", "title": "BOLA /a", "target": "/a",
+                    "reproduced": [3, 3]}],
+        not_tested=[{"probe": "long-input", "kind": "unstable", "target": "/t", "title": "x",
+                     "reason": "fired in 1 of 3 passes — not reproducible"}])
+    text = render_scan_result(r)
+    assert "⟨reproduced 3/3⟩" in text
+    assert "UNSTABLE" in text and "long-input /t — fired in 1 of 3 passes" in text
+    assert "NOT TESTED" not in text            # an unstable hit is not a coverage gap

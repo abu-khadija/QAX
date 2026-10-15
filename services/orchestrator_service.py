@@ -64,9 +64,13 @@ class OrchestratorService:
         tour_login: dict | None = None,
         visual_baseline: str | None = None,
         progress: ProgressReporter | None = None,
+        reverify: int = 0,
     ) -> OrchestratorResult:
         """
         Run the autonomous pipeline over a repo against a live app.
+
+        `reverify` (default 0 = off): re-run the probe battery this many EXTRA times and
+        confirm only findings that fire in every pass; the rest are reported as unstable.
 
         Args:
             repo_path (str): Repository root to model and test.
@@ -159,6 +163,8 @@ class OrchestratorService:
 
         # 3) Prove the exploits HTTP steps can't express (JWT forgery, crashes) — free.
         probe_result = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog)
+        if reverify > 0 and probe_result.exploited:
+            probe_result = self._reverify(probe_result, model, base_url, auth, reverify, prog)
 
         # 3b) Tour the live UI (browser-driven) and turn what the browser sees —
         #     uncaught JS errors, failed API calls — into findings. Needs Playwright
@@ -403,6 +409,64 @@ class OrchestratorService:
                       "SILENT-GAP in: " + ", ".join(silent) + " — a stage produced nothing it should have.")
         prog.emit("orchestrate", "ok", result.summary())
         return result
+
+    # ── Re-verify ("reproduce 2/2", every anomaly gets a clean rerun) ──
+
+    def _reverify(self, first, model, base_url: str, auth, extra_passes: int, prog):
+        """
+        Re-run the probe battery `extra_passes` more times and keep as CONFIRMED only the
+        findings that fire in EVERY pass (stamped `reproduced=[hits, passes]` — a MEASURED
+        X/X for the bug report). A finding that fires in some passes but not all is flaky:
+        it is dropped from the confirmed list and recorded as an `unstable` entry, so a
+        timing-dependent or environment-dependent hit never reaches a ticket. Only
+        first-pass findings are examined (nothing to verify when pass 1 was clean).
+        Never raises; on failure the first pass stands.
+        """
+        from services.probe_service import ProbeService
+        from services.results import ProbeResult
+        key = lambda f: (f.probe, f.target, f.title)
+        passes = 1 + extra_passes
+        seen = {key(f): 1 for f in first.exploited}
+        results = [first]
+        try:
+            for n in range(extra_passes):
+                prog.emit("orchestrate", "step", f"re-verifying probe findings — pass {n + 2} of {passes}")
+                r = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog)
+                results.append(r)
+                for k in {key(f) for f in r.exploited}:
+                    if k in seen:
+                        seen[k] += 1
+        except Exception as exc:
+            logger.warning("re-verify failed (the first pass stands): %s", exc)
+            return first
+        stable, unstable = [], []
+        for f in first.findings:
+            if not f.exploited:
+                stable.append(f)
+                continue
+            hits = seen.get(key(f), 1)
+            if hits >= passes:
+                f.reproduced = [hits, passes]
+                stable.append(f)
+            else:
+                unstable.append({"probe": f.probe, "kind": "unstable", "target": f.target, "title": f.title,
+                                 "reason": f"fired in {hits} of {passes} passes — not reproducible, so not "
+                                           f"confirmed (flaky or environment-dependent)"})
+        for u in unstable:
+            prog.emit("orchestrate", "warn", f"UNSTABLE — {u['probe']} {u['target']}: {u['reason']}")
+        skipped: list = []
+        for r in results:
+            for sk in r.skipped:
+                if sk not in skipped:
+                    skipped.append(sk)
+        leftover: list = []
+        for r in results:
+            for it in r.leftover:
+                if it not in leftover:
+                    leftover.append(it)
+        return ProbeResult(findings=stable, created_records=sum(r.created_records for r in results),
+                           cleaned_records=sum(r.cleaned_records for r in results),
+                           skipped=skipped + unstable, leftover=leftover)
 
     # ── Coverage ──────────────────────────────────────────────────────────────
 
@@ -1263,5 +1327,6 @@ class OrchestratorService:
             confirmed.append({
                 "title": getattr(f, "title", ""), "severity": getattr(f, "severity", ""),
                 "evidence": getattr(f, "evidence", ""), "source": "probe",
-                "probe": getattr(f, "probe", ""), "target": getattr(f, "target", "")})
+                "probe": getattr(f, "probe", ""), "target": getattr(f, "target", ""),
+                **({"reproduced": list(f.reproduced)} if getattr(f, "reproduced", None) else {})})
         return confirmed
