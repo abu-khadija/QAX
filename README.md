@@ -58,7 +58,7 @@ python main.py verify-fixes --from fresh_scan.json      # 3. later: are they act
 ## How we know it works
 
 `make eval` boots a golden vulnerable app and a fixed copy of it: every planted bug must be
-caught (14/14), nothing may be flagged on the fixed copy, two scans must agree, and a quick scan
+caught (32/32), nothing may be flagged on the fixed copy, two scans must agree, and a quick scan
 must work with no API key. Five real open-source apps (Node, Go, Java, Django, Gitea) have been
 scanned with 0 false alarms — QAX raised false alarms on two of them first; the case studies in
 `strategy/` say so and show the fixes.
