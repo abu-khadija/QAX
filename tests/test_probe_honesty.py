@@ -50,29 +50,39 @@ def _gaps(sess, probe):
     return [s for s in sess._qax_skips if s["probe"] == probe]
 
 
-# probe-id, function, endpoint a candidate-less app lacks, endpoint that gives it work
+# probe-id -> (function, an endpoint that gives it work, has_na, needs_token)
+#   has_na:       the probe says "not applicable" when the app has nothing for it (cors / open-redirect
+#                 always try "/" so they never do)
+#   needs_token:  the probe sends authenticated requests, so a missing token is a gap
 _CASES = {
-    "host-header-injection": (P.host_header_injection_probe, {"method": "GET", "path": "/home"}),
-    "xxe": (P.xxe_probe, {"method": "POST", "path": "/import"}),
-    "file-upload": (P.file_upload_probe, {"method": "POST", "path": "/upload", "request_fields": ["file"]}),
-    "ssti": (P.ssti_probe, {"method": "GET", "path": "/greet", "query_params": ["name"]}),
-    "xss": (P.xss_probe, {"method": "GET", "path": "/greet", "query_params": ["name"]}),
+    "host-header-injection": (P.host_header_injection_probe, {"method": "GET", "path": "/home"}, True, True),
+    "xxe": (P.xxe_probe, {"method": "POST", "path": "/import"}, True, True),
+    "file-upload": (P.file_upload_probe, {"method": "POST", "path": "/upload", "request_fields": ["file"]}, True, True),
+    "ssti": (P.ssti_probe, {"method": "GET", "path": "/greet", "query_params": ["name"]}, True, True),
+    "xss": (P.xss_probe, {"method": "GET", "path": "/greet", "query_params": ["name"]}, True, True),
+    "cors": (P.cors_probe, {"method": "GET", "path": "/home"}, False, False),
+    "open-redirect": (P.open_redirect_probe, {"method": "GET", "path": "/home"}, False, False),
+    "injection": (P.injection_probe, {"method": "GET", "path": "/search", "query_params": ["q"]}, True, True),
+    "sqli": (P.sqli_probe, {"method": "GET", "path": "/users/{id}"}, True, True),
+    "nosql": (P.nosql_probe, {"method": "POST", "path": "/find", "request_fields": ["name"]}, True, True),
 }
 _IDS = list(_CASES)
+_NA = [k for k, v in _CASES.items() if v[2]]
+_TOK = [k for k, v in _CASES.items() if v[3]]
 
 
-@pytest.mark.parametrize("probe", _IDS)
+@pytest.mark.parametrize("probe", _NA)
 def test_nothing_to_test_is_reported_as_not_applicable_not_a_gap(probe):
-    fn, _ = _CASES[probe]
+    fn = _CASES[probe][0]
     s = _Quiet()
     assert fn(_m({"method": "DELETE", "path": "/x"}), "http://x", session=s) == []
     g = _gaps(s, probe)
     assert len(g) == 1 and g[0]["kind"] == "not-applicable"
 
 
-@pytest.mark.parametrize("probe", _IDS)
+@pytest.mark.parametrize("probe", _TOK)
 def test_an_endpoint_needing_auth_without_a_token_is_a_missing_prerequisite(probe):
-    fn, ep = _CASES[probe]
+    fn, ep = _CASES[probe][:2]
     s = _Quiet()
     fn(_m({**ep, "auth_required": True}), "http://x", session=s)
     g = [x for x in _gaps(s, probe) if x["kind"] == "missing-prerequisite" and x.get("needs") == "auth-token"]
@@ -81,19 +91,40 @@ def test_an_endpoint_needing_auth_without_a_token_is_a_missing_prerequisite(prob
 
 @pytest.mark.parametrize("probe", _IDS)
 def test_a_dead_server_is_reported_as_unreached_never_as_clean(probe):
-    fn, ep = _CASES[probe]
+    fn, ep = _CASES[probe][:2]
     s = _Dead()
     assert fn(_m(ep), "http://x", session=s) == []
-    g = [x for x in _gaps(s, probe) if "could be reached" in x["reason"]]
-    assert g and g[0]["kind"] == "missing-prerequisite"
+    g = [x for x in _gaps(s, probe) if "could be reached" in x["reason"] or "could not exercise" in x["reason"]]
+    assert g and g[0]["kind"] == "missing-prerequisite", _gaps(s, probe)
 
 
 @pytest.mark.parametrize("probe", _IDS)
 def test_a_normal_server_that_simply_answers_produces_no_gap(probe):
-    fn, ep = _CASES[probe]
+    fn, ep = _CASES[probe][:2]
     s = _Quiet()
     assert fn(_m(ep), "http://x", session=s) == []
     assert _gaps(s, probe) == []                    # reachable + nothing wrong ≠ a coverage gap
+
+
+def test_nosql_a_crashing_baseline_means_it_could_not_be_exercised():
+    class _Crashy(_Quiet):
+        def request(self, *a, **k):
+            return MagicMock(status_code=500, text="boom", headers={}, json=MagicMock(side_effect=ValueError()))
+    s = _Crashy()
+    assert P.nosql_probe(_m(_CASES["nosql"][1]), "http://x", session=s) == []
+    g = _gaps(s, "nosql")
+    assert len(g) == 1 and "benign baseline request failed" in g[0]["reason"] and g[0]["needs"] == "valid-body"
+
+
+def test_a_probe_that_finds_something_does_not_also_claim_a_gap():
+    # CORS reflecting the Origin is a finding; reachability is obviously fine → no gap entry.
+    class _Reflects(_Quiet):
+        def get(self, url, headers=None, **k):
+            r = MagicMock(status_code=200, text="", headers={"Access-Control-Allow-Origin": (headers or {}).get("Origin", "")})
+            return r
+    s = _Reflects()
+    out = P.cors_probe(_m(), "http://x", session=s)
+    assert out and out[0].probe == "cors" and _gaps(s, "cors") == []
 
 
 def test_graphql_a_dead_server_is_unreached_but_a_plain_404_is_not_a_gap():
@@ -122,5 +153,5 @@ def test_no_ledger_means_no_crash_and_no_output():
     class _Bare:
         def get(self, *a, **k): raise ConnectionError("x")
         post = request = get
-    for fn, ep in _CASES.values():
+    for fn, ep, *_ in _CASES.values():
         assert fn(_m(ep), "http://x", session=_Bare()) == []

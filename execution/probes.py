@@ -1445,9 +1445,14 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
     cands = [e for e in getattr(model, "endpoints", [])
              if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
              and "{" in str(e.get("path", ""))]
+    if not cands:
+        _no_candidates(sess, "sqli", "GET endpoint with a path parameter")
+        return out
     token = None
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"sqli_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "sqli", token)
+    reached = [0]
 
     for e in cands[:limit]:
         path = str(e.get("path", ""))
@@ -1460,6 +1465,7 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
         def send(value, _p=path, _pr=param, _h=headers):
             try:
                 r = sess.get(f"{base}{_p.replace('{' + _pr + '}', str(value))}", headers=_h, timeout=15)
+                reached[0] += 1
                 return r.status_code, r.text
             except Exception:
                 return None, ""
@@ -1468,6 +1474,8 @@ def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
                               where=f"path param '{param}'")
         if f:
             out.append(f)
+    if not out and not reached[0]:
+        _unreached(sess, "sqli", len(cands[:limit]))
     return out
 
 
@@ -1718,6 +1726,7 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
     out: list[ProbeFinding] = []
     eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
     _tok = {"v": None}
+    reached = [0]
 
     def token_for(e):
         if not e.get("auth_required"):
@@ -1725,10 +1734,18 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
         if _tok["v"] is None:
             _tok["v"] = _resolve_token(sess, base, recipe, model,
                                        f"inj_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+            _need_token(sess, "injection", _tok["v"])
         return _auth_headers(_tok["v"], auth)
 
+    q_eps = [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:limit]
+    b_eps = [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
+             and field_names(x.get("request_fields"))][:limit]
+    if not q_eps and not b_eps:
+        _no_candidates(sess, "injection", "endpoint with query parameters or a writable body")
+        return out
+
     # Query-param injection — GET only (safe to repeat).
-    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:limit]:
+    for e in q_eps:
         path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
         headers = token_for(e)
         qps = list(e.get("query_params") or [])
@@ -1738,6 +1755,7 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
                 params[_qp] = value
                 try:
                     r = sess.get(f"{base}{_p}", params=params, headers=_h, timeout=15)
+                    reached[0] += 1
                     return r.status_code, r.text
                 except Exception:
                     return None, ""
@@ -1748,8 +1766,7 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
                 out.append(f)
 
     # Body-field injection — POST/PUT/PATCH only (never DELETE).
-    for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
-              and field_names(x.get("request_fields"))][:limit]:
+    for e in b_eps:
         method = str(e.get("method", "POST")).upper()
         path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
         headers = token_for(e)
@@ -1760,6 +1777,7 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
                 body = dict(benign, **{_fld: value})
                 try:
                     r = sess.request(_m, f"{base}{_p}", json=body, headers=_h, timeout=15)
+                    reached[0] += 1
                     return r.status_code, r.text
                 except Exception:
                     return None, ""
@@ -1768,6 +1786,8 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
                                   where=f"body field '{fld}'")
             if f:
                 out.append(f)
+    if not out and not reached[0]:
+        _unreached(sess, "injection", len(q_eps) + len(b_eps))
     return out
 
 
@@ -1814,9 +1834,16 @@ def nosql_probe(model, base_url: str, *, session: requests.Session | None = None
         if _tok["v"] is None:
             _tok["v"] = _resolve_token(sess, base, recipe, model,
                                        f"nosql_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+            _need_token(sess, "nosql", _tok["v"])
         return _auth_headers(_tok["v"], auth)
 
-    for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")][:6]:
+    writes = [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")][:6]
+    if not writes:
+        _no_candidates(sess, "nosql", "write (POST/PUT/PATCH) endpoint")
+        return out
+    candidates = exercised = 0
+
+    for e in writes:
         method = str(e.get("method", "POST")).upper()
         path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
         headers = token_for(e)
@@ -1824,6 +1851,7 @@ def nosql_probe(model, base_url: str, *, session: requests.Session | None = None
         keys = list(fields) + [k for k in path_qps.get(str(e.get("path", "")), []) if k not in fields]
         if not keys:
             continue
+        candidates += 1
         others = _benign_body(fields)
         for key in keys[:3]:
             def send(value, _k=key, _h=headers, _p=path, _m=method):
@@ -1842,7 +1870,8 @@ def nosql_probe(model, base_url: str, *, session: requests.Session | None = None
 
             sb, bb = ask("qaxprobe1")
             if sb is None or sb >= 500:
-                continue
+                continue                    # the benign baseline failed → no valid comparison
+            exercised += 1
             nben = len(bb or "")
             st, bt = ask({"$ne": "qax_nomatch_zzz"})
             sf, bf = ask({"$eq": "qax_nomatch_zzz"})
@@ -1873,6 +1902,10 @@ def nosql_probe(model, base_url: str, *, session: requests.Session | None = None
                                   f"string was accepted ({sb}) — the body may feed a document query "
                                   f"(possible NoSQL injection), NOT confirmed. Reported low and separately."),
                         target=str(e.get("path", ""))))
+    if not out and candidates and not exercised:
+        _skip(sess, "nosql", f"could not exercise it: the benign baseline request failed or crashed on "
+                             f"all {candidates} candidate endpoint(s), so the operator variants had "
+                             f"nothing valid to be compared with", needs="valid-body")
     return out
 
 
@@ -2202,11 +2235,13 @@ def cors_probe(model, base_url: str, *, session: requests.Session | None = None,
             p = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
             if p and p not in targets:
                 targets.append(p)
+    reached = 0
     for path in targets[:15]:
         try:
             r = sess.get(base + path, headers={"Origin": _EVIL_ORIGIN}, timeout=15)
         except Exception:
             continue
+        reached += 1
         acao = (r.headers.get("Access-Control-Allow-Origin") or "").strip()
         acac = (r.headers.get("Access-Control-Allow-Credentials") or "").strip().lower()
         if acao == _EVIL_ORIGIN:
@@ -2224,6 +2259,8 @@ def cors_probe(model, base_url: str, *, session: requests.Session | None = None,
                                        else " to this API")),
                 target=path))
             break   # one proof is enough
+    if not out and not reached:
+        _unreached(sess, "cors", len(targets[:15]))
     return out
 
 
@@ -2779,6 +2816,7 @@ def open_redirect_probe(model, base_url: str, *, session: requests.Session | Non
             targets.append(str(e.get("path", "")))
     targets = targets[:6]
     seen_target: set = set()
+    reached = 0
     for path in targets:
         if path in seen_target:
             continue
@@ -2789,6 +2827,7 @@ def open_redirect_probe(model, base_url: str, *, session: requests.Session | Non
                 r = sess.get(url, headers={}, allow_redirects=False, timeout=15)
             except Exception:
                 continue
+            reached += 1
             if 300 <= getattr(r, "status_code", 0) < 400:
                 loc = (r.headers.get("Location") or "").strip()
                 if urlparse(loc).netloc == evil_host:
@@ -2801,6 +2840,8 @@ def open_redirect_probe(model, base_url: str, *, session: requests.Session | Non
                                   f"external host taken straight from the request parameter."),
                         target=path))
                     return out  # one proof is enough
+    if not reached:
+        _unreached(sess, "open-redirect", len(seen_target))
     return out
 
 
