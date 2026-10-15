@@ -86,7 +86,12 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 21. ✅ **Q2 — time-to-first-confirmed-finding <= 10 min — DONE 2026-10-15** (`python main.py demo`; measured ~26 s from an empty venv incl. pip install on a clean copy with no .env and no key; Docker deliberately NOT shipped — unverifiable on this machine). Original text: (one command / Docker + bundled demo target).
 22. ✅ **Q4 — GitHub Action — DONE 2026-10-15** (`ci/pr_scan.py` + `ci/github_action_scan.yml` rebuilt on the honesty rules; run for real against the golden target). Original text:: scan a preview URL, comment CONFIRMED only (+ UNSTABLE/NOT TESTED honesty).
 23. ⏸ **Q3 step 2 — confirmed finding -> runnable regression test -> Xray** (Xray half of B6 waits on the owner's trial app).
-24. **KB mining continues**: file 13 (automation deep pass), 01-03 principles/lifecycle, 06, 08-10 (see memory).
+24. ▶ **Instrument the OLDER probes' silent bail-outs** — `verify-fixes` calls a bug FIXED when its
+    probe "ran and reported no gap", but ~30 older probes still `return []` silently when their
+    own control fails (e.g. bola's create, persistence's read-back) with no ledger entry. Until each
+    reports "could not exercise" like the 5 typed probes do, FIXED is only as honest as the probe.
+    (The not-tested ledger + `_skip()` already exist; this is mechanical, probe by probe, gated.)
+25. **KB mining continues**: file 13 (automation deep pass), 01-03 principles/lifecycle, 06, 08-10 (see memory).
 Opportunistic/gated: B6 Xray half (owner), Q5 open benchmark (gated on B9 IP), B8 GTM slices, B9 IP/legal (deferred).
 
 **From the Qodo competitive study (2026-10-14, `strategy/QODO_COMPETITIVE_INTEL.md`):**
