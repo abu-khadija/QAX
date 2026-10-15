@@ -363,7 +363,7 @@ def host_header_injection_probe(model, base_url: str, *, session: requests.Sessi
         loc = str(r.headers.get("Location", ""))
         body = r.text or ""
         if marker in loc or f"//{marker}" in body or f"://{marker}" in body:
-            where = "the Location header" if marker in loc else "a URL in the response body"
+            where = "the Location header" if marker in loc else "the response body"
             out.append(ProbeFinding(
                 probe="host-header-injection",
                 title=f"Host header reflected into a URL on GET {path}",

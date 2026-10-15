@@ -2081,6 +2081,16 @@ def _find_test_case_in_output(tc_id: str) -> dict | None:
 # SCAN COMMAND — the full autonomous agent team (Orchestrator)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def run_file_findings_command() -> None:
+    """
+    Handle the 'file-findings' subcommand — file a scan's confirmed findings to
+    Jira as Bugs (dry run unless --live). Logic lives in cli/file_findings.py.
+
+    Called when sys.argv[1] == "file-findings".
+    """
+    from cli.file_findings import run as _run_file_findings
+    sys.exit(_run_file_findings(sys.argv[2:]))
+
 def run_scan_command() -> None:
     """
     Handle the 'scan' subcommand — a deep, autonomous security + QA scan.
@@ -2227,7 +2237,12 @@ def run_scan_command() -> None:
 
     if args.out:
         try:
-            Path(args.out).write_text(json.dumps(result.to_dict(), indent=2, ensure_ascii=False),
+            # Record WHAT was scanned, so a finding filed later (file-findings) can
+            # state its environment — a bug report without one is not reproducible.
+            _out = {**result.to_dict(), "target_url": args.url,
+                    "scan_mode": "quick" if args.quick else "deep",
+                    "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+            Path(args.out).write_text(json.dumps(_out, indent=2, ensure_ascii=False),
                                       encoding="utf-8")
             print(f"  Full result written to {args.out}\n")
         except Exception as exc:
@@ -2273,13 +2288,14 @@ def main() -> None:
         "ui":               run_ui_command,
         "pipeline":         run_pipeline_command,
         "scan":             run_scan_command,
+        "file-findings":    run_file_findings_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

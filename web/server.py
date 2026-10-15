@@ -251,35 +251,17 @@ def generate():
     return jsonify({"tests": cases or []})
 
 
-_SEV_TO_PRIORITY = {"P1": "critical", "P2": "high", "P3": "medium", "P4": "low"}
 _EXPORT_TARGETS = ("xray", "zephyr", "excel", "csv", "memory")
 
 
 def _finding_to_testcase(b: dict, i: int) -> dict:
-    """Map a security finding to the test-case shape the export adapters expect, so a
-    proven bug (and a regression test for it) can be filed to Jira/Xray."""
-    sev = str(b.get("severity", "P3")).upper()
-    rem = b.get("remediation") or {}
-    probe = str(b.get("probe", "") or b.get("source", "") or "sec")
-    parts = []
-    if b.get("target"):
-        parts.append("Endpoint: " + str(b["target"]))
-    if b.get("evidence"):
-        parts.append("Evidence: " + str(b["evidence"]))
-    if rem.get("why"):
-        parts.append("Why it matters: " + str(rem["why"]))
-    if rem.get("fix"):
-        parts.append("How to fix: " + str(rem["fix"]))
-    return {
-        "test_case_id": f"QAX-{probe.upper().replace(' ', '-')}-{i + 1}",
-        "title": f"[Security] {b.get('title', 'Finding')}",
-        "priority": _SEV_TO_PRIORITY.get(sev, "medium"),
-        "manual_steps": [{"action": f"Reproduce against {b.get('target', 'the endpoint')}",
-                          "expected_result": rem.get("fix", "Input should be rejected / handled safely"),
-                          "data": ""}],
-        "description": "\n".join(parts),
-        "labels": ["qax", "security"] + ([probe] if probe and probe != "sec" else []),
-    }
+    """Map a security finding to the bug shape filed to Jira (see core.jira_bugs)."""
+    from core.jira_bugs import finding_to_bug
+    from services.remediation import qa_for, remediation_for
+    b = dict(b)
+    b.setdefault("remediation", remediation_for(b))
+    b.setdefault("qa", qa_for(b))
+    return finding_to_bug(b, i)
 
 
 @app.post("/api/export")
@@ -306,8 +288,10 @@ def export():
     if kind == "findings":
         bugs = [_finding_to_testcase(b, i) for i, b in enumerate(items) if isinstance(b, dict)]
         try:
-            from core.xray_client import XrayClient
-            result = XrayClient(dry_run=dry_run).push_bugs(bugs)   # S1: request-scoped, no env mutation
+            # Jira-only filer: no Xray credentials needed to file a Bug. S1: the
+            # dry-run flag is request-scoped, no env mutation.
+            from core.jira_bugs import JiraBugFiler
+            result = JiraBugFiler(dry_run=dry_run, project_key=project).file_many(bugs)
         except Exception as exc:
             result = {"success": False, "exported_count": 0, "failed_count": len(bugs),
                       "references": [], "error": f"Bug filing failed: {exc}"}

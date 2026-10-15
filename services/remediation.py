@@ -298,3 +298,99 @@ def remediation_for(finding: dict) -> dict:
     if "object-level authorization" in title or "idor" in title or "blocks another user" in title:
         return _MAP["bola"]
     return {}
+
+
+# ── QA bug-report fields (owner's compact format) ───
+# Per probe: `how` — the condition the reproduction applies (completes "Send
+# <METHOD> <path> …"); `expected` — the Expected Result stated as a MUST rule.
+# Additive to _MAP: remediation_for() is unchanged.
+_QA = {
+    "forge-jwt": ("with a JWT signed by the guessed/hardcoded secret instead of a real login token",
+                  "The server MUST reject any token not signed with its private, high-entropy secret (401)."),
+    "jwt-flaws": ("with a token whose alg is 'none' or whose signature is altered",
+                  "The server MUST verify the signature with a pinned algorithm and reject unsigned/tampered tokens (401)."),
+    "forged-token-replay": ("replaying a forged token against sibling protected endpoints",
+                            "Every protected endpoint MUST reject a forged token (401), not only the one first tested."),
+    "host-header-injection": ("with a forged Host / X-Forwarded-Host header (e.g. Host: attacker.example)",
+                              "The server MUST build absolute URLs from its configured base URL, never from the request's Host header."),
+    "business-logic": ("with a non-positive quantity/amount (e.g. -1 or 0)",
+                       "The server MUST reject business-invalid values (422) and never store them."),
+    "file-upload": ("uploading a file with an executable/attacker-chosen name or extension",
+                    "Uploads MUST be stored under a server-generated name with an allow-listed type, outside any executable path."),
+    "graphql-introspection": ("with a GraphQL introspection query (__schema)",
+                              "Introspection MUST be disabled in production (or require an admin identity)."),
+    "xxe": ("with an XML body declaring an external entity (file:///etc/passwd)",
+            "The XML parser MUST disable DTDs/external entities; the response MUST NOT contain resolved entity content."),
+    "ssti": ("with a template expression (e.g. {{7*7}}) in a text field",
+             "User input MUST be rendered as data — the response MUST contain the literal expression, never its evaluated result."),
+    "bfla": ("as an ORDINARY (non-admin) user, against an admin-namespaced function",
+             "An admin function MUST return 403 to a non-admin user."),
+    "bola": ("as user B, reading/modifying an object created by user A",
+             "A user MUST NOT read or modify another user's object (403/404)."),
+    "sqli": ("with SQL metacharacters / a boolean or time-based payload in a parameter",
+             "Parameters MUST be bound (parameterised queries); behaviour MUST NOT change with injected SQL."),
+    "nosql": ("with a NoSQL operator object (e.g. {\"$ne\": null}) in place of a value",
+              "Operators in user input MUST be rejected or treated as literals."),
+    "excessive-data": ("as an ordinary user and inspect the response fields",
+                       "Responses MUST return only the fields the caller is entitled to (no secrets, hashes or other users' data)."),
+    "malformed-input": ("with a malformed / wrongly-typed body",
+                        "Malformed input MUST return a handled 4xx, never an unhandled 5xx or a stack trace."),
+    "debug-disclosure": ("triggering an error",
+                         "Production errors MUST NOT expose stack traces, debuggers or internal paths."),
+    "input-robustness": ("with boundary / unusual input",
+                         "Unusual input MUST be validated and answered with a handled 4xx."),
+    "error-handling": ("triggering an error path",
+                       "Errors MUST return a handled status with a safe, generic message."),
+    "cookie-flags": ("and inspect the Set-Cookie headers",
+                     "Session cookies MUST carry Secure, HttpOnly and SameSite."),
+    "path-traversal": ("with ../ sequences in a path/file parameter",
+                       "File access MUST be confined to the intended directory; traversal MUST be rejected."),
+    "cors": ("with an Origin header of an untrusted site",
+             "CORS MUST NOT reflect arbitrary origins together with credentials."),
+    "security-headers": ("and inspect the response headers",
+                         "Every HTML response MUST set the missing security header(s) listed under Actual Result."),
+    "mass-assignment": ("with extra privileged fields in the body (e.g. is_admin, role)",
+                        "The server MUST ignore or reject fields the caller may not set."),
+    "open-redirect": ("with a redirect parameter pointing to an external site",
+                      "Redirects MUST be limited to an allow-list of internal destinations."),
+    "xss": ("with an HTML/script payload in a reflected parameter",
+            "User input MUST be output-encoded; the payload MUST NOT appear unescaped in the response."),
+    "stored-xss": ("storing an HTML/script payload, then reading it back",
+                   "Stored user input MUST be output-encoded when rendered."),
+    "ssrf": ("with a URL parameter pointing at an internal/callback address",
+             "The server MUST NOT fetch arbitrary user-supplied URLs (allow-list destinations)."),
+    "command-injection": ("with shell metacharacters in a parameter",
+                          "User input MUST never reach a shell; behaviour MUST NOT change with injected commands."),
+    "rate-limit": ("repeating the request rapidly",
+                   "Sensitive endpoints MUST throttle repeated requests (429)."),
+    "persistence": ("writing a value, then reading it back",
+                    "A successful write MUST persist exactly what was accepted."),
+    "auth-error": ("with missing/invalid credentials",
+                   "Authentication errors MUST return 401 with a generic message."),
+    "search-robustness": ("with ordinary special characters in the search input",
+                          "Search MUST handle ordinary characters with a normal result set, never a 405/5xx."),
+    "unpaginated-list": ("and count the returned items",
+                         "List endpoints MUST paginate (bounded page size)."),
+}
+
+
+
+def qa_for(finding: dict) -> dict:
+    """
+    QA bug-report fields for a finding: {'how','expected','data_safety'} — or {}
+    when the probe has no entry. data_safety follows the owner's non-negotiable #7.
+    """
+    if not isinstance(finding, dict):
+        return {}
+    probe = str(finding.get("probe", "")).lower()
+    if probe not in _QA:
+        return {}
+    how, expected = _QA[probe]
+    try:
+        from execution.probes import MUTATING_PROBES   # single source of truth
+    except Exception:
+        MUTATING_PROBES = frozenset()
+    safety = ("Reproduced with disposable records QAX created for this scan and cleaned up "
+              "afterwards; no existing records were modified." if probe in MUTATING_PROBES else
+              "Read-only reproduction — no records were created or modified.")
+    return {"how": how, "expected": expected, "data_safety": safety}
