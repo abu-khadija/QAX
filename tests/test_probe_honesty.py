@@ -423,3 +423,159 @@ def test_security_headers_missing_headers_is_a_finding_not_a_gap():
     s = _Quiet()
     out = P.security_headers_probe(_m(), "http://x", session=s)
     assert out and out[0].probe == "security-headers" and _gaps(s, "security-headers") == []
+
+
+# ── the last probes: persistence, jwt-flaws, bfla, forged-token-replay, bola, business-logic ─────
+
+from tests.test_probes import _VALID_JWT, _PersistSession, _model_persist  # noqa: E402
+
+
+def test_persistence_has_distinct_states_for_every_way_it_can_fail_to_judge():
+    # no create/read pair at all → not applicable
+    s = _Quiet()
+    assert P.persistence_probe(_m({"method": "GET", "path": "/x"}), "http://x", session=s) == []
+    assert _gaps(s, "persistence")[0]["kind"] == "not-applicable"
+    # the create is rejected → could not exercise
+    s = _Quiet()
+    assert P.persistence_probe(_model_persist(), "http://x", session=s) == []
+    g = _gaps(s, "persistence")
+    assert len(g) == 1 and "create request was rejected or failed" in g[0]["reason"] and g[0]["needs"] == "valid-body"
+
+    # created, but the read-by-key fails
+    class _NoRead(_PersistSession):
+        def get(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=404, text="no")
+    s = _NoRead(); s._qax_skips = []
+    assert P.persistence_probe(_model_persist(), "http://x", session=s) == []
+    assert "could not be read back by key" in s._qax_skips[0]["reason"]
+
+    # created and read, but the GET echoes none of our fields → cannot tell a drop from a field it never returns
+    s = _PersistSession(drop=None, echo_none=True); s._qax_skips = []
+    assert P.persistence_probe(_model_persist(), "http://x", session=s) == []
+    assert "did not echo any submitted field" in s._qax_skips[0]["reason"]
+
+    # everything persists → genuinely clean, NO gap entry
+    s = _PersistSession(drop=None); s._qax_skips = []
+    assert P.persistence_probe(_model_persist(), "http://x", session=s) == [] and s._qax_skips == []
+
+
+class _JwtApp(_Led):
+    """A tiny JWT-protected API. public: /me answers with no token; valid_ok: the real token is accepted."""
+    def __init__(self, public=False, valid_ok=True, accepts_forged=False, valid_token=_VALID_JWT):
+        super().__init__()
+        self.public, self.valid_ok, self.accepts_forged, self.valid_token = public, valid_ok, accepts_forged, valid_token
+
+    def get(self, url, headers=None, **k):
+        tok = ((headers or {}).get("Authorization") or "").replace("Bearer ", "")
+        if not tok:
+            code = 200 if self.public else 401
+        elif tok == self.valid_token:
+            code = 200 if self.valid_ok else 401
+        else:
+            code = 200 if self.accepts_forged else 401
+        return MagicMock(status_code=code, text="{}", headers={})
+
+
+_ME = {"method": "GET", "path": "/me", "auth_required": True}
+_AUTH = {"token": _VALID_JWT}
+
+
+def test_jwt_flaws_states():
+    # (The recipe always supplies a default identity endpoint, so "no target at all" is not reachable.)
+    s = _JwtApp(valid_ok=False)
+    assert P.jwt_flaws_probe(_m(_ME), "http://x", session=s, auth=_AUTH) == []
+    g = _gaps(s, "jwt-flaws")
+    assert len(g) == 1 and "valid token was not accepted" in g[0]["reason"] and g[0]["needs"] == "auth-token"
+    s = _JwtApp(public=True)
+    assert P.jwt_flaws_probe(_m(_ME), "http://x", session=s, auth=_AUTH) == []
+    assert "not access-controlled" in _gaps(s, "jwt-flaws")[0]["reason"] and _gaps(s, "jwt-flaws")[0]["kind"] == "not-applicable"
+    s = _JwtApp(valid_token="opaque-api-key")        # the app accepts it, but it is not a JWT
+    assert P.jwt_flaws_probe(_m(_ME), "http://x", session=s, auth={"token": "opaque-api-key"}) == []
+    assert "not a JWT" in _gaps(s, "jwt-flaws")[0]["reason"]
+    # a server that verifies signatures: clean and NO gap
+    s = _JwtApp()
+    assert P.jwt_flaws_probe(_m(_ME), "http://x", session=s, auth=_AUTH) == [] and _gaps(s, "jwt-flaws") == []
+
+
+def test_forged_token_replay_distinguishes_no_control_from_a_clean_server():
+    s = _JwtApp(valid_ok=False)
+    assert P.forged_token_replay_probe(_m(_ME), "http://x", session=s, auth=_AUTH) == []
+    g = _gaps(s, "forged-token-replay")
+    assert len(g) == 1 and "valid token was rejected on all 1 protected endpoint" in g[0]["reason"] and g[0]["needs"] == "auth-token"
+    s = _JwtApp(public=True)
+    assert P.forged_token_replay_probe(_m(_ME), "http://x", session=s, auth=_AUTH) == []
+    assert _gaps(s, "forged-token-replay")[0]["kind"] == "not-applicable"
+    s = _JwtApp()                                   # clean control + forged rejected → silent, no gap
+    assert P.forged_token_replay_probe(_m(_ME), "http://x", session=s, auth=_AUTH) == [] and _gaps(s, "forged-token-replay") == []
+    s = _JwtApp()
+    assert P.forged_token_replay_probe(_m(), "http://x", session=s, auth=_AUTH) == []
+    assert _gaps(s, "forged-token-replay")[0]["kind"] == "not-applicable"
+
+
+def test_bfla_states():
+    adm = {"method": "GET", "path": "/admin/users"}
+    s = _Dead()
+    assert P.bfla_probe(_m(adm), "http://x", session=s, auth={"token_b": "B"}) == []
+    assert "could be reached" in _gaps(s, "bfla")[0]["reason"]
+    s = _JwtApp(public=True)                         # admin path answers without a token: not access-controlled
+    assert P.bfla_probe(_m(adm), "http://x", session=s, auth={"token_b": "B"}) == []
+    g = _gaps(s, "bfla")
+    assert len(g) == 1 and g[0]["kind"] == "not-applicable" and "none of the 1 admin-namespaced" in g[0]["reason"]
+    s = _JwtApp()
+    assert P.bfla_probe(_m({"method": "GET", "path": "/home"}), "http://x", session=s, auth={"token_b": "B"}) == []
+    assert _gaps(s, "bfla")[0]["kind"] == "not-applicable"
+
+
+_BOLA = [{"method": "POST", "path": "/notes", "request_fields": ["title", "body"], "auth_required": True},
+         {"method": "GET", "path": "/notes/{title}", "auth_required": True}]
+
+
+def test_bola_states():
+    both = {"token": "A", "token_b": "B"}
+    s = _Quiet()
+    assert P.bola_probe(_m(), "http://x", session=s, auth=both) == []
+    assert _gaps(s, "bola")[0]["kind"] == "not-applicable"
+    s = _Quiet()                                     # A's create is rejected (404)
+    assert P.bola_probe(_m(*_BOLA), "http://x", session=s, auth=both) == []
+    g = _gaps(s, "bola")
+    assert len(g) == 1 and "user A's create request was rejected" in g[0]["reason"] and g[0]["needs"] == "valid-body"
+
+    class _NoOwnRead(_Quiet):
+        def post(self, *a, **k):
+            return MagicMock(status_code=201, text="{}", headers={})
+    s = _NoOwnRead()                                 # created, but A cannot read it back (GET 404)
+    assert P.bola_probe(_m(*_BOLA), "http://x", session=s, auth=both) == []
+    assert "could not read its own back" in _gaps(s, "bola")[0]["reason"]
+
+    key_only = [{"method": "POST", "path": "/tags", "request_fields": ["name"], "auth_required": True},
+                {"method": "GET", "path": "/tags/{name}", "auth_required": True}]
+    s = _Quiet()
+    assert P.bola_probe(_m(*key_only), "http://x", session=s, auth=both) == []
+    assert _gaps(s, "bola")[0]["kind"] == "not-applicable" and "only a key field" in _gaps(s, "bola")[0]["reason"]
+
+
+def test_business_logic_states():
+    ep = {"method": "POST", "path": "/orders", "request_fields": ["item", "quantity"]}
+    s = _Quiet()
+    assert P.business_logic_probe(_m({"method": "GET", "path": "/x"}), "http://x", session=s) == []
+    assert _gaps(s, "business-logic")[0]["kind"] == "not-applicable"
+    s = _Quiet()                                     # the POSITIVE quantity itself is rejected
+    assert P.business_logic_probe(_m(ep), "http://x", session=s) == []
+    g = _gaps(s, "business-logic")
+    assert len(g) == 1 and "positive-value request was rejected" in g[0]["reason"] and g[0]["needs"] == "valid-body"
+    s = _Accepting()                                 # accepts positives, but does not echo the negative: clean
+    s2 = _Quiet()
+    class _OkNoEcho(_Quiet):
+        def post(self, *a, **k):
+            return MagicMock(status_code=201, text="{}", headers={})
+        request = post
+    s = _OkNoEcho()
+    assert P.business_logic_probe(_m(ep), "http://x", session=s) == [] and _gaps(s, "business-logic") == []
+
+
+def test_forge_jwt_is_not_applicable_when_the_source_has_no_hardcoded_secret():
+    from services.context import QAXContext
+    from services.probe_service import ProbeService
+    res = ProbeService(QAXContext(anthropic_key="k", project="")).run(_m(), "http://127.0.0.1:1")
+    g = [x for x in res.skipped if x["probe"] == "forge-jwt"]
+    assert g and g[0]["kind"] == "not-applicable" and "no hardcoded JWT signing secret" in g[0]["reason"]

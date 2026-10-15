@@ -89,6 +89,7 @@ def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = 
                    and e.get("auth_required") and "{" not in str(e.get("path", ""))), None)
     target = target or recipe.get("identity_path")
     if not target:
+        _no_candidates(sess, "jwt-flaws", "protected GET endpoint (or identity endpoint) to test a token against")
         return out
     token = _resolve_token(sess, base, recipe, model, f"jwtf_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
     if not token:
@@ -106,16 +107,24 @@ def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = 
     try:
         s_notoken = sess.get(url, timeout=15).status_code
     except Exception:
+        _unreached(sess, "jwt-flaws", 1)
         return out
     s_valid = code_with(token)
     # Controls: the valid token must work AND the endpoint must reject no token.
     if not (isinstance(s_valid, int) and 200 <= s_valid < 300):
+        _skip(sess, "jwt-flaws", f"could not exercise it: the valid token was not accepted on GET {target} "
+                                 f"(HTTP {s_valid}), so a tampered one has nothing to be compared with",
+              needs="auth-token")
         return out
     if s_notoken not in (401, 403):
+        _skip(sess, "jwt-flaws", f"GET {target} answers without any token (HTTP {s_notoken}) — it is not "
+                                 f"access-controlled, so token forgery cannot be demonstrated there",
+              kind="not-applicable")
         return out
 
     parsed = _jwt_payload_segment(token)
     if not parsed:
+        _skip(sess, "jwt-flaws", "the token is not a JWT", kind="not-applicable")
         return out
     parts = parsed[0]
 
@@ -200,19 +209,35 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
                 seen_paths.add(p)
                 targets.append(p)
     if not targets:
+        _no_candidates(sess, "forged-token-replay", "protected GET endpoint without path parameters")
         return out
 
     # 1) Establish forgeability on the first clean control endpoint.
     control_path = None
+    had_clean_control = False
+    valid_rejected = 0
     for p in targets:
         url = f"{base}{p}"
-        if not (is2xx(code(url, _auth_headers(token, auth))) and code(url, None) in (401, 403)):
-            continue   # not a clean control (public, or valid token rejected) — try next
+        if not is2xx(code(url, _auth_headers(token, auth))):
+            valid_rejected += 1
+            continue   # the VALID token was rejected here — not a clean control
+        if code(url, None) not in (401, 403):
+            continue   # public — no protection to bypass
+        had_clean_control = True
         if is2xx(code(url, _auth_headers(forged, auth))):
             control_path = p   # forgery confirmed server-wide
         break                  # the first clean control is decisive either way
     if not control_path:
-        return out             # server verifies signatures → quiet, no false positive
+        if not had_clean_control:
+            if valid_rejected == len(targets):
+                _skip(sess, "forged-token-replay", f"the valid token was rejected on all {len(targets)} "
+                                                   f"protected endpoint(s), so a forged one has nothing to be "
+                                                   f"compared with", needs="auth-token")
+            else:
+                _skip(sess, "forged-token-replay", "no protected endpoint gave a clean control (valid token "
+                                                   "accepted AND a no-token request rejected)",
+                      kind="not-applicable")
+        return out             # clean control + forged rejected → server verifies signatures → quiet
 
     # 2) Sweep the remaining protected endpoints with the forged token.
     for p in targets:
@@ -383,11 +408,18 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
             seen.add(p)
             targets.append(p)
 
+    if not targets:
+        _no_candidates(sess, "bfla", "admin-namespaced GET endpoint (/admin, /manage, /internal …)")
+        return out
+    answered = controlled = 0
     for p in targets[:limit]:
         url = f"{base}{p}"
         s_notoken = code(url, None)
+        if s_notoken is not None:
+            answered += 1
         if s_notoken not in (401, 403):
             continue   # not access-controlled (public, or broken differently) — can't prove escalation
+        controlled += 1
         if is2xx(code(url, _auth_headers(token, auth))):
             out.append(ProbeFinding(
                 probe="bfla",
@@ -398,9 +430,14 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
                           f"and access-controlled, but enforces no role/function check — any user can "
                           f"call admin functions."),
                 target=p))
+    if not out:
+        if not answered:
+            _unreached(sess, "bfla", len(targets[:limit]))
+        elif not controlled:
+            _skip(sess, "bfla", f"none of the {len(targets[:limit])} admin-namespaced endpoint(s) rejected a "
+                                f"request without a token, so none is access-controlled — escalation to them "
+                                f"cannot be shown", kind="not-applicable")
     return out
-
-
 def host_header_injection_probe(model, base_url: str, *, session: requests.Session | None = None,
                                 auth: dict | None = None, limit: int = 10) -> list[ProbeFinding]:
     """
@@ -745,6 +782,9 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
         tgt = next((n for n in names if any(k in n.lower().rsplit(".", 1)[-1] for k in _QTY_FIELDS)), None)
         if tgt:
             cands.append((e, names, tgt))
+    if not cands:
+        _no_candidates(sess, "business-logic", "create endpoint with a quantity/amount/price field")
+        return out
     token = None
     if any(e.get("auth_required") for e, _, _ in cands):
         token = _resolve_token(sess, base, recipe, model, f"bl_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
@@ -754,6 +794,7 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
                   needs="auth-token")
 
     seen: set = set()
+    controlled = 0
     for e, names, tgt in cands[:limit]:
         path = str(e.get("path", ""))
         key = (path, tgt)
@@ -766,6 +807,7 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
             rp = sess.post(f"{base}{path}", json=_benign_create_body(names, tgt, 3), headers=headers, timeout=15)
             if not (200 <= rp.status_code < 300):
                 continue   # positive control not accepted → can't establish the endpoint
+            controlled += 1
             rn = sess.post(f"{base}{path}", json=_benign_create_body(names, tgt, neg), headers=headers, timeout=15)
         except Exception:
             continue
@@ -780,9 +822,11 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
                           f"correct app rejects them."),
                 target=path))
             break
+    if not out and not controlled:
+        _skip(sess, "business-logic", f"could not exercise it: the positive-value request was rejected or "
+                                      f"failed on all {len(seen)} candidate endpoint(s), so a negative value "
+                                      f"had nothing valid to be compared with", needs="valid-body")
     return out
-
-
 # Path segments that mark a "membership / access grant" sub-resource — the thing an
 # owner grants to another user and can revoke. The access-revocation probe keys on these.
 _MEMBERSHIP_SEGS = ("collaborators", "collaborator", "members", "member", "access",
@@ -1393,6 +1437,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         if key_field:
             pairs.append((post, ge, prefix, param, key_field, pf))
     if not pairs:
+        _no_candidates(sess, "bola", "create endpoint paired with a read-by-key GET")
         return out
 
     ta = _resolve_token(sess, base, recipe, model, f"bola_a_{uuid.uuid4().hex[:8]}@example.com",
@@ -1405,6 +1450,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         return out
 
     _CONTENT_KW = ("secret", "content", "body", "data", "value", "text", "note", "description", "payload")
+    attempted = created_ok = readable = compared = 0
     for post, ge, prefix, param, key_field, pf in pairs[:limit]:
         key = f"qaxbola{uuid.uuid4().hex[:10]}"
         marker = f"qaxmarker{uuid.uuid4().hex[:12]}"
@@ -1426,6 +1472,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
             if not placed:
                 continue  # key-only resource: nothing private to leak, can't prove
             body[placed] = marker
+        attempted += 1
 
         auth_a = _auth_headers(ta, auth)
         auth_b = _auth_headers(tb, auth)
@@ -1433,14 +1480,17 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
             cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=auth_a, timeout=15)
             if cr.status_code >= 400:
                 continue
+            created_ok += 1
             _record_created(sess, prefix, body, auth_a)
             read_path = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
             ar = sess.get(read_path, headers=auth_a, timeout=15)
             if ar.status_code >= 400:  # control: A must be able to read its own object
                 continue
+            readable += 1
             br = sess.get(read_path, headers=auth_b, timeout=15)
         except Exception:
             continue
+        compared += 1
         if br.status_code < 300 and marker in (br.text or ""):
             out.append(ProbeFinding(
                 probe="bola", title=f"Broken object-level authorization in GET {ge['path']}",
@@ -1449,9 +1499,18 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
                           f"returned {br.status_code} containing A's private content. The endpoint "
                           f"has no ownership check — any authenticated user can read any object."),
                 target=str(ge["path"])))
+    if not out:
+        if not attempted:
+            _skip(sess, "bola", "every candidate resource has only a key field — there is no private content "
+                                "for a second user to leak", kind="not-applicable")
+        elif not created_ok:
+            _skip(sess, "bola", f"could not exercise it: user A's create request was rejected or failed on "
+                                f"all {attempted} candidate endpoint(s), so there was no object to attack",
+                  needs="valid-body")
+        elif not readable:
+            _skip(sess, "bola", "user A created objects but could not read its own back (the control), so "
+                                "user B's access could not be compared")
     return out
-
-
 def sqli_probe(model, base_url: str, *, session: requests.Session | None = None,
                auth: dict | None = None, limit: int = 5) -> list[ProbeFinding]:
     """
@@ -2529,13 +2588,16 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
         if key_field and _persistable_fields([f for f in pf if f != key_field]):
             pairs.append((post, ge, prefix, param, key_field, pf))
     if not pairs:
+        _no_candidates(sess, "persistence", "create endpoint paired with a read-by-key GET")
         return out
 
     token = None
     if any(p[0].get("auth_required") or p[1].get("auth_required") for p in pairs):
         token = _resolve_token(sess, base, recipe, model,
                                f"persist_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "persistence", token)
 
+    tried = created_ok = read_ok = judged = 0
     for post, ge, prefix, param, key_field, pf in pairs[:4]:
         key = f"qaxkey{uuid.uuid4().hex[:10]}"
         markers: dict[str, str] = {}          # field -> its unique marker token
@@ -2560,6 +2622,7 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
                 body[f] = tok
         if not markers:
             continue
+        tried += 1
         headers = _auth_headers(token, auth) if (post.get("auth_required") or ge.get("auth_required")) else {}
         try:
             cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=headers, timeout=15)
@@ -2567,6 +2630,7 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
             continue
         if not (200 <= cr.status_code < 300):      # control: the create must be accepted
             continue
+        created_ok += 1
         _record_created(sess, prefix, body, headers)
         read_url = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
         try:
@@ -2575,6 +2639,7 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
             continue
         if not (200 <= rr.status_code < 300):      # control: the object must read back
             continue
+        read_ok += 1
         read_text = rr.text or ""
         present = [f for f, tok in markers.items() if tok in read_text]
         dropped = [f for f, tok in markers.items() if tok not in read_text]
@@ -2594,6 +2659,8 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
             read_text = again.text or ""
             present = [f for f, tok in markers.items() if tok in read_text]
             dropped = [f for f, tok in markers.items() if tok not in read_text]
+        if present:
+            judged += 1            # at least one field echoed → the read-back CAN show a drop
         # Need a positive control (something survived) AND a real drop. All-absent is
         # inconclusive — the GET may just not echo these fields — so stay silent.
         if present and dropped:
@@ -2613,9 +2680,18 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
                           f"{present} persisted. A field accepted with a success response but silently "
                           f"dropped on reload is data loss the user never sees."),
                 target=str(post.get("path", prefix))))
+    if not out and tried:
+        if not created_ok:
+            _skip(sess, "persistence", f"could not exercise it: the create request was rejected or failed on "
+                                       f"all {tried} candidate endpoint(s), so there was nothing to read back",
+                  needs="valid-body")
+        elif not read_ok:
+            _skip(sess, "persistence", "records were created but could not be read back by key (the read "
+                                       "request failed), so a silent drop could not be judged")
+        elif not judged:
+            _skip(sess, "persistence", "the read-back did not echo any submitted field, so a dropped field "
+                                       "could not be told apart from a field the GET never returns")
     return out
-
-
 def auth_error_probe(model, base_url: str, *, session: requests.Session | None = None,
                      auth: dict | None = None) -> list[ProbeFinding]:
     """

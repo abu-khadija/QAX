@@ -107,6 +107,9 @@ class ProbeService:
                 logger.error("utility token resolve failed: %s", exc)
 
         # Forge-JWT — only when the model found a hardcoded secret to forge with.
+        if not model.exposed_secrets:
+            _skip(shared, "forge-jwt", "no hardcoded JWT signing secret was found in the modelled source "
+                                       "(a live-only scan has no source to read)", kind="not-applicable")
         if model.exposed_secrets:
             try:
                 f = forge_jwt_probe(model, base_url, session=shared)

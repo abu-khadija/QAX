@@ -86,7 +86,7 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 21. ✅ **Q2 — time-to-first-confirmed-finding <= 10 min — DONE 2026-10-15** (`python main.py demo`; measured ~26 s from an empty venv incl. pip install on a clean copy with no .env and no key; Docker deliberately NOT shipped — unverifiable on this machine). Original text: (one command / Docker + bundled demo target).
 22. ✅ **Q4 — GitHub Action — DONE 2026-10-15** (`ci/pr_scan.py` + `ci/github_action_scan.yml` rebuilt on the honesty rules; run for real against the golden target). Original text:: scan a preview URL, comment CONFIRMED only (+ UNSTABLE/NOT TESTED honesty).
 23. ⏸ **Q3 step 2 — confirmed finding -> runnable regression test -> Xray** (Xray half of B6 waits on the owner's trial app).
-24. ▶ **Instrument the OLDER probes' silent bail-outs** — `verify-fixes` calls a bug FIXED when its
+24. ✅ **Instrument the OLDER probes' silent bail-outs — DONE 2026-10-15** (all 40 probes now report not-applicable / missing-prerequisite / unreached / could-not-exercise; 131 ledger call-sites; 116+ honesty tests; found+fixed 3 real blind spots: command-injection, ssrf and debug-disclosure sent NO credentials; ssrf can't be tested against a remote target). Original text: — `verify-fixes` calls a bug FIXED when its
     probe "ran and reported no gap", but ~30 older probes still `return []` silently when their
     own control fails (e.g. bola's create, persistence's read-back) with no ledger entry. Until each
     reports "could not exercise" like the 5 typed probes do, FIXED is only as honest as the probe.
