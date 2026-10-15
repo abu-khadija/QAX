@@ -37,6 +37,11 @@ from pathlib import Path
 # The spec-typed probes planted on the golden target's /tasks endpoint.
 _TYPED_PROBES = {"boolean-false", "single-element-array", "date-order", "long-input", "duplicate-rows"}
 
+# Probes with a bug planted on the golden target (ROADMAP #26) — each must fire here and stay
+# silent on the SECURE app. Grown batch by batch until every probe has one.
+_PLANTED_PROBES = {"cookie-flags", "error-handling", "debug-disclosure", "excessive-data",
+                   "crash-fuzz", "auth-error"}
+
 APP = str(Path(__file__).parent / "targets" / "vuln_jwt_app.py")
 TRUTH = str(Path(__file__).parent / "truth" / "golden-jwt.json")
 
@@ -187,6 +192,9 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     # The five spec-typed probes must be proven on a RUNNING server, not just
     # against fakes: each planted bug in /tasks fires, none is silently skipped.
     typed_missing = sorted(_TYPED_PROBES - probes)
+    planted_missing = sorted(_PLANTED_PROBES - probes)
+    checks.append(("planted-bug probes all fired on the vulnerable target", not planted_missing,
+                   f"fired={sorted(_PLANTED_PROBES & probes)} missing={planted_missing or 'none'}"))
     checks.append(("typed probes: all 5 fired on the vulnerable target", not typed_missing,
                    f"fired={sorted(_TYPED_PROBES & probes)} missing={typed_missing or 'none'}"))
     revoked = [b for b in res_auth.confirmed if b.get("probe") == "access-revocation"]
@@ -218,6 +226,9 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     ar_fp = [b.get("probe") for b in sres_auth.confirmed if b.get("probe") == "access-revocation"]
     checks.append(("secure control: access-revocation silent (0)", not ar_fp,
                    f"findings on fixed app={ar_fp or 0}"))
+    planted_fp = sorted({b.get("probe") for b in sres.confirmed if b.get("probe") in _PLANTED_PROBES})
+    checks.append(("secure control: planted-bug probes silent (0)", not planted_fp,
+                   f"findings on fixed app={planted_fp or 0}"))
     typed_fp = [b.get("probe") for b in sres.confirmed if b.get("probe") in _TYPED_PROBES]
     checks.append(("secure control: typed probes silent (0)", not typed_fp,
                    f"typed findings on fixed app={typed_fp or 0}"))

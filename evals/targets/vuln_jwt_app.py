@@ -28,7 +28,7 @@ import hmac
 import json
 import os
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, make_response, request
 
 app = Flask(__name__)
 SECRET = b"super-secret-signing-key"
@@ -77,6 +77,13 @@ def _auth():
 @app.post("/auth/register")
 def register():
     body = request.get_json(silent=True) or {}
+    pw = str(body.get("password", ""))
+    if len(pw) > 72:
+        # VULNERABLE: the hashing layer chokes on a >72-byte password and the error is unhandled (5xx).
+        # SECURE: a clean validation error.
+        if SECURE:
+            return jsonify({"error": "password too long"}), 422
+        return jsonify({"error": "hash failed: password cannot be longer than 72 bytes"}), 500
     _USERS[body.get("email", "")] = body.get("password", "")
     return jsonify({}), 201
 
@@ -87,7 +94,11 @@ def login():
     email = body.get("email", "")
     if email not in _USERS:                 # must register first
         return jsonify({"error": "no such user"}), 401
-    return jsonify({"access_token": _make_token(email)}), 200
+    tok = _make_token(email)
+    resp = make_response(jsonify({"access_token": tok}), 200)
+    # VULNERABLE: the session cookie is readable by JavaScript (no HttpOnly). SECURE sets it.
+    resp.set_cookie("session", tok, httponly=SECURE)
+    return resp
 
 
 @app.get("/me")
@@ -112,6 +123,52 @@ def admin_users():
 def invoices():
     sub = _auth()
     return (jsonify({"invoices": [{"id": 1, "amount": 4200}]}), 200) if sub else (jsonify({"error": "unauthorized"}), 401)
+
+
+def _auth_unsafe():
+    """VULNERABLE: decodes the token with no error handling, so a malformed token crashes the
+    handler (an unhandled 5xx where a clean 401 belongs). SECURE: the guarded path."""
+    tok = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not tok:
+        return None
+    if SECURE:
+        return _subject(tok)
+    _h, p, _s = tok.split(".")
+    return json.loads(_b64u_dec(p)).get("sub")
+
+
+@app.get("/account")
+def account():
+    """VULNERABLE: returns the stored credential material along with the profile
+    (excessive data exposure) and crashes on a malformed token (auth-error). SECURE: neither."""
+    sub = _auth_unsafe()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    out = {"email": sub, "plan": "free"}
+    if not SECURE:
+        out["password_hash"] = "$2b$12$notarealhashnotarealhashnotarealhashnotarealhash"
+    return jsonify(out), 200
+
+
+@app.get("/items/<item_id>")
+def item(item_id):
+    """VULNERABLE: a non-numeric id raises and the raw traceback is returned to the client
+    (stack-trace disclosure). SECURE: a clean 404."""
+    try:
+        n = int(item_id)
+    except ValueError:
+        if SECURE:
+            return jsonify({"error": "not found"}), 404
+        return ("Traceback (most recent call last):\n  File \"/srv/app/items.py\", line 12, in item\n"
+                f"    n = int({item_id!r})\nValueError: invalid literal for int()", 500,
+                {"Content-Type": "text/plain"})
+    return jsonify({"id": n, "name": "widget"}), 200
+
+
+@app.errorhandler(404)
+def not_found(_e):
+    """VULNERABLE: the global handler for unknown routes itself fails (5xx instead of 404)."""
+    return (jsonify({"error": "not found"}), 404) if SECURE else (jsonify({"error": "internal"}), 500)
 
 
 @app.get("/greet")
@@ -340,6 +397,10 @@ def spec():
             "/me": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
             "/admin/users": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
             "/billing/invoices": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
+            "/account": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
+            "/items/{item_id}": {"get": {"parameters": [{"name": "item_id", "in": "path", "required": True,
+                                                         "schema": {"type": "string"}}],
+                                         "responses": {"200": {"description": "ok"}}}},
             "/greet": {"get": {
                 "parameters": [{"name": "name", "in": "query",
                                 "schema": {"type": "string"}}],

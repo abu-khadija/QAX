@@ -2263,7 +2263,7 @@ def error_handling_probe(model, base_url: str, *, session: requests.Session | No
             evidence=(f"GET {nonsense} — a path that cannot exist — returned HTTP {r.status_code}. "
                       f"Unknown routes should return 404; a 5xx pollutes monitoring and makes real "
                       f"faults and scans indistinguishable from crashes."),
-            target=nonsense))
+            target="(any unknown route)"))   # stable: the random probe path is in the evidence only
     return out
 
 

@@ -318,6 +318,17 @@ def test_error_handling_flags_5xx_on_nonsense_route():
     assert len(out) == 1 and out[0].probe == "error-handling" and out[0].severity == "P3"
 
 
+def test_error_handling_finding_identity_is_stable_across_runs():
+    """The random probe path must not leak into the target — it feeds the Jira fingerprint / dedupe."""
+    class Sess:
+        def get(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=500, text="boom")
+    a = error_handling_probe(AppModel(root="/x"), "http://x", session=Sess())[0]
+    b = error_handling_probe(AppModel(root="/x"), "http://x", session=Sess())[0]
+    assert a.target == b.target and "qax_nonexistent" not in a.target
+    assert "qax_nonexistent" in a.evidence
+
+
 def test_error_handling_quiet_on_404():
     class Sess:
         def get(self, url, headers=None, timeout=None):
