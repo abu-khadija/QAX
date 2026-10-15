@@ -26,6 +26,11 @@ without breaking anything. No number, no merge.
 - **PR #1 merged to main** (2026-10-13, merge commit 95322b2).
 - Scanner: **28 deterministic probes**; suite **348 passed**, 3 skipped; the gate (quick
   + deep) is green. Work lands directly on `main` (owner's call; harness blocks PR merges).
+- **2026-10-15:** 34 probes; suite **449 passed**; gate green. B4 now **3 real apps** (+Gitea,
+  the first large token-auth app — killed a 12× P1 false-positive cascade; 0 FP, 2 real
+  findings). **B6 Bug half done:** SCRUM-5/6 filed live to the owner's Jira in their own
+  QA bug format. Deep-scan generation fixes (G4/G5) built but **not yet re-validated
+  live — Anthropic credits ran out**.
 
 ---
 
