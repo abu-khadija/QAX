@@ -357,6 +357,13 @@ Examples:
 
     valid_cases = validation_result["valid"]
 
+    # ── Deterministic quality lint (advisory — never blocks) ───────────────
+    try:
+        from core.test_lint import lint_cases, summary_line
+        print("  " + summary_line(lint_cases(valid_cases)))
+    except Exception as _le:
+        logger.debug("Test lint failed (non-fatal): %s", _le)
+
     # ── Save output ────────────────────────────────────────────────────────
     saved_path = ""
     if valid_cases:
@@ -2091,6 +2098,17 @@ def run_file_findings_command() -> None:
     from cli.file_findings import run as _run_file_findings
     sys.exit(_run_file_findings(sys.argv[2:]))
 
+def run_lint_tests_command() -> None:
+    """
+    Handle the 'lint-tests' subcommand — deterministic quality lint of a saved test-case file
+    (vague expected results, missing steps, execution notes…). Logic lives in cli/lint_tests.py.
+
+    Called when sys.argv[1] == "lint-tests".
+    """
+    from cli.lint_tests import run as _run_lint_tests
+    sys.exit(_run_lint_tests(sys.argv[2:]))
+
+
 def run_demo_command() -> None:
     """
     Handle the 'demo' subcommand — boot QAX's bundled vulnerable demo app and scan it, so a new
@@ -2339,13 +2357,14 @@ def main() -> None:
         "file-findings":    run_file_findings_command,
         "verify-fixes":     run_verify_fixes_command,
         "demo":             run_demo_command,
+        "lint-tests":       run_lint_tests_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes, demo")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes, demo, lint-tests")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 
