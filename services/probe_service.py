@@ -340,7 +340,7 @@ class ProbeService:
 
         # Debug disclosure — an interactive debugger / stack trace on an error.
         try:
-            findings.extend(debug_disclosure_probe(model, base_url, session=shared))
+            findings.extend(debug_disclosure_probe(model, base_url, session=shared, auth=read_auth))
         except Exception as exc:
             logger.error("debug_disclosure probe failed: %s", exc)
             _skip(shared, "debug-disclosure", f"the probe crashed: {exc}", kind="error")

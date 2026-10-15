@@ -289,6 +289,19 @@ def _need_token(sess, probe: str, token, needed: bool = True) -> None:
                            "login failed — those were requested without credentials", needs="auth-token")
 
 
+def _registration_failed(sess, probe: str, path: str, status: int) -> None:
+    """
+    A probe that needs a self-registered user could not create one. 404/405 means the app has no
+    such endpoint (not applicable — e.g. token-only APIs); any other rejection is a real gap.
+    """
+    if status in (404, 405):
+        _skip(sess, probe, f"no self-registration endpoint answered at {path} (HTTP {status})",
+              kind="not-applicable")
+    else:
+        _skip(sess, probe, f"the registration request at {path} was rejected (HTTP {status}), so the "
+                           f"probe could not create the user it needs", needs="valid-body")
+
+
 def _unreached(sess, probe: str, tried: int) -> None:
     """Every request failed at the network level — QAX could not talk to the endpoint(s) at all."""
     _skip(sess, probe, f"none of the {tried} candidate endpoint(s) could be reached (every request "
@@ -1633,10 +1646,18 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
         if _tok["v"] is None:
             _tok["v"] = _resolve_token(sess, base, recipe, model,
                                        f"mal_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+            _need_token(sess, "malformed-input", _tok["v"])
         return _auth_headers(_tok["v"], auth)
 
-    for e in [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
-              and field_names(x.get("request_fields"))][:6]:
+    w_eps = [x for x in eps if str(x.get("method", "")).upper() in ("POST", "PUT", "PATCH")
+             and field_names(x.get("request_fields"))][:6]
+    g_eps = [x for x in eps if str(x.get("method", "")).upper() == "GET"][:8]
+    if not w_eps and not g_eps:
+        _no_candidates(sess, "malformed-input", "endpoint to send a malformed value to")
+        return out
+    reached = exercised = 0
+
+    for e in w_eps:
         method = str(e.get("method", "POST")).upper()
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         headers = headers_for(e)
@@ -1646,8 +1667,10 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
             rb = sess.request(method, f"{base}{path}", json=benign, headers=headers, timeout=15)
         except Exception:
             continue
+        reached += 1
         if rb.status_code >= 500 or rb.status_code >= 400:
             continue  # baseline must be accepted, else we can't attribute a later 5xx
+        exercised += 1
         for fld in fields[:6]:
             bad = dict(benign, **{fld: "qax-not-a-valid-value-!@#"})
             try:
@@ -1679,7 +1702,7 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
     # Query-param pass: a type-violating value on a GET param the server parses
     # unguarded (int(request.args.get('page'))...). Tries grounded query params plus
     # common numeric ones, so it works even when no spec lists them.
-    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET"][:8]:
+    for e in g_eps:
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         headers = headers_for(e)
         qps = list(e.get("query_params") or [])
@@ -1689,8 +1712,10 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
             rb = sess.get(f"{base}{path}", params=base_params, headers=headers, timeout=15)
         except Exception:
             continue
+        reached += 1
         if rb.status_code >= 500:
             continue
+        exercised += 1
         for p in cands[:7]:
             try:
                 r = sess.get(f"{base}{path}", params=dict(base_params, **{p: "qax-not-a-number-!@#"}),
@@ -1718,9 +1743,15 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
                           + ". Malformed query input must be rejected with a 4xx."),
                 target=str(e.get("path", ""))))
             break
+    if not out:
+        if not reached:
+            _unreached(sess, "malformed-input", len(w_eps) + len(g_eps))
+        elif not exercised:
+            _skip(sess, "malformed-input", "could not exercise it: the valid baseline request was rejected "
+                                           "(4xx) or crashed (5xx) on every candidate endpoint, so a "
+                                           "malformed value had nothing valid to be compared with",
+                  needs="valid-body")
     return out
-
-
 def injection_probe(model, base_url: str, *, session: requests.Session | None = None,
                     auth: dict | None = None, limit: int = 6) -> list[ProbeFinding]:
     """
@@ -1958,8 +1989,13 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
 
     gets = [e for e in getattr(model, "endpoints", [])
             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"]
+    if not gets:
+        _no_candidates(sess, "excessive-data", "GET endpoint")
+        return out
     token = None
     seen: set = set()
+    reached = 0
+    skipped_auth = 0
     for e in gets[:12]:
         path = str(e.get("path", ""))
         resolved = re.sub(r"\{[^}]+\}", "qaxprobe1", path)
@@ -1972,10 +2008,15 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
                 token = _resolve_token(sess, base, recipe, model,
                                        f"ede_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
             if not token:
+                skipped_auth += 1          # this endpoint needs auth and we have no token: not checked
                 continue
             headers = _auth_headers(token, auth)
         try:
             r = sess.get(f"{base}{resolved}", headers=headers, timeout=15)
+        except Exception:
+            continue
+        reached += 1
+        try:
             if r.status_code >= 400:
                 continue
             data = r.json()
@@ -1993,9 +2034,12 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
                              else "to any authenticated user")
                           + f" (HTTP {r.status_code}). Credentials/secrets must never be returned."),
                 target=path))
+    if skipped_auth:
+        _skip(sess, "excessive-data", f"{skipped_auth} endpoint(s) need auth, but no token was supplied and "
+                                      f"self-registration/login failed — they were not checked", needs="auth-token")
+    if not out and not reached and not skipped_auth:
+        _unreached(sess, "excessive-data", len(gets[:12]))
     return out
-
-
 def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """
     Cookie hardening (QA knowledge base sec 1.3): a cookie set at login should carry
@@ -2012,6 +2056,7 @@ def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None
 
     ident = f"cookie_{uuid.uuid4().hex[:8]}@example.com"
     set_cookies: list[str] = []
+    reached = 0
     for path, body in ((recipe["register_path"], register_body(recipe, model, ident)),
                        (recipe["login_path"], None)):
         try:
@@ -2023,6 +2068,7 @@ def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None
                 r = sess.post(f"{base}{path}", json=lb, timeout=15)
         except Exception:
             continue
+        reached += 1
         # requests joins multiple Set-Cookie values; split defensively on ", <name>=".
         raw = r.headers.get("Set-Cookie") or ""
         if raw:
@@ -2052,9 +2098,14 @@ def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None
                                  if "HttpOnly" in missing else "")
                               + ("Without Secure it can leak over plain HTTP. " if "Secure" in missing else "")),
                     target=recipe["login_path"]))
+    if not out:
+        if not reached:
+            _unreached(sess, "cookie-flags", 2)
+        elif not set_cookies:
+            _skip(sess, "cookie-flags", "no cookie was set on registration or login, so there were no cookie "
+                                        "flags to check (bearer-token APIs don't use cookies)",
+                  kind="not-applicable")
     return out
-
-
 # Interactive debuggers (exposed = source disclosure AND often remote code execution).
 _DEBUG_INTERACTIVE = ("werkzeug debugger", "__debugger__", "flask debugtoolbar",
                       "console.png?__debugger__", "werkzeug powered traceback interpreter")
@@ -2064,7 +2115,8 @@ _DEBUG_TRACE = ("traceback (most recent call last)", "sqlalchemy.exc", "psycopg2
                 'at object.<anonymous>', ".py&#34;, line ", '.py", line ', "stack trace:")
 
 
-def debug_disclosure_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
+def debug_disclosure_probe(model, base_url: str, *, session: requests.Session | None = None,
+                           auth: dict | None = None) -> list[ProbeFinding]:
     """
     Debug-mode / stack-trace disclosure (QA knowledge base sec 1.9): a deployed app
     should never return an interactive debugger or a raw stack trace. Provokes an
@@ -2079,7 +2131,17 @@ def debug_disclosure_probe(model, base_url: str, *, session: requests.Session | 
     lookups = [e for e in getattr(model, "endpoints", [])
                if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
                and "{" in str(e.get("path", ""))]
+    if not lookups:
+        _no_candidates(sess, "debug-disclosure", "GET endpoint with a path parameter")
+        return out
+    token = None
+    if any(e.get("auth_required") for e in lookups[:4]):
+        from core.auth_recipe import derive_auth_recipe
+        token = _resolve_token(sess, base, derive_auth_recipe(model), model,
+                               f"dbg_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "debug-disclosure", token)
     seen: set = set()
+    reached = 0
     for e in lookups[:4]:
         path = str(e.get("path", ""))
         m = re.search(r"\{([^}]+)\}", path)
@@ -2089,10 +2151,12 @@ def debug_disclosure_probe(model, base_url: str, *, session: requests.Session | 
         if resolved in seen:
             continue
         seen.add(resolved)
+        hdr = _auth_headers(token, auth) if e.get("auth_required") else {}
         try:
-            r = sess.get(f"{base}{resolved}", timeout=15)
+            r = sess.get(f"{base}{resolved}", headers=hdr, timeout=15)
         except Exception:
             continue
+        reached += 1
         body = (r.text or "").lower()
         if any(s in body for s in _DEBUG_INTERACTIVE):
             out.append(ProbeFinding(
@@ -2113,9 +2177,9 @@ def debug_disclosure_probe(model, base_url: str, *, session: requests.Session | 
                           f"(HTTP {r.status_code}), disclosing source paths and implementation "
                           f"detail that aid an attacker. Errors should be generic."),
                 target=path))
+    if not out and not reached:
+        _unreached(sess, "debug-disclosure", len(seen))
     return out
-
-
 def error_handling_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """
     Robustness: an unknown route must return 404, not a 5xx (QA knowledge base sec
@@ -2769,13 +2833,17 @@ def mass_assignment_probe(model, base_url: str, *, session: requests.Session | N
     try:
         r = sess.post(f"{base}{recipe['register_path']}", json=body, timeout=15)
     except Exception:
+        _unreached(sess, "mass-assignment", 1)
         return out
     if r.status_code >= 300:
+        _registration_failed(sess, "mass-assignment", recipe["register_path"], r.status_code)
         return out
     _record_created(sess, _collection_of(recipe["register_path"]), body, {})
     try:
         data = r.json()
     except Exception:
+        _skip(sess, "mass-assignment", "the registration response is not JSON, so the privileged "
+                                       "fields it should have refused could not be inspected")
         return out
     # Flatten one level so a {"user": {...}} wrapper is still inspected.
     scopes = [data] + ([v for v in data.values() if isinstance(v, dict)] if isinstance(data, dict) else [])
@@ -2881,8 +2949,10 @@ def rate_limit_probe(model, base_url: str, *, session: requests.Session | None =
     try:
         reg = sess.post(f"{base}{recipe['register_path']}", json=register_body(recipe, model, ident), timeout=15)
     except Exception:
+        _unreached(sess, "rate-limit", 1)
         return out
     if getattr(reg, "status_code", 500) >= 300:
+        _registration_failed(sess, "rate-limit", recipe["register_path"], getattr(reg, "status_code", 500))
         return out  # couldn't create the account → can't judge login throttling
 
     bad_login = {recipe["id_field"]: ident, recipe["secret_field"]: "wrong-" + uuid.uuid4().hex[:6]}
@@ -2891,6 +2961,7 @@ def rate_limit_probe(model, base_url: str, *, session: requests.Session | None =
         try:
             r = sess.post(f"{base}{recipe['login_path']}", json=bad_login, timeout=15)
         except Exception:
+            _skip(sess, "rate-limit", f"the login endpoint stopped answering after {len(statuses)} attempt(s)")
             return out
         statuses.append(getattr(r, "status_code", 0))
     throttled = any(s in (429, 423) for s in statuses)
@@ -2905,9 +2976,10 @@ def rate_limit_probe(model, base_url: str, *, session: requests.Session | None =
                       f"HTTP {statuses[-1]} with no 429/423 — the endpoint has no visible "
                       f"brute-force throttling or account lockout."),
             target=recipe["login_path"]))
+    if not out and not throttled:
+        _skip(sess, "rate-limit", f"the login endpoint did not behave like a normal auth failure "
+                                  f"(statuses {sorted(set(statuses))}), so throttling could not be judged")
     return out
-
-
 # ── command injection ─────────────────────────────────────────────────────────
 # Param/endpoint names that commonly feed an OS command (ping/dns/host tools, etc.).
 _CMD_KW = ("cmd", "command", "exec", "run", "system", "shell", "ping", "ip", "ipaddr",

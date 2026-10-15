@@ -42,10 +42,24 @@ class _Quiet(_Led):
     def request(self, *a, **k): return self._answer()
 
 
+class _Accepting(_Led):
+    """A well-behaved server: every request is accepted (200, empty JSON)."""
+    def _ok(self, *a, **k):
+        r = MagicMock(status_code=200, text="{}", headers={"Content-Type": "application/json"}, content=b"{}")
+        r.json.return_value = {}
+        return r
+    get = post = put = delete = request = _ok
+
+
 class _Dead(_Led):
     """Nothing is listening: every request fails at the network level."""
     def _boom(self, *a, **k): raise ConnectionError("refused")
     get = post = put = delete = request = _boom
+
+
+# malformed-input needs its valid BASELINE accepted before it can say anything; a server that rejects
+# everything is a genuine "could not exercise" gap, so its "normal server" case uses an accepting one.
+_OK = {"malformed-input": _Accepting}
 
 
 def _m(*eps):
@@ -82,6 +96,12 @@ _CASES = {
     "ssrf": (P.ssrf_probe, {"method": "GET", "path": "/preview", "query_params": ["url"]}, True, True),
     "path-traversal": (P.path_traversal_probe, {"method": "GET", "path": "/files/{name}"}, True, True),
     "stored-xss": (P.stored_xss_probe, {"method": "POST", "path": "/comments", "request_fields": ["content"]}, True, True),
+    "mass-assignment": (P.mass_assignment_probe, {"method": "GET", "path": "/x"}, True, False),
+    "rate-limit": (P.rate_limit_probe, {"method": "GET", "path": "/x"}, True, False),
+    "malformed-input": (P.malformed_input_probe, {"method": "POST", "path": "/items", "request_fields": ["name"]}, True, True),
+    "excessive-data": (P.excessive_data_probe, {"method": "GET", "path": "/items"}, True, True),
+    "cookie-flags": (P.cookie_flags_probe, {"method": "GET", "path": "/x"}, True, False),
+    "debug-disclosure": (P.debug_disclosure_probe, {"method": "GET", "path": "/items/{id}"}, True, True),
 }
 # SSRF's callback listener lives on the scanner's loopback: only a LOCAL target can reach it, so its
 # "normal server" case must use a local URL (the remote case has its own test below).
@@ -125,7 +145,7 @@ def test_a_dead_server_is_reported_as_unreached_never_as_clean(probe):
 @pytest.mark.parametrize("probe", _IDS)
 def test_a_normal_server_that_simply_answers_produces_no_gap(probe):
     fn, ep = _CASES[probe][:2]
-    s = _Quiet()
+    s = _OK.get(probe, _Quiet)()
     assert fn(_model_for(probe, ep), _base(probe), session=s) == []
     # reachable + nothing wrong ≠ a coverage GAP (a "not applicable" note is allowed, e.g. no HTML sink)
     assert [g for g in _gaps(s, probe) if g["kind"] != "not-applicable"] == []
@@ -237,3 +257,101 @@ def test_stored_xss_without_a_read_endpoint_is_not_applicable():
     s = _Quiet()
     assert P.stored_xss_probe(_m(_CASES["stored-xss"][1]), "http://x", session=s) == []
     assert _gaps(s, "stored-xss")[0]["kind"] == "not-applicable"
+
+
+# ── batch 4 specifics ────────────────────────────────────────────────────────────
+
+class _Responder(_Led):
+    """Scripted server: `rules` maps (method, path-suffix) -> (status, text, headers)."""
+    def __init__(self, rules):
+        super().__init__()
+        self.rules = rules
+
+    def _go(self, method, url, **k):
+        for (m, suffix), (code, text, headers) in self.rules.items():
+            if m == method and url.endswith(suffix):
+                r = MagicMock(status_code=code, text=text, headers=headers)
+                try:
+                    import json as _j
+                    r.json.return_value = _j.loads(text)
+                except Exception:
+                    r.json.side_effect = ValueError("not json")
+                return r
+        return self._answer()
+
+    def get(self, url, **k): return self._go("GET", url, **k)
+    def post(self, url, **k): return self._go("POST", url, **k)
+    def request(self, method, url, **k): return self._go(method.upper(), url, **k)
+
+
+def test_registration_gaps_are_classified_by_status():
+    # 404/405: the app simply has no self-registration endpoint (token-only API) → not applicable.
+    for probe, fn in (("mass-assignment", P.mass_assignment_probe), ("rate-limit", P.rate_limit_probe)):
+        s = _Responder({("POST", "/auth/register"): (405, "", {})})
+        assert fn(_m(), "http://x", session=s) == []
+        g = _gaps(s, probe)
+        assert len(g) == 1 and g[0]["kind"] == "not-applicable" and "no self-registration endpoint" in g[0]["reason"]
+        # 422: the endpoint exists but rejected our body → a real gap QAX cannot fix alone.
+        s = _Responder({("POST", "/auth/register"): (422, "{}", {})})
+        assert fn(_m(), "http://x", session=s) == []
+        g = _gaps(s, probe)
+        assert len(g) == 1 and g[0]["kind"] == "missing-prerequisite" and g[0]["needs"] == "valid-body"
+        assert "rejected (HTTP 422)" in g[0]["reason"]
+
+
+def test_mass_assignment_non_json_registration_response_is_a_gap():
+    s = _Responder({("POST", "/auth/register"): (201, "created", {})})
+    assert P.mass_assignment_probe(_m(), "http://x", session=s) == []
+    assert "not JSON" in _gaps(s, "mass-assignment")[0]["reason"]
+
+
+def test_rate_limit_oddly_behaving_login_is_inconclusive_not_clean():
+    s = _Responder({("POST", "/auth/register"): (201, "{}", {}), ("POST", "/auth/login"): (500, "boom", {})})
+    assert P.rate_limit_probe(_m(), "http://x", session=s) == []
+    g = _gaps(s, "rate-limit")
+    assert len(g) == 1 and "did not behave like a normal auth failure" in g[0]["reason"]
+
+
+def test_rate_limit_throttled_or_unthrottled_login_needs_no_gap():
+    s = _Responder({("POST", "/auth/register"): (201, "{}", {}), ("POST", "/auth/login"): (429, "slow down", {})})
+    assert P.rate_limit_probe(_m(), "http://x", session=s) == [] and _gaps(s, "rate-limit") == []
+    s = _Responder({("POST", "/auth/register"): (201, "{}", {}), ("POST", "/auth/login"): (401, "no", {})})
+    out = P.rate_limit_probe(_m(), "http://x", session=s)
+    assert out and out[0].probe == "rate-limit" and _gaps(s, "rate-limit") == []
+
+
+def test_malformed_input_rejected_baseline_is_could_not_exercise():
+    s = _Quiet()                                    # every request 404 → the valid baseline never succeeds
+    assert P.malformed_input_probe(_m(_CASES["malformed-input"][1]), "http://x", session=s) == []
+    g = _gaps(s, "malformed-input")
+    assert len(g) == 1 and "valid baseline request was rejected" in g[0]["reason"] and g[0]["needs"] == "valid-body"
+
+
+def test_excessive_data_endpoint_needing_auth_without_a_token_is_reported_with_its_count():
+    s = _Quiet()
+    P.excessive_data_probe(_m({"method": "GET", "path": "/a", "auth_required": True},
+                              {"method": "GET", "path": "/b", "auth_required": True}), "http://x", session=s)
+    g = [x for x in _gaps(s, "excessive-data") if x.get("needs") == "auth-token"]
+    assert len(g) == 1 and "2 endpoint(s) need auth" in g[0]["reason"]
+
+
+def test_cookie_flags_bearer_api_with_no_cookies_is_not_applicable_but_bad_cookies_are_findings():
+    s = _Responder({("POST", "/auth/login"): (200, "{}", {})})
+    assert P.cookie_flags_probe(_m(), "http://x", session=s) == []
+    g = _gaps(s, "cookie-flags")
+    assert len(g) == 1 and g[0]["kind"] == "not-applicable" and "bearer-token APIs" in g[0]["reason"]
+    s = _Responder({("POST", "/auth/login"): (200, "{}", {"Set-Cookie": "sid=abc; Path=/"})})
+    out = P.cookie_flags_probe(_m(), "http://x", session=s)
+    assert out and out[0].probe == "cookie-flags" and _gaps(s, "cookie-flags") == []
+
+
+def test_debug_disclosure_now_sends_the_token_to_authenticated_lookups():
+    seen = []
+
+    class _Rec(_Quiet):
+        def get(self, url, **k):
+            seen.append((k.get("headers") or {}).get("Authorization"))
+            return super().get(url)
+    P.debug_disclosure_probe(_m({"method": "GET", "path": "/items/{id}", "auth_required": True}), "http://x",
+                             session=_Rec(), auth={"token": "TKN"})
+    assert seen and set(seen) == {"Bearer TKN"}
