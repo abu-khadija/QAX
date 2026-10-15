@@ -377,7 +377,7 @@ No token                    → HTTP 401
       <p class="lead">Every change to QAX goes through a gate that scans a deliberately vulnerable app and a fixed copy of it. If it misses a planted bug or flags the fixed copy, the change can't merge.</p>
     </div>
     <div class="grid g4">
-      <div class="stat"><div class="n ok">14 / 14</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
+      <div class="stat"><div class="n ok">32 / 32</div><div class="l">planted bugs caught</div><div class="src">Golden test target, quick scan. Run it with <code>make eval</code>.</div></div>
       <div class="stat"><div class="n ok">0</div><div class="l">false positives</div><div class="src">The same gate, plus a fixed copy of the target that must come back silent.</div></div>
       <div class="stat"><div class="n">2×</div><div class="l">identical confirmed list</div><div class="src">The gate scans twice and requires the same result.</div></div>
       <div class="stat"><div class="n">5</div><div class="l">real apps, 0 false alarms</div><div class="src">Node, Go, Java, Django and Gitea (537 API operations) backends we didn't write. QAX raised false alarms on two of them first; we fixed the causes and wrote it up. Still a small sample.</div></div>
