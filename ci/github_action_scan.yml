@@ -1,18 +1,25 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # QAX — GitHub Actions: Security scan on Pull Request (PR gate)
 # ─────────────────────────────────────────────────────────────────────────────
-# On every PR: start the app, run QAX against it, comment the PROVEN findings on
-# the PR, and fail the check when a confirmed P1/P2 is found. Low-confidence leads
-# (P3) are reported but never block.
+# On every PR: scan a RUNNING copy of the app (a preview deployment, or one started in
+# this job), comment the CONFIRMED findings on the PR, and fail the check when a confirmed
+# P1/P2 is found. AI suspicions are shown separately as leads and never block.
 #
-# Required GitHub secret:
-#   ANTHROPIC_API_KEY — your Anthropic API key (QAX models the source with it)
+# The comment is honest about what it did NOT check: a clean result is never called clean
+# while checks could not run (a NOT TESTED section says which, and what would unblock them),
+# flaky hits are shown as UNSTABLE, and any test records QAX could not remove are listed.
+#
+# No API key is needed for the default (quick, live-app) scan.
 #
 # Setup:
 #   1. Copy this file to .github/workflows/qax-scan.yml
-#   2. Add ANTHROPIC_API_KEY to the repo secrets
-#   3. Edit the "Start the app under test" step to boot YOUR app and set
-#      QAX_TARGET_URL to its URL (the probes need a running app).
+#   2. Set the repo VARIABLE  QAX_TARGET_URL  to the app's URL (only apps you are allowed
+#      to test), or edit "Start the app under test" to boot it inside the job.
+#   3. Recommended — add secrets QAX_TOKEN (a valid token) and QAX_TOKEN_B (a SECOND,
+#      ordinary user's token): they enable the authenticated probes (BOLA, BFLA, stale
+#      access after revocation, ...). Without them those checks are listed as NOT TESTED.
+#   4. Optional variable  QAX_REQUIRE_PROBES  (e.g. "bola,bfla"): fail the check if one of
+#      those probes could not run, so a green check can never mean "it didn't run".
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: QAX — Security Scan
@@ -42,10 +49,10 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install QAX dependencies
+      - name: Install QAX dependencies (lean scanner set)
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-scan.txt
 
       # ── Start YOUR app under test, then expose its URL as QAX_TARGET_URL ──
       # Replace this with however your app boots (docker compose, a run command,
@@ -70,11 +77,14 @@ jobs:
         id: scan
         continue-on-error: true
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DRY_RUN: 'true'
           LOG_LEVEL: 'WARNING'
-          QAX_REPO: '.'
+          QAX_REPO: ''                      # empty = scan the live app only (needs no API key)
           QAX_FAIL_ON: 'P1,P2'
+          QAX_REVERIFY: '1'                 # confirm only what reproduces on a second pass
+          QAX_TOKEN: ${{ secrets.QAX_TOKEN }}
+          QAX_TOKEN_B: ${{ secrets.QAX_TOKEN_B }}
+          QAX_REQUIRE_PROBES: ${{ vars.QAX_REQUIRE_PROBES }}
         run: |
           set +e
           python -m ci.pr_scan
