@@ -10,6 +10,8 @@ Run with:
 
 from unittest.mock import MagicMock
 
+import pytest
+
 import json as _json
 
 from execution.probes import _auth_token as _auth_token_fn  # noqa: F401
@@ -1040,6 +1042,48 @@ class _PersistSession:
         return MagicMock(status_code=200, text=_json.dumps(body))
 
 
+@pytest.fixture(autouse=True)
+def _no_readback_wait(monkeypatch):
+    """The read-back retry sleeps between reads; tests don't need the wall-clock delay."""
+    import execution.probes as P
+    monkeypatch.setattr(P, "_READBACK_WAIT", 0)
+
+
+class _LaggySession(_PersistSession):
+    """An async write: the dropped field only becomes visible on the SECOND read (replica lag)."""
+    def __init__(self, visible_after=2):
+        super().__init__(drop=None)
+        self.reads, self.visible_after, self.full = 0, visible_after, {}
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        r = super().post(url, json=json, headers=headers, timeout=timeout)
+        rec = dict(json or {})
+        self.full[rec.get("title")] = rec
+        # At first only the key + `category` are visible (a positive control); `body` lags.
+        self.store[rec.get("title")] = {k: v for k, v in rec.items() if k in ("title", "category")}
+        return r
+
+    def get(self, url, headers=None, timeout=None):
+        self.reads += 1
+        title = url.rsplit("/", 1)[-1]
+        if self.reads >= self.visible_after and title in self.full:
+            self.store[title] = self.full[title]
+        return super().get(url, headers=headers, timeout=timeout)
+
+
+def test_persistence_does_not_cry_wolf_when_the_write_just_lags():
+    # First read shows only the key (looks like a drop); the next read has everything.
+    s = _LaggySession(visible_after=2)
+    assert persistence_probe(_model_persist(), "http://x", session=s) == []
+    assert s.reads >= 2                      # it DID re-read before deciding
+
+
+def test_persistence_still_flags_a_drop_that_survives_every_re_read():
+    s = _PersistSession(drop="body")
+    out = persistence_probe(_model_persist(), "http://x", session=s)
+    assert len(out) == 1 and "body" in out[0].evidence
+
+
 def test_persistence_flags_silent_drop():
     out = persistence_probe(_model_persist(), "http://x", session=_PersistSession(drop="body"))
     assert len(out) == 1 and out[0].probe == "persistence" and out[0].severity == "P2"
@@ -1626,3 +1670,52 @@ def test_probe_result_and_orchestrator_result_carry_gaps():
     r = OrchestratorResult(not_tested=skipped)
     assert [g["probe"] for g in r.coverage_gaps] == ["bola"]          # n/a is NOT a gap
     assert r.to_dict()["not_tested"] == skipped
+
+
+# ── Data-state ledger: what QAX created and could NOT remove ────────────────────
+
+def test_cleanup_reports_exactly_what_it_left_and_why():
+    from execution.probes import _record_created, cleanup_artifacts, leftover_artifacts
+    model = AppModel(root="/x", endpoints=[
+        {"method": "DELETE", "path": "/users/v1/{username}", "auth_required": True},
+        {"method": "DELETE", "path": "/orgs/{name}", "auth_required": True}])
+
+    class _Sess:
+        def delete(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=403 if "/orgs/" in url else 204, text="")
+
+    s = _Sess(); s._qax_created = []
+    _record_created(s, "/users/v1", {"username": "qax_ok", "password": "Secret123!"}, {"Authorization": "Bearer SECRET"})
+    _record_created(s, "/orgs", {"name": "qax_org"}, {})                      # delete refused (403)
+    _record_created(s, "/books/v1", {"title": "qax_book"}, {})                # no DELETE endpoint
+    assert cleanup_artifacts(model, "http://x", s) == 1
+    left = leftover_artifacts(s)
+    assert {(l["collection"], l["key"]) for l in left} == {("/orgs", "qax_org"), ("/books/v1", "qax_book")}
+    why = {l["key"]: l["why"] for l in left}
+    assert "refused (HTTP 403)" in why["qax_org"] and "no DELETE endpoint" in why["qax_book"]
+    blob = str(left)
+    assert "Secret123!" not in blob and "SECRET" not in blob and "Bearer" not in blob   # no secrets, no headers
+
+
+def test_leftover_lists_everything_when_the_api_has_no_delete_at_all():
+    from execution.probes import _record_created, cleanup_artifacts, leftover_artifacts
+    s = MagicMock(spec=["_qax_created", "delete"]); s._qax_created = []
+    _record_created(s, "/things", {"name": "qax_t1"}, {})
+    assert cleanup_artifacts(AppModel(root="/x", endpoints=[]), "http://x", s) == 0
+    assert [l["why"] for l in leftover_artifacts(s)] == ["the API has no DELETE endpoint for it"]
+
+
+def test_leftover_falls_back_to_the_registry_when_cleanup_never_ran():
+    from execution.probes import _record_created, leftover_artifacts
+    s = MagicMock(spec=["_qax_created"]); s._qax_created = []
+    _record_created(s, "/things", {"name": "qax_t1"}, {})
+    out = leftover_artifacts(s, "cleanup was disabled")
+    assert out == [{"collection": "/things", "key": "qax_t1", "why": "cleanup was disabled"}]
+    assert leftover_artifacts(object()) == []                                  # never raises
+
+
+def test_result_types_carry_the_leftover_ledger():
+    from services.results import OrchestratorResult, ProbeResult
+    left = [{"collection": "/x", "key": "k", "why": "w"}]
+    assert ProbeResult(leftover=left).leftover == left
+    assert OrchestratorResult(left_on_target=left).to_dict()["left_on_target"] == left

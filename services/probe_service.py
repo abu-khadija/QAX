@@ -353,6 +353,7 @@ class ProbeService:
         # Clean up the disposable records we created (best-effort, only our own data).
         created = len(getattr(shared, "_qax_created", []) or [])
         cleaned = 0
+        from execution.probes import leftover_artifacts
         if cleanup and created:
             try:
                 from execution.probes import cleanup_artifacts
@@ -362,7 +363,8 @@ class ProbeService:
             prog.emit("probe", "info", f"test-data cleanup: removed {cleaned}/{created} record(s)")
 
         skipped = list(getattr(shared, "_qax_skips", []) or [])
+        leftover = leftover_artifacts(shared, "cleanup was disabled") if created else []
         result = ProbeResult(findings=findings, created_records=created, cleaned_records=cleaned,
-                             skipped=skipped)
+                             skipped=skipped, leftover=leftover)
         prog.emit("probe", "ok", result.summary())
         return result

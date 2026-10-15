@@ -168,7 +168,7 @@ class _Ctx:
         tok = self.token()
         if not tok:
             _skip(self.sess, self.tag, "the endpoints need auth, but no token was supplied and "
-                                       "self-registration/login failed")
+                                       "self-registration/login failed", needs="auth-token")
             return None
         return _auth_headers(tok, self.auth)
 
@@ -250,7 +250,7 @@ class _Ctx:
         """No candidate's positive control succeeded → say so, never a silent clean result."""
         _skip(self.sess, probe, f"could not build a request the app accepts — the positive control was "
                                 f"rejected on all {tried} candidate endpoint(s), so the probe could not "
-                                f"test the attack variant")
+                                f"test the attack variant", needs="valid-body")
 
 
 # ── 1. boolean `false` rejected / crashes ────────────────────────────────────

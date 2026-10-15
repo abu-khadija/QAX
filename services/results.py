@@ -454,6 +454,7 @@ class OrchestratorResult:
     # Probes that could NOT run, with the reason: [{probe, reason, kind}]. The honest
     # counterpart of the findings — "absence of a finding != a pass".
     not_tested: list = field(default_factory=list)
+    left_on_target: list = field(default_factory=list)   # data-state ledger: created & not removed
     error: str | None = None
 
     @property
@@ -540,6 +541,7 @@ class OrchestratorResult:
             "legs": self.legs,
             "silent_legs": self.silent_legs(),
             "not_tested": self.not_tested,
+            "left_on_target": self.left_on_target,
             "evidence": self.evidence,
             "error": self.error,
             "success": self.success,
@@ -593,6 +595,8 @@ class ProbeResult:
     # Probes that could NOT run, and why: [{probe, reason, kind}] where kind is
     # "missing-prerequisite" (a real coverage gap) or "not-applicable" (nothing to test).
     skipped: list = field(default_factory=list)
+    # Records QAX created and did NOT remove: [{collection, key, why}] (the data-state ledger).
+    leftover: list = field(default_factory=list)
 
     @property
     def success(self) -> bool:

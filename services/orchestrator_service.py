@@ -391,6 +391,7 @@ class OrchestratorService:
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens, legs=legs, evidence=evidence,
             not_tested=list(getattr(probe_result, "skipped", []) or []),
+            left_on_target=list(getattr(probe_result, "leftover", []) or []),
             created_records=getattr(probe_result, "created_records", 0),
             cleaned_records=getattr(probe_result, "cleaned_records", 0))
         for gap in result.coverage_gaps:

@@ -48,6 +48,41 @@ def render_scan_result(result) -> str:
     if gaps:
         lines.append("\n  ⚠ NOT TESTED — these checks could not run (a quiet result here means "
                      "\"unknown\", not \"safe\"):")
-        for g in gaps:
-            lines.append(f"    · {g.get('probe')}: {g.get('reason')}")
+        lines.extend(_render_gaps(gaps))
+
+    left = list(getattr(result, "left_on_target", []) or [])
+    if left:
+        created = getattr(result, "created_records", 0) or len(left)
+        lines.append(f"\n  ⚠ LEFT ON THE TARGET — QAX created {created} test record(s) and could not remove "
+                     f"{len(left)} (remove them by hand):")
+        for item in left[:12]:
+            ident = f" {item['key']}" if item.get("key") else ""
+            lines.append(f"    · {item.get('collection') or '?'}{ident} — {item.get('why')}")
+        if len(left) > 12:
+            lines.append(f"    · … and {len(left) - 12} more (see left_on_target in the --out JSON)")
     return "\n".join(lines) + "\n"
+
+
+# What the operator can do about a recurring gap — one decision, not one note per probe.
+_NEEDS_HINT = {
+    "token_b": "supply a second, ORDINARY user's token with --token-b (and the owner's with --token)",
+    "auth-token": "supply a valid token with --token (QAX could not self-register or log in)",
+    "valid-body": "QAX could not build a request this app accepts — an example valid request body "
+                  "for the create endpoints would unblock it",
+}
+
+
+def _render_gaps(gaps: list) -> list[str]:
+    """Group the not-tested gaps by what would unblock them (escalate ONCE)."""
+    grouped: dict = {}
+    loose: list = []
+    for g in gaps:
+        (grouped.setdefault(g["needs"], []) if g.get("needs") else loose).append(g)
+    out: list[str] = []
+    for needs, items in grouped.items():
+        probes = ", ".join(sorted({str(i.get("probe")) for i in items}))
+        out.append(f"    · {probes}")
+        out.append(f"        → to enable: {_NEEDS_HINT.get(needs, needs)}")
+    for g in loose:
+        out.append(f"    · {g.get('probe')}: {g.get('reason')}")
+    return out

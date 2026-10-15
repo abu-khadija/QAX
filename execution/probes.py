@@ -92,7 +92,8 @@ def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = 
         return out
     token = _resolve_token(sess, base, recipe, model, f"jwtf_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
     if not token:
-        _skip(sess, "jwt-flaws", "no auth token — none supplied and self-registration/login failed")
+        _skip(sess, "jwt-flaws", "no auth token — none supplied and self-registration/login failed",
+              needs="auth-token")
         return out
     url = f"{base}{target}"
 
@@ -178,7 +179,8 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
     token = _resolve_token(sess, base, recipe, model,
                            f"ftr_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
     if not token:
-        _skip(sess, "forged-token-replay", "no auth token — none supplied and self-registration/login failed")
+        _skip(sess, "forged-token-replay", "no auth token — none supplied and self-registration/login failed",
+              needs="auth-token")
         return out
     parsed = _jwt_payload_segment(token)
     if not parsed:
@@ -236,13 +238,17 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
     return out
 
 
-def _skip(sess, probe: str, reason: str, kind: str = "missing-prerequisite") -> None:
+def _skip(sess, probe: str, reason: str, kind: str = "missing-prerequisite",
+          needs: str | None = None) -> None:
     """
     Record that a probe could NOT run, and why — so a quiet scan is never read as a
     clean one ("absence of a finding != a pass"). `kind` is "missing-prerequisite"
     (the probe needed something QAX didn't have: a second identity, a working login…
     — a real coverage gap worth surfacing) or "not-applicable" (the app has nothing
-    for this probe to test — informational). A no-op unless the caller (ProbeService)
+    for this probe to test — informational). `needs` is a short key for WHAT would
+    unblock it ("token_b", "auth-token", …) so the report can ask the operator ONCE
+    ("supply X → enables A, B, C") instead of repeating one note per probe.
+    A no-op unless the caller (ProbeService)
     opened a ledger on the session, so probes run in isolation write nothing extra.
     Never raises.
     """
@@ -250,6 +256,8 @@ def _skip(sess, probe: str, reason: str, kind: str = "missing-prerequisite") -> 
         ledger = getattr(sess, "_qax_skips", None)
         if isinstance(ledger, list):
             item = {"probe": probe, "reason": reason, "kind": kind}
+            if needs:
+                item["needs"] = needs
             if item not in ledger:
                 ledger.append(item)
     except Exception:
@@ -316,7 +324,7 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
         token = (auth or {}).get("token_b")
     if not token:
         _skip(sess, "bfla", "no provably-ordinary identity — self-registration failed and no "
-                            "second (non-admin) token was supplied (--token-b)")
+                            "second (non-admin) token was supplied (--token-b)", needs="token_b")
         return out
 
     seen: set = set()
@@ -660,7 +668,8 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
         token = _resolve_token(sess, base, recipe, model, f"bl_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
         if not token:
             _skip(sess, "business-logic", "the quantity/amount endpoints need auth, but no token was "
-                                          "supplied and self-registration/login failed")
+                                          "supplied and self-registration/login failed",
+                  needs="auth-token")
 
     seen: set = set()
     for e, names, tgt in cands[:limit]:
@@ -840,7 +849,8 @@ def access_revocation_probe(model, base_url: str, *, session: requests.Session |
     # two supplied identities.
     if not (tok_a and tok_b):
         _skip(sess, "access-revocation", "needs two supplied identities (--token = the resource "
-                                         "owner, --token-b = the user to grant then revoke)")
+                                         "owner, --token-b = the user to grant then revoke)",
+              needs="token_b")
         return out
 
     b_user = _whoami(sess, base, tok_b, auth)
@@ -1147,17 +1157,61 @@ def _record_created(sess, collection: str, body: dict, headers: dict) -> None:
         pass
 
 
+_ID_FIELDS = ("username", "email", "title", "name", "id", "key", "slug")
+
+
+def _artifact_key(body: dict):
+    """A short human identifier for a created record (never a secret: only id-like fields)."""
+    for f in _ID_FIELDS:
+        for k, v in (body or {}).items():
+            if str(k).lower() == f and isinstance(v, (str, int)) and str(v):
+                return str(v)[:60]
+    for k, v in (body or {}).items():
+        if any(h in str(k).lower() for h in _ID_FIELDS) and isinstance(v, (str, int)) and str(v):
+            return str(v)[:60]
+    return None
+
+
+def _left(art: dict, why: str) -> dict:
+    """One 'left on the target' entry: where, which record, and why it stayed. No headers/bodies."""
+    return {"collection": str(art.get("collection", "")), "key": _artifact_key(art.get("body", {})),
+            "why": why}
+
+
+def leftover_artifacts(session, default_why: str = "not cleaned") -> list[dict]:
+    """
+    The records QAX created on the target and did NOT remove ("list what
+    tests created and what remains, with exact locations"). After cleanup_artifacts ran
+    this is its precise list; if cleanup never ran, every registered record is listed with
+    `default_why`. Never raises.
+    """
+    try:
+        left = getattr(session, "_qax_leftover", None)
+        if isinstance(left, list):
+            return list(left)
+        reg = getattr(session, "_qax_created", None) or []
+        return [_left(a, default_why) for a in reg]
+    except Exception:
+        return []
+
+
 def cleanup_artifacts(model, base_url: str, session) -> int:
     """
     Best-effort DELETE of the disposable records QAX created this scan. Deletes ONLY
     keys QAX itself recorded, matched to a DELETE endpoint on the same collection and
     authorized with the creator's own token. Never deletes anything it did not create,
-    and never raises. Returns the count actually removed.
+    and never raises. Returns the count actually removed; whatever could NOT be removed
+    (and why) is left on `session._qax_leftover` for leftover_artifacts().
     """
     reg = getattr(session, "_qax_created", None)
     if not reg:
         return 0
     base = base_url.rstrip("/")
+    left: list[dict] = []
+    try:
+        session._qax_leftover = left
+    except Exception:
+        pass
     dels = []
     for e in getattr(model, "endpoints", []):
         if isinstance(e, dict) and str(e.get("method", "")).upper() == "DELETE":
@@ -1166,11 +1220,13 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
             if m:
                 dels.append((p, m.group(1), p[:m.start()].rstrip("/")))
     if not dels:
+        left.extend(_left(a, "the API has no DELETE endpoint for it") for a in reg)
         return 0
     cleaned = 0
     for art in reg:
         match = next((d for d in dels if d[2] == art.get("collection", "")), None)
         if not match:
+            left.append(_left(art, "no DELETE endpoint for this collection"))
             continue
         path, param, _ = match
         body = art.get("body", {})
@@ -1181,14 +1237,18 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
             key = next((body[f] for f in body if any(k in f.lower()
                         for k in ("username", "email", "title", "name", "id", "key", "slug"))), None)
         if key is None:
+            left.append(_left(art, "could not work out its key to delete it"))
             continue
         url = f"{base}{path.replace('{' + param + '}', str(key))}"
         try:
             r = session.delete(url, headers=art.get("headers", {}), timeout=15)
-            if getattr(r, "status_code", 500) < 300:
+            code = getattr(r, "status_code", 500)
+            if code < 300:
                 cleaned += 1
+            else:
+                left.append(_left(art, f"delete was refused (HTTP {code})"))
         except Exception:
-            continue
+            left.append(_left(art, "the delete request failed"))
     return cleaned
 
 
@@ -1259,7 +1319,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
                         auth=auth, slot="secondary")
     if not ta or not tb:
         _skip(sess, "bola", "needs two distinct users — self-registration failed and "
-                            "--token/--token-b were not both supplied")
+                            "--token/--token-b were not both supplied", needs="token_b")
         return out
 
     _CONTENT_KW = ("secret", "content", "body", "data", "value", "text", "note", "description", "payload")
@@ -2231,6 +2291,10 @@ def _persistable_fields(fields: list[str]) -> list[str]:
     return out
 
 
+_READBACK_RETRIES = 2       # extra reads before a "field was dropped" claim is believed
+_READBACK_WAIT = 0.6        # seconds between them
+
+
 def persistence_probe(model, base_url: str, *, session: requests.Session | None = None,
                       auth: dict | None = None) -> list[ProbeFinding]:
     """
@@ -2331,6 +2395,22 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
         read_text = rr.text or ""
         present = [f for f, tok in markers.items() if tok in read_text]
         dropped = [f for f, tok in markers.items() if tok not in read_text]
+        # Read-back timing ("many 'nothing persisted' conclusions were false negatives
+        # from reading a field before it repopulated"): before claiming data loss, re-read a
+        # couple of times — an async write / replica lag / cache that catches up is not a drop.
+        for _ in range(_READBACK_RETRIES):
+            if not (present and dropped):
+                break
+            time.sleep(_READBACK_WAIT)
+            try:
+                again = sess.get(read_url, headers=headers, timeout=15)
+            except Exception:
+                break
+            if not (200 <= again.status_code < 300):
+                break
+            read_text = again.text or ""
+            present = [f for f, tok in markers.items() if tok in read_text]
+            dropped = [f for f, tok in markers.items() if tok not in read_text]
         # Need a positive control (something survived) AND a real drop. All-absent is
         # inconclusive — the GET may just not echo these fields — so stay silent.
         if present and dropped:
