@@ -77,7 +77,7 @@ class _Cap:
         self.lines.append(str(msg))
 
 
-def _scan(base_url: str, *, deep: bool = False, prog=None):
+def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None):
     """Scan the live target. Quick = deterministic/zero-LLM; deep = credit-gated."""
     import json
 
@@ -94,7 +94,7 @@ def _scan(base_url: str, *, deep: bool = False, prog=None):
         _usage.reset()
     t0 = time.time()
     kw = dict(max_router_files=1, max_endpoints=6) if deep else {}
-    res = OrchestratorService(QAXContext.from_env()).run(
+    res = OrchestratorService(ctx or QAXContext.from_env()).run(
         empty, base_url, deep=deep, use_cache=False, progress=prog, **kw)
     if deep:
         from services import usage as _usage
@@ -138,6 +138,12 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     try:
         res, rec = _scan(f"http://127.0.0.1:{port}")
         res2, _ = _scan(f"http://127.0.0.1:{port}")   # second scan — must match deterministically
+        # ROADMAP Q2: a quick scan must work on a clean machine with NO API key at all.
+        import dataclasses
+
+        from services.context import QAXContext
+        res_nokey, rec_nokey = _scan(f"http://127.0.0.1:{port}",
+                                     ctx=dataclasses.replace(QAXContext.from_env(), anthropic_key=""))
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
@@ -160,6 +166,10 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     checks.append(("forged-token-replay fired (item 6)", "forged-token-replay" in probes,
                    f"probes={sorted(p for p in probes if p)}"))
     checks.append(pipe_check)   # original pipeline's execute leg, verified E2E
+    nk = rec_nokey.get("accuracy", {})
+    checks.append(("Q2: quick scan works with NO API key (same recall, 0 FP)",
+                   nk.get("recall_pct") == 100.0 and nk.get("false_positives") == 0 and not res_nokey.error,
+                   f"recall={nk.get('recall_pct')}% fp={nk.get('false_positives')} error={res_nokey.error}"))
 
     # The five spec-typed probes must be proven on a RUNNING server, not just
     # against fakes: each planted bug in /tasks fires, none is silently skipped.

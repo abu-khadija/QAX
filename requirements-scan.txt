@@ -1,0 +1,12 @@
+# QAX — LEAN dependencies for the SCANNER only (demo, scan, file-findings, verify-fixes).
+# Fastest path to a first confirmed finding on a clean machine:
+#     python3 -m venv .venv && . .venv/bin/activate
+#     pip install -r requirements-scan.txt
+#     python main.py demo
+# The full set (Streamlit UI, test generation extras) is requirements.txt.
+anthropic>=0.40.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+jsonschema>=4.23.0
+requests>=2.31.0
+flask>=3.0.0

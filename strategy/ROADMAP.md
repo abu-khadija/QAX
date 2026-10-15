@@ -83,8 +83,8 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 20. ✅ **Prove the new probes can FAIL on a running server — DONE 2026-10-15** (golden target `/tasks` + 3 truth entries; recall 14/14; gate checks typed probes fire / are exercised / silent on SECURE; mutation-checked: breaking `boolean_false_probe` makes the gate FAIL) — original text: — extend the golden target with
     planted bugs for the 5 typed probes + access-revocation (+ secure controls) and truth
     entries ("show every test failing once"; also Q5 benchmark credibility).
-21. ▶ **Q2 — time-to-first-confirmed-finding <= 10 min** (one command / Docker + bundled demo target).
-22. **Q4 — GitHub Action**: scan a preview URL, comment CONFIRMED only (+ UNSTABLE/NOT TESTED honesty).
+21. ✅ **Q2 — time-to-first-confirmed-finding <= 10 min — DONE 2026-10-15** (`python main.py demo`; measured ~26 s from an empty venv incl. pip install on a clean copy with no .env and no key; Docker deliberately NOT shipped — unverifiable on this machine). Original text: (one command / Docker + bundled demo target).
+22. ▶ **Q4 — GitHub Action**: scan a preview URL, comment CONFIRMED only (+ UNSTABLE/NOT TESTED honesty).
 23. **Q3 step 2 — confirmed finding -> runnable regression test -> Xray** (Xray half of B6 waits on the owner's trial app).
 24. **KB mining continues**: file 13 (automation deep pass), 01-03 principles/lifecycle, 06, 08-10 (see memory).
 Opportunistic/gated: B6 Xray half (owner), Q5 open benchmark (gated on B9 IP), B8 GTM slices, B9 IP/legal (deferred).

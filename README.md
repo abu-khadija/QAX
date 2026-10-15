@@ -1,28 +1,78 @@
 # QAX
 
-AI-powered test case generation and execution.
-Works with any codebase. Built for QA teams.
+**QAX proves what your running app actually does.** It attacks your API (and tours your UI),
+keeps only the bugs it can prove with a real request and response — checked against a control
+request — explains the fix, and drafts the Jira bug for you. It also generates test cases from
+source code. Runs locally. Built for QA teams.
 
 ---
 
-## Quick Start (5 minutes)
+## See it work in under a minute (no API key, no account, no config)
 
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-scan.txt     # lean: just what the scanner needs
+python main.py demo
+```
 
-# 2. Copy and fill in your config
-cp .env.example .env
-# Edit .env — fill in ANTHROPIC_API_KEY at minimum
+`demo` boots QAX's bundled, deliberately-vulnerable app on a free local port, runs a quick scan
+(deterministic probes — zero LLM calls), prints the confirmed findings, and stops the app. On the
+author's machine that is **about 30 seconds from an empty virtualenv** to 18 confirmed findings
+(about 20 s of it is `pip install`; times vary with your network and pip cache).
 
-# 3. Test the connection
+## Scan your own app
+
+```bash
+python main.py scan --url https://your-app.example --quick --authorized \
+    --token <a valid token> --token-b <a second, ordinary user's token>
+```
+
+* Only scan apps you are allowed to test (`--authorized` is your confirmation). Some probes
+  create disposable test records; QAX removes what it can and **lists what it left behind**.
+* **Confirmed** findings come from deterministic probes: scan again and you get the same list.
+  `--reverify 2` re-runs the probes and confirms only what reproduces every time (and stamps a
+  measured "Reproduced 3/3" on the ticket); anything flaky is reported as *unstable*.
+* **`NOT TESTED`** lists the checks that could not run (no second user's token, a probe that
+  crashed, …) with what would unblock them. A quiet result there means "unknown", not "safe".
+* A **quick** scan needs no API key. A **deep** scan (AI test generation, red-team, critic)
+  needs `ANTHROPIC_API_KEY` in `.env` (about $0.5–1 per run).
+
+## From finding to Jira, and back
+
+```bash
+python main.py scan ... --out scan.json                 # 1. find
+python main.py file-findings --from scan.json           # 2. preview the Jira bugs (nothing is filed)
+python main.py file-findings --from scan.json --live    #    file them (needs JIRA_* in .env)
+python main.py verify-fixes --from fresh_scan.json      # 3. later: are they actually fixed?
+```
+
+* Bugs follow a real QA bug-report layout (steps with a direct URL, expected as a MUST rule,
+  evidence, fix, reproducibility, workaround) and carry the evidence as an attachment.
+  `--client-safe` writes tickets with no tool name in them. Fields your Jira project doesn't
+  have are left out, and a repeat scan never files a duplicate.
+* `verify-fixes` answers **FIXED / STILL REPRODUCES / COULD NOT TEST** — never rounded together.
+  A probe that merely went quiet is not clearance, and a bug that vanishes on an unchanged build
+  is flagged as flaky. QAX never closes a ticket on its own (`--apply` shows the plan,
+  `--apply --yes` writes, and only for FIXED tickets).
+
+## How we know it works
+
+`make eval` boots a golden vulnerable app and a fixed copy of it: every planted bug must be
+caught (14/14), nothing may be flagged on the fixed copy, two scans must agree, and a quick scan
+must work with no API key. Five real open-source apps (Node, Go, Java, Django, Gitea) have been
+scanned with 0 false alarms — QAX raised false alarms on two of them first; the case studies in
+`strategy/` say so and show the fixes.
+
+---
+
+## Test-case generation (the original workflow)
+
+```bash
+pip install -r requirements.txt          # full set, including the Streamlit UI
+cp .env.example .env                     # fill in ANTHROPIC_API_KEY at minimum
 python main.py check-connection
-
-# 4. Generate test cases (dry run — nothing sent to Jira)
-python main.py analyze --file your_file.cs --project example --dry-run
-
-# 5. When you're happy, push to Xray
-python main.py analyze --file your_file.cs --project example
+python main.py analyze --file your_file.cs --project example --dry-run   # nothing sent to Jira
+python main.py analyze --file your_file.cs --project example             # push to Xray
 ```
 
 ---

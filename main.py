@@ -2091,6 +2091,17 @@ def run_file_findings_command() -> None:
     from cli.file_findings import run as _run_file_findings
     sys.exit(_run_file_findings(sys.argv[2:]))
 
+def run_demo_command() -> None:
+    """
+    Handle the 'demo' subcommand — boot QAX's bundled vulnerable demo app and scan it, so a new
+    user sees confirmed findings in about a minute with no setup. Logic lives in cli/demo.py.
+
+    Called when sys.argv[1] == "demo".
+    """
+    from cli.demo import run as _run_demo
+    sys.exit(_run_demo(sys.argv[2:]))
+
+
 def run_verify_fixes_command() -> None:
     """
     Handle the 'verify-fixes' subcommand — are the bugs QAX filed actually fixed? Compares
@@ -2101,6 +2112,15 @@ def run_verify_fixes_command() -> None:
     """
     from cli.verify_fixes import run as _run_verify_fixes
     sys.exit(_run_verify_fixes(sys.argv[2:]))
+
+
+def scan_needs_key(quick: bool, repo: str | None) -> bool:
+    """
+    Whether a scan needs an Anthropic key: a DEEP scan (generation, red-team, critic) or any
+    scan that models a --repo's source with the AI. A quick scan of a live app (probes +
+    deterministic coverage templates) makes no model call and must run without one.
+    """
+    return (not quick) or bool(repo)
 
 
 def run_scan_command() -> None:
@@ -2196,7 +2216,14 @@ def run_scan_command() -> None:
 
     try:
         ctx = QAXContext.from_env(project=args.project or "", dry_run=args.dry_run)
-        ctx.require_anthropic_key()
+        # A key is needed only where an LLM is actually used: a DEEP scan, or modelling a
+        # --repo's source. A quick scan of a live app (probes + coverage templates) makes no
+        # model call, so it must run on a clean machine with no key (ROADMAP Q2).
+        if scan_needs_key(args.quick, args.repo):
+            ctx.require_anthropic_key()
+        elif not ctx.anthropic_key:
+            print("\n  (no ANTHROPIC_API_KEY — a quick scan of a live app needs none; the AI "
+                  "verification of failing generated tests is simply skipped)")
     except Exception as exc:
         print(f"\n  {exc}\n")
         sys.exit(1)
@@ -2311,13 +2338,14 @@ def main() -> None:
         "scan":             run_scan_command,
         "file-findings":    run_file_findings_command,
         "verify-fixes":     run_verify_fixes_command,
+        "demo":             run_demo_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes, demo")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 
