@@ -123,8 +123,23 @@ Hand triage of all 19: **every one is a bad test, not a Gitea bug** — two more
   vars onto the seeded ones, for both generated and red-team tests.
 - Round-2 setup repair also honours supplied tokens now (no register/login preamble).
 
-**Not yet re-validated live** — needs Anthropic credits. Next deep run should show
-the generated tests spread across resource groups and reaching their assertions.
+**Re-validated live (credits restored, 2026-10-15)** — two more deep scans, same target:
+
+| | deep #1 (before G4/G5) | deep #2 (G4+G5) | deep #3 (+ setup-step token) |
+|---|---|---|---|
+| endpoint groups sent to the LLM | 1 ("api", ~537 ops, truncated) | 4 (repos/user/orgs/admin, ~40) | 4 |
+| generated tests that invent a login | all | 0 | 0 |
+| executed tests PASS / FAIL | 20 / 19 | 30 / 17 | **36 / 2** |
+| generated (LLM) tests PASS | — | 14 of 23 | **18 of 18** |
+| confirmed findings / false positives | 2 / 0 | 2 / 0 | 2 / 0 |
+| cost | ~$0.36 (credits ran out) | ~$0.69 | ~$0.72 |
+
+Deep #2 showed G4 fixed and G5 mostly: 6 of the 9 remaining failing tests died at
+step 1 — `POST /admin/users` sent bare (401) because the model dropped the token with
+the login it invented. Fix: a SETUP step that expects a 2xx and has no auth gets the
+seeded token (the last step is left alone — a bare final step is the deliberate
+no-token probe). Deep #3: 17 → 2 FAILs. Throughout, the Critic/Investigator confirmed
+**0** of the failing LLM tests (0 AI leads) — the AI layer did not cry wolf.
 
 ## Changes (all with tests)
 

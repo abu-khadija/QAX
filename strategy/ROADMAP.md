@@ -29,8 +29,8 @@ without breaking anything. No number, no merge.
 - **2026-10-15:** 34 probes; suite **449 passed**; gate green. B4 now **3 real apps** (+Gitea,
   the first large token-auth app — killed a 12× P1 false-positive cascade; 0 FP, 2 real
   findings). **B6 Bug half done:** SCRUM-5/6 filed live to the owner's Jira in their own
-  QA bug format. Deep-scan generation fixes (G4/G5) built but **not yet re-validated
-  live — Anthropic credits ran out**.
+  QA bug format. Deep-scan generation fixes (G4/G5) **validated live** once credits returned (deep scan FAILs 19 → 2, generated tests 18/18 PASS, 0 AI false leads, ~$0.72/run).
+- **2026-10-15 (KB mining, files 05 + 11):** 40 probes (+5 spec-typed: boolean-false, single-element-array, date-order, long-input, duplicate-rows); **not-tested ledger** (a probe that can't run now says so — "absence of a finding != a pass"); Jira Bug covers the owner's 13 fields + `--client-safe` + evidence attachment. Suite 510.
 
 ---
 
