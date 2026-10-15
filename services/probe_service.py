@@ -86,6 +86,7 @@ class ProbeService:
         import uuid
         shared = requests.Session()
         shared._qax_created = []  # probes append every test record they write here
+        shared._qax_skips = []    # probes record WHY they could not run (not-tested ledger)
 
         # Resolve ONE shared "utility" user for the read-only probes that only need a
         # valid login (sqli, injection, path-traversal, ...), so they don't each
@@ -345,6 +346,8 @@ class ProbeService:
                 logger.error("probe cleanup failed: %s", exc)
             prog.emit("probe", "info", f"test-data cleanup: removed {cleaned}/{created} record(s)")
 
-        result = ProbeResult(findings=findings, created_records=created, cleaned_records=cleaned)
+        skipped = list(getattr(shared, "_qax_skips", []) or [])
+        result = ProbeResult(findings=findings, created_records=created, cleaned_records=cleaned,
+                             skipped=skipped)
         prog.emit("probe", "ok", result.summary())
         return result

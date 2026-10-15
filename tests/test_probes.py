@@ -1549,3 +1549,80 @@ def test_access_revocation_silent_without_grant_revoke_pair():
     m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/repos/{owner}/{repo}/collaborators"}])
     assert access_revocation_probe(m, "http://x", session=_RevokeSession("stale"),
                                    auth={"token": "A", "token_b": "B"}) == []
+
+
+# ── Not-tested ledger: a probe that can't run must SAY so (not return [] silently) ─
+
+class _LedgerSession(_RevokeSession):
+    """A fake app session that also carries the not-tested ledger ProbeService opens."""
+    def __init__(self, mode="secure"):
+        super().__init__(mode)
+        self._qax_skips = []
+
+
+def test_skip_helper_is_noop_without_a_ledger():
+    from execution.probes import _skip
+    _skip(object(), "x", "y")                     # no attribute → silently nothing
+    _skip(MagicMock(), "x", "y")                  # a non-list attribute → ignored, never raises
+
+
+def test_skip_helper_dedupes():
+    from execution.probes import _skip
+    s = _LedgerSession()
+    _skip(s, "bfla", "r"); _skip(s, "bfla", "r")
+    assert s._qax_skips == [{"probe": "bfla", "reason": "r", "kind": "missing-prerequisite"}]
+
+
+def test_access_revocation_reports_missing_second_identity():
+    from execution.probes import access_revocation_probe
+    s = _LedgerSession("stale")
+    assert access_revocation_probe(_revoke_model(), "http://x", session=s, auth={"token": "A"}) == []
+    assert [(k["probe"], k["kind"]) for k in s._qax_skips] == [("access-revocation", "missing-prerequisite")]
+    assert "--token-b" in s._qax_skips[0]["reason"]
+
+
+def test_access_revocation_na_is_not_a_gap_when_app_has_no_grant_pair():
+    from execution.probes import access_revocation_probe
+    from services.results import AppModel
+    s = _LedgerSession("stale")
+    m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/items"}])
+    assert access_revocation_probe(m, "http://x", session=s, auth={"token": "A"}) == []
+    assert s._qax_skips[0]["kind"] == "not-applicable"       # informational, not a coverage gap
+
+
+def test_access_revocation_reports_missing_whoami():
+    from execution.probes import access_revocation_probe
+
+    class _NoWhoami(_LedgerSession):
+        def get(self, url, headers=None, timeout=None):
+            if url.endswith("/user"):
+                return MagicMock(status_code=404, json=lambda: {})
+            return super().get(url, headers=headers, timeout=timeout)
+
+    s = _NoWhoami("stale")
+    assert access_revocation_probe(_revoke_model(), "http://x", session=s,
+                                   auth={"token": "A", "token_b": "B"}) == []
+    assert "whoami" in s._qax_skips[0]["reason"]
+
+
+def test_bfla_reports_when_no_ordinary_identity():
+    from execution.probes import bfla_probe
+
+    class _NoReg(_LedgerSession):
+        def post(self, *a, **k):
+            return MagicMock(status_code=404, text="", json=lambda: {})
+
+    s = _NoReg()
+    out = bfla_probe(_bfla_model(), "http://x", session=s, auth={"token": _VALID_JWT})  # primary only
+    assert out == []
+    assert any(k["probe"] == "bfla" and k["kind"] == "missing-prerequisite" for k in s._qax_skips)
+
+
+def test_probe_result_and_orchestrator_result_carry_gaps():
+    from services.results import OrchestratorResult, ProbeResult
+    skipped = [{"probe": "bola", "reason": "needs two users", "kind": "missing-prerequisite"},
+               {"probe": "xxe", "reason": "no xml endpoint", "kind": "not-applicable"}]
+    assert ProbeResult(skipped=skipped).skipped == skipped
+    r = OrchestratorResult(not_tested=skipped)
+    assert [g["probe"] for g in r.coverage_gaps] == ["bola"]          # n/a is NOT a gap
+    assert r.to_dict()["not_tested"] == skipped

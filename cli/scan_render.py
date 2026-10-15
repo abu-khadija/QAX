@@ -37,5 +37,17 @@ def render_scan_result(result) -> str:
             if b.get("evidence"):
                 lines.append(f"        {str(b['evidence'])[:150]}")
     else:
-        lines.append("\n  No findings — the app held up to the scan.")
+        gaps = list(getattr(result, "coverage_gaps", []) or [])
+        if gaps:
+            lines.append(f"\n  No findings — but {len(gaps)} check(s) could NOT run (below), so this "
+                         "is NOT a clean bill of health.")
+        else:
+            lines.append("\n  No findings — the app held up to the scan.")
+
+    gaps = list(getattr(result, "coverage_gaps", []) or [])
+    if gaps:
+        lines.append("\n  ⚠ NOT TESTED — these checks could not run (a quiet result here means "
+                     "\"unknown\", not \"safe\"):")
+        for g in gaps:
+            lines.append(f"    · {g.get('probe')}: {g.get('reason')}")
     return "\n".join(lines) + "\n"

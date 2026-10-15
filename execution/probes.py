@@ -92,6 +92,7 @@ def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = 
         return out
     token = _resolve_token(sess, base, recipe, model, f"jwtf_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
     if not token:
+        _skip(sess, "jwt-flaws", "no auth token — none supplied and self-registration/login failed")
         return out
     url = f"{base}{target}"
 
@@ -177,9 +178,11 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
     token = _resolve_token(sess, base, recipe, model,
                            f"ftr_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
     if not token:
+        _skip(sess, "forged-token-replay", "no auth token — none supplied and self-registration/login failed")
         return out
     parsed = _jwt_payload_segment(token)
     if not parsed:
+        _skip(sess, "forged-token-replay", "the token is not a JWT", kind="not-applicable")
         return out   # not a JWT bearer scheme — this probe doesn't apply
     parts = parsed[0]
     forged = f"{parts[0]}.{parts[1]}.{'A' * max(10, len(parts[2]))}"   # tampered signature
@@ -231,6 +234,26 @@ def forged_token_replay_probe(model, base_url: str, *, session: requests.Session
         if len(out) >= limit:
             break
     return out
+
+
+def _skip(sess, probe: str, reason: str, kind: str = "missing-prerequisite") -> None:
+    """
+    Record that a probe could NOT run, and why — so a quiet scan is never read as a
+    clean one ("absence of a finding != a pass"). `kind` is "missing-prerequisite"
+    (the probe needed something QAX didn't have: a second identity, a working login…
+    — a real coverage gap worth surfacing) or "not-applicable" (the app has nothing
+    for this probe to test — informational). A no-op unless the caller (ProbeService)
+    opened a ledger on the session, so probes run in isolation write nothing extra.
+    Never raises.
+    """
+    try:
+        ledger = getattr(sess, "_qax_skips", None)
+        if isinstance(ledger, list):
+            item = {"probe": probe, "reason": reason, "kind": kind}
+            if item not in ledger:
+                ledger.append(item)
+    except Exception:
+        pass
 
 
 # Probes that WRITE to the target (create records / persist input) rather than only
@@ -290,6 +313,8 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
     if not token:
         token = (auth or {}).get("token_b")
     if not token:
+        _skip(sess, "bfla", "no provably-ordinary identity — self-registration failed and no "
+                            "second (non-admin) token was supplied (--token-b)")
         return out
 
     seen: set = set()
@@ -631,6 +656,9 @@ def business_logic_probe(model, base_url: str, *, session: requests.Session | No
     token = None
     if any(e.get("auth_required") for e, _, _ in cands):
         token = _resolve_token(sess, base, recipe, model, f"bl_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        if not token:
+            _skip(sess, "business-logic", "the quantity/amount endpoints need auth, but no token was "
+                                          "supplied and self-registration/login failed")
 
     seen: set = set()
     for e, names, tgt in cands[:limit]:
@@ -781,8 +809,6 @@ def access_revocation_probe(model, base_url: str, *, session: requests.Session |
     out: list[ProbeFinding] = []
     tok_a = (auth or {}).get("token")
     tok_b = (auth or {}).get("token_b")
-    if not (tok_a and tok_b):
-        return out   # needs two real identities; self-registration can't make B an owner's grantee
 
     # Grant/revoke pairs: PUT (grant) + DELETE (revoke) on the SAME membership path
     # whose last segment is the member identity ({collaborator}/{username}/...).
@@ -804,10 +830,21 @@ def access_revocation_probe(model, base_url: str, *, session: requests.Session |
         if has("DELETE", path):
             pairs.append((path, m.group(1)))
     if not pairs:
+        _skip(sess, "access-revocation", "no grant/revoke (PUT + DELETE) membership endpoint pair",
+              kind="not-applicable")
+        return out
+    # Only now — the app HAS something to test — is a missing identity a real gap.
+    # Self-registration can't make B the grantee of an owner's resource, so this needs
+    # two supplied identities.
+    if not (tok_a and tok_b):
+        _skip(sess, "access-revocation", "needs two supplied identities (--token = the resource "
+                                         "owner, --token-b = the user to grant then revoke)")
         return out
 
     b_user = _whoami(sess, base, tok_b, auth)
     if not b_user:
+        _skip(sess, "access-revocation", "could not learn the grantee's username (no recognised "
+                                         "'whoami' endpoint such as /user or /me)")
         return out
 
     seen: set = set()
@@ -1219,6 +1256,8 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
     tb = _resolve_token(sess, base, recipe, model, f"bola_b_{uuid.uuid4().hex[:8]}@example.com",
                         auth=auth, slot="secondary")
     if not ta or not tb:
+        _skip(sess, "bola", "needs two distinct users — self-registration failed and "
+                            "--token/--token-b were not both supplied")
         return out
 
     _CONTENT_KW = ("secret", "content", "body", "data", "value", "text", "note", "description", "payload")

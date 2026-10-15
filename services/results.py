@@ -451,11 +451,19 @@ class OrchestratorResult:
     cleaned_records: int = 0
     legs: dict = field(default_factory=dict)   # B2: per-stage output counts (diagnostics)
     evidence: dict = field(default_factory=dict)   # S6: redacted replay trail (tests + steps)
+    # Probes that could NOT run, with the reason: [{probe, reason, kind}]. The honest
+    # counterpart of the findings — "absence of a finding != a pass".
+    not_tested: list = field(default_factory=list)
     error: str | None = None
 
     @property
     def success(self) -> bool:
         return self.error is None
+
+    @property
+    def coverage_gaps(self) -> list:
+        """The not-tested entries that are REAL gaps (a missing prerequisite), not n/a."""
+        return [n for n in (self.not_tested or []) if n.get("kind") == "missing-prerequisite"]
 
     def silent_legs(self) -> list:
         """
@@ -531,6 +539,7 @@ class OrchestratorResult:
             "cleaned_records": self.cleaned_records,
             "legs": self.legs,
             "silent_legs": self.silent_legs(),
+            "not_tested": self.not_tested,
             "evidence": self.evidence,
             "error": self.error,
             "success": self.success,
@@ -581,6 +590,9 @@ class ProbeResult:
     # about its footprint instead of silently polluting the target.
     created_records: int = 0
     cleaned_records: int = 0
+    # Probes that could NOT run, and why: [{probe, reason, kind}] where kind is
+    # "missing-prerequisite" (a real coverage gap) or "not-applicable" (nothing to test).
+    skipped: list = field(default_factory=list)
 
     @property
     def success(self) -> bool:

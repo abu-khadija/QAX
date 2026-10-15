@@ -390,8 +390,12 @@ class OrchestratorService:
             confirmed=confirmed, coverage=coverage, rounds=rounds,
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens, legs=legs, evidence=evidence,
+            not_tested=list(getattr(probe_result, "skipped", []) or []),
             created_records=getattr(probe_result, "created_records", 0),
             cleaned_records=getattr(probe_result, "cleaned_records", 0))
+        for gap in result.coverage_gaps:
+            prog.emit("orchestrate", "warn",
+                      f"NOT TESTED — {gap['probe']}: {gap['reason']}")
         silent = result.silent_legs()
         if silent:
             prog.emit("orchestrate", "warn",
