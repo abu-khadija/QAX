@@ -71,6 +71,24 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
     positioned per the Qodo study below; every claim maps to a gate number or a shipped
     control. Web scans now enforce the S4 authorized-target confirmation (was CLI-only).
 
+**NEXT — ordered (re-sequenced 2026-10-15 after the KB mining; each item green + gated before the next):**
+18. ✅ **KB mining batch 1+2 (files 05, 11, 12, 14)** — not-tested ledger, 5 spec-typed probes,
+    13-field Jira Bug + `--client-safe` + evidence attachment, `--reverify N` (measured X/X),
+    read-back retry, grouped gaps, data-state ledger. (40 probes, suite 527.)
+19. ▶ **`qax verify-fixes` (Q3, step 1 — close the loop)** — re-check filed findings →
+    FIXED / STILL REPRODUCES / COULD NOT TEST (the not-tested ledger decides the third bucket;
+    a probe that merely stopped firing is NOT clearance). Never closes as Duplicate, no
+    comment on unfixed, per-batch approval, record a build fingerprint (Last-Modified/ETag/root
+    hash) so "not redeployed" is distinguishable from "not fixed".
+20. **Prove the new probes can FAIL on a running server** — extend the golden target with
+    planted bugs for the 5 typed probes + access-revocation (+ secure controls) and truth
+    entries ("show every test failing once"; also Q5 benchmark credibility).
+21. **Q2 — time-to-first-confirmed-finding <= 10 min** (one command / Docker + bundled demo target).
+22. **Q4 — GitHub Action**: scan a preview URL, comment CONFIRMED only (+ UNSTABLE/NOT TESTED honesty).
+23. **Q3 step 2 — confirmed finding -> runnable regression test -> Xray** (Xray half of B6 waits on the owner's trial app).
+24. **KB mining continues**: file 13 (automation deep pass), 01-03 principles/lifecycle, 06, 08-10 (see memory).
+Opportunistic/gated: B6 Xray half (owner), Q5 open benchmark (gated on B9 IP), B8 GTM slices, B9 IP/legal (deferred).
+
 **From the Qodo competitive study (2026-10-14, `strategy/QODO_COMPETITIVE_INTEL.md`):**
 Qodo (≈$120M raised) is now enterprise AI *code review + governance*. It **retired test
 generation** (Cover unmaintained since Jun 2025; IDE plugin retires 30 Oct 2026) and shows
