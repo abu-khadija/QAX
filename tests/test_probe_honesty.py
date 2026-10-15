@@ -579,3 +579,28 @@ def test_forge_jwt_is_not_applicable_when_the_source_has_no_hardcoded_secret():
     res = ProbeService(QAXContext(anthropic_key="k", project="")).run(_m(), "http://127.0.0.1:1")
     g = [x for x in res.skipped if x["probe"] == "forge-jwt"]
     assert g and g[0]["kind"] == "not-applicable" and "no hardcoded JWT signing secret" in g[0]["reason"]
+
+
+# ── probe candidate ordering (found by planting bugs on the golden target) ─────────────────────────
+
+def test_risk_ordered_puts_security_relevant_endpoints_first_without_mutating():
+    from services.probe_service import risk_ordered
+    from services.results import AppModel
+    eps = [{"method": "GET", "path": "/aaa-health"},
+           {"method": "GET", "path": "/bbb-status"},
+           {"method": "POST", "path": "/zzz/upload", "request_fields": ["file"], "auth_required": True},
+           {"method": "GET", "path": "/zzz/reset-link"}]
+    m = AppModel(root="/x", endpoints=eps)
+    ordered = risk_ordered(m)
+    paths = [e["path"] for e in ordered.endpoints]
+    assert paths[0] == "/zzz/upload" and paths[1] == "/zzz/reset-link"
+    assert [e["path"] for e in m.endpoints] == ["/aaa-health", "/bbb-status", "/zzz/upload", "/zzz/reset-link"]
+    assert len(paths) == 4                                            # nothing dropped
+    assert risk_ordered(AppModel(root="/x", endpoints=[])).endpoints == []   # tiny/empty models untouched
+
+
+def test_risk_ordered_is_stable_for_ties():
+    from services.probe_service import risk_ordered
+    from services.results import AppModel
+    eps = [{"method": "GET", "path": f"/p{i}"} for i in range(6)]
+    assert [e["path"] for e in risk_ordered(AppModel(root="/x", endpoints=eps)).endpoints] == [e["path"] for e in eps]

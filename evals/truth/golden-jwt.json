@@ -147,6 +147,69 @@
       "match": [
         "mass assignment"
       ]
+    },
+    {
+      "id": "sqli-path",
+      "match": [
+        "produced a sql error",
+        "/products/"
+      ]
+    },
+    {
+      "id": "sqli-body",
+      "match": [
+        "produced a sql error",
+        "/lookup"
+      ]
+    },
+    {
+      "id": "nosql",
+      "match": [
+        "nosql injection",
+        "/lookup"
+      ]
+    },
+    {
+      "id": "malformed-input",
+      "match": [
+        "unhandled server error",
+        "/appointments"
+      ]
+    },
+    {
+      "id": "command-injection",
+      "match": [
+        "command injection",
+        "/ping"
+      ]
+    },
+    {
+      "id": "ssrf",
+      "match": [
+        "ssrf",
+        "/fetch"
+      ]
+    },
+    {
+      "id": "stored-xss",
+      "match": [
+        "stored xss",
+        "/comments"
+      ]
+    },
+    {
+      "id": "bola",
+      "match": [
+        "broken object-level authorization",
+        "/notes/"
+      ]
+    },
+    {
+      "id": "persistence",
+      "match": [
+        "silent data loss",
+        "/notes"
+      ]
     }
   ]
 }

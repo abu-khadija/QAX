@@ -525,7 +525,7 @@ _ID_KEYS = ("id", "uuid", "pk", "_id")
 
 
 def duplicate_rows_probe(model, base_url: str, *, session: requests.Session | None = None,
-                         auth: dict | None = None, limit: int = 12) -> list[ProbeFinding]:
+                         auth: dict | None = None, limit: int = 30) -> list[ProbeFinding]:
     """
     One record listed twice ("lists show a record once, even with many
     pending items on it" — a join fan-out). READ-ONLY: GET each collection endpoint (no

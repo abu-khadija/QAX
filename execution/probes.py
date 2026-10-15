@@ -439,7 +439,7 @@ def bfla_probe(model, base_url: str, *, session: requests.Session | None = None,
                                 f"cannot be shown", kind="not-applicable")
     return out
 def host_header_injection_probe(model, base_url: str, *, session: requests.Session | None = None,
-                                auth: dict | None = None, limit: int = 10) -> list[ProbeFinding]:
+                                auth: dict | None = None, limit: int = 25) -> list[ProbeFinding]:
     """
     Host-header injection / web-cache & reset-link poisoning. Send a request with a
     forged `Host` (and `X-Forwarded-Host`) and confirm the server used it to BUILD a
@@ -2055,7 +2055,7 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
     seen: set = set()
     reached = 0
     skipped_auth = 0
-    for e in gets[:12]:
+    for e in gets[:20]:
         path = str(e.get("path", ""))
         resolved = re.sub(r"\{[^}]+\}", "qaxprobe1", path)
         if resolved in seen:
@@ -2097,7 +2097,7 @@ def excessive_data_probe(model, base_url: str, *, session: requests.Session | No
         _skip(sess, "excessive-data", f"{skipped_auth} endpoint(s) need auth, but no token was supplied and "
                                       f"self-registration/login failed — they were not checked", needs="auth-token")
     if not out and not reached and not skipped_auth:
-        _unreached(sess, "excessive-data", len(gets[:12]))
+        _unreached(sess, "excessive-data", len(gets[:20]))
     return out
 def cookie_flags_probe(model, base_url: str, *, session: requests.Session | None = None) -> list[ProbeFinding]:
     """
@@ -2868,7 +2868,7 @@ def unpaginated_list_probe(model, base_url: str, *, session: requests.Session | 
     seen: set = set()
     reached = 0
     big = 0
-    for e in cols[:8]:
+    for e in cols[:30]:
         path = str(e.get("path", ""))
         if path in seen:
             continue
@@ -3540,7 +3540,7 @@ def stored_xss_probe(model, base_url: str, *, session: requests.Session | None =
     html_seen = [0]
 
     def _read_has(marker):
-        for re_ in reads[:8]:
+        for re_ in reads[:20]:
             rpath = re.sub(r"\{[^}]+\}", "1", str(re_.get("path", "")))
             rheaders = _auth_headers(token, auth) if re_.get("auth_required") else {}
             try:

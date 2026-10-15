@@ -41,7 +41,8 @@ _TYPED_PROBES = {"boolean-false", "single-element-array", "date-order", "long-in
 # silent on the SECURE app. Grown batch by batch until every probe has one.
 _PLANTED_PROBES = {"cookie-flags", "error-handling", "debug-disclosure", "excessive-data",
                    "crash-fuzz", "auth-error", "cors", "path-traversal", "unpaginated-list",
-                   "open-redirect", "mass-assignment", "rate-limit"}
+                   "open-redirect", "mass-assignment", "rate-limit", "stored-xss", "nosql", "sqli", "bola",
+                   "persistence", "malformed-input", "command-injection", "ssrf", "search-robustness"}
 
 APP = str(Path(__file__).parent / "targets" / "vuln_jwt_app.py")
 TRUTH = str(Path(__file__).parent / "truth" / "golden-jwt.json")

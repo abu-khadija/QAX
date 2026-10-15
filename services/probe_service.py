@@ -26,6 +26,40 @@ from services.results import AppModel, ProbeResult
 
 logger = logging.getLogger(__name__)
 
+# Words that mark an endpoint as worth probing first (account/recovery flows, files, URLs, search,
+# free text, money). Used only to ORDER candidates — nothing is excluded.
+_PRIORITY_HINTS = ("reset", "forgot", "password", "login", "auth", "token", "admin", "upload", "import",
+                   "export", "file", "download", "url", "redirect", "fetch", "search", "query", "comment",
+                   "message", "lookup", "user", "account", "order", "payment", "billing", "invoice")
+
+
+def _probe_priority(e) -> int:
+    """Security relevance of one endpoint: writes, auth, a hinting name, and user-controlled inputs."""
+    if not isinstance(e, dict):
+        return 0
+    path = str(e.get("path", "")).lower()
+    return ((2 if str(e.get("method", "")).upper() in ("POST", "PUT", "PATCH", "DELETE") else 0)
+            + (1 if e.get("auth_required") else 0)
+            + (2 if any(h in path for h in _PRIORITY_HINTS) else 0)
+            + (1 if (e.get("query_params") or e.get("request_fields") or "{" in path) else 0))
+
+
+def risk_ordered(model: AppModel) -> AppModel:
+    """
+    A copy of `model` whose endpoints are ordered most-security-relevant first (stable, so ties keep
+    spec order). Every probe inspects only the first N candidates of its kind; with the spec's
+    alphabetical order a large app's reset-link / upload / lookup endpoints fell outside those windows
+    and were never probed. The caller's model is not mutated.
+    """
+    import dataclasses
+    eps = getattr(model, "endpoints", None)
+    if not isinstance(eps, list) or len(eps) < 2:
+        return model
+    try:
+        return dataclasses.replace(model, endpoints=sorted(eps, key=_probe_priority, reverse=True))
+    except Exception:
+        return model
+
 
 class ProbeService:
     """Run active exploit probes against a live app, driven by the AppModel."""
@@ -66,6 +100,7 @@ class ProbeService:
         prog = progress or NullProgressReporter()
         if not isinstance(model, AppModel) or not model.success:
             return ProbeResult(error="No valid AppModel to drive probes.")
+        model = risk_ordered(model)
         if not base_url or not str(base_url).strip():
             return ProbeResult(error="No base_url to probe against.")
 

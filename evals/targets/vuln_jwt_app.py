@@ -112,6 +112,106 @@ def login():
     return resp
 
 
+_COMMENTS: list = []
+_NOTES: dict = {}       # title -> {"owner", "title", "body", "summary"}
+
+
+@app.post("/comments")
+def add_comment():
+    """Stores a comment. The GET below renders it as HTML (stored XSS when unescaped)."""
+    body = request.get_json(silent=True) or {}
+    content = body.get("content")
+    if not isinstance(content, str):
+        return jsonify({"error": "content must be a string"}), 422
+    _COMMENTS.append(content)
+    return jsonify({"id": len(_COMMENTS)}), 201
+
+
+@app.get("/comments")
+def list_comments():
+    """VULNERABLE: stored comments are written into the HTML page raw (stored XSS).
+    SECURE: HTML-escaped."""
+    import html as _html
+    items = _COMMENTS if not SECURE else [_html.escape(c) for c in _COMMENTS]
+    return ("<html><body><ul>" + "".join(f"<li>{c}</li>" for c in items) + "</ul></body></html>", 200,
+            {"Content-Type": "text/html"})
+
+
+@app.post("/lookup")
+def lookup():
+    """
+    VULNERABLE (two classes on one lookup):
+      • SQL injection — a quote in `username` breaks the query (error text returned, HTTP 500);
+      • NoSQL operator injection — an operator object ({"$ne": x}) is evaluated as a filter and
+        returns every account.
+    SECURE: parameterised (a quote is just a character) and operator objects are rejected (400).
+    """
+    body = request.get_json(silent=True) or {}
+    u = body.get("username")
+    if isinstance(u, dict):
+        if SECURE:
+            return jsonify({"error": "username must be a string"}), 400
+        everyone = [{"username": n} for n in list(_USERS) + ["admin", "root", "svc-backup"]]
+        if "$ne" in u:
+            return jsonify({"users": everyone}), 200          # filter bypassed: all accounts
+        return jsonify({"users": []}), 200                    # $eq / anything else: no match
+    if not isinstance(u, str):
+        return jsonify({"error": "username is required"}), 422
+    if not SECURE and ("'" in u or '"' in u):
+        return ('sqlite3.OperationalError: near "\'": syntax error', 500, {"Content-Type": "text/plain"})
+    return jsonify({"users": [{"username": n} for n in _USERS if n == u]}), 200
+
+
+@app.post("/notes")
+def create_note():
+    """
+    Private notes, owned by the creator. VULNERABLE: the `summary` field is accepted ("saved") but
+    never stored (silent data loss on save). SECURE stores every field.
+    """
+    sub = _auth()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    title, text, summary = body.get("title"), body.get("body"), body.get("summary")
+    if not isinstance(title, str) or not title:
+        return jsonify({"error": "title is required"}), 422
+    note = {"owner": sub, "title": title, "body": text if isinstance(text, str) else ""}
+    if SECURE:
+        note["summary"] = summary if isinstance(summary, str) else ""
+    _NOTES[title] = note
+    return jsonify({"success": True, "message": "saved"}), 201
+
+
+@app.get("/notes/<note_id>")
+def get_note(note_id):
+    """VULNERABLE: any authenticated user can read any note (BOLA). SECURE: owner only (404 otherwise)."""
+    sub = _auth()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    note = _NOTES.get(note_id)
+    if note is None or (SECURE and note["owner"] != sub):
+        return jsonify({"error": "not found"}), 404
+    return jsonify(note), 200
+
+
+@app.post("/appointments")
+def create_appointment():
+    """VULNERABLE: `scheduled_at` is parsed with no error handling, so a malformed value is an
+    unhandled 500. SECURE: a clean 422."""
+    import datetime as _dt
+    body = request.get_json(silent=True) or {}
+    title, when = body.get("title"), body.get("scheduled_at")
+    if not isinstance(title, str) or not isinstance(when, str):
+        return jsonify({"error": "title and scheduled_at must be strings"}), 422
+    try:
+        at = _dt.datetime.fromisoformat(when)
+    except ValueError:
+        if SECURE:
+            return jsonify({"error": "scheduled_at must be an ISO-8601 datetime"}), 422
+        raise                                                    # VULNERABLE: unhandled -> HTTP 500
+    return jsonify({"id": 1, "title": title, "scheduled_at": at.isoformat()}), 201
+
+
 @app.get("/me")
 def me():
     sub = _auth()
@@ -180,6 +280,61 @@ def item(item_id):
 def not_found(_e):
     """VULNERABLE: the global handler for unknown routes itself fails (5xx instead of 404)."""
     return (jsonify({"error": "not found"}), 404) if SECURE else (jsonify({"error": "internal"}), 500)
+
+
+@app.get("/products/<pid>")
+def product(pid):
+    """VULNERABLE: the id is spliced into a raw SQL string — a quote breaks the query and the driver's
+    error text comes back (SQL injection). SECURE: parameterised (a quote is just a character)."""
+    if not SECURE and ("'" in pid or '"' in pid):
+        return ('sqlite3.OperationalError: unrecognized token: "\'"', 500, {"Content-Type": "text/plain"})
+    return (jsonify({"id": pid, "name": "widget"}), 200) if pid.isdigit() else (jsonify({"error": "not found"}), 404)
+
+
+@app.get("/ping")
+def ping():
+    """
+    VULNERABLE: `host` is interpolated into a shell command (simulated — nothing is executed): a
+    separator followed by `echo X` runs and its output is returned. SECURE: strict hostname allow-list.
+    """
+    import re as _re
+    host = request.args.get("host", "127.0.0.1")
+    if SECURE and not _re.fullmatch(r"[A-Za-z0-9.\-]{1,253}", host):
+        return jsonify({"error": "invalid host"}), 400
+    parts = _re.split(r";|&&|\||`|\$\(", host)
+    out = f"PING {parts[0].strip()}: 64 bytes\n"
+    for extra in parts[1:]:
+        m = _re.match(r"\s*echo\s+([^\s)`]+)", extra)
+        if m:
+            out += m.group(1) + "\n"
+    return out, 200, {"Content-Type": "text/plain"}
+
+
+@app.get("/search")
+def search():
+    """VULNERABLE: raw search-engine operator syntax — an ordinary special character (email '@', a
+    slash, quotes...) is rejected with 405. SECURE: the query is escaped and answered."""
+    q = request.args.get("q", "")
+    if not SECURE and any(ch in q for ch in '@"()/|~^-'):
+        return jsonify({"error": "method not allowed"}), 405
+    return jsonify({"results": [], "q": q[:50]}), 200
+
+
+@app.get("/fetch")
+def fetch():
+    """VULNERABLE: fetches any http(s) URL it is given (SSRF). SECURE: refuses non-allow-listed hosts."""
+    import urllib.request
+    from urllib.parse import urlparse
+    url = request.args.get("url", "")
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "url must be http(s)"}), 400
+    if SECURE and urlparse(url).hostname not in ("api.example.com",):
+        return jsonify({"error": "host not allowed"}), 400
+    try:
+        n = len(urllib.request.urlopen(url, timeout=3).read())
+    except Exception:
+        return jsonify({"error": "fetch failed"}), 502
+    return jsonify({"fetched_bytes": n}), 200
 
 
 @app.after_request
@@ -450,6 +605,26 @@ def spec():
         "paths": {
             "/auth/register": {"post": {"responses": {"201": {"description": "ok"}}}},
             "/auth/login": {"post": {"responses": {"200": {"description": "ok"}}}},
+            "/comments": {
+                "get": {"responses": {"200": {"description": "html"}}},
+                "post": {"responses": {"201": {"description": "ok"}},
+                         "requestBody": {"content": {"application/json": {"schema": {"properties": {
+                             "content": {"type": "string"}}}}}}}},
+            "/lookup": {"post": {"responses": {"200": {"description": "ok"}},
+                                 "requestBody": {"content": {"application/json": {"schema": {"properties": {
+                                     "username": {"type": "string"}}}}}}}},
+            "/notes": {"post": {"security": secured, "responses": {"201": {"description": "ok"}},
+                                "requestBody": {"content": {"application/json": {"schema": {"properties": {
+                                    "title": {"type": "string"}, "body": {"type": "string"},
+                                    "summary": {"type": "string"}}}}}}}},
+            "/notes/{note_id}": {"get": {"security": secured,
+                                         "parameters": [{"name": "note_id", "in": "path", "required": True,
+                                                         "schema": {"type": "string"}}],
+                                         "responses": {"200": {"description": "ok"}}}},
+            "/appointments": {"post": {"responses": {"201": {"description": "ok"}},
+                                       "requestBody": {"content": {"application/json": {"schema": {"properties": {
+                                           "title": {"type": "string"},
+                                           "scheduled_at": {"type": "string", "format": "date-time"}}}}}}}},
             "/me": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
             "/admin/users": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
             "/billing/invoices": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
@@ -463,6 +638,15 @@ def spec():
                               "responses": {"200": {"description": "ok"}}}},
             "/redirect": {"get": {"parameters": [{"name": "url", "in": "query", "schema": {"type": "string"}}],
                                   "responses": {"302": {"description": "redirect"}}}},
+            "/products/{pid}": {"get": {"parameters": [{"name": "pid", "in": "path", "required": True,
+                                                         "schema": {"type": "string"}}],
+                                        "responses": {"200": {"description": "ok"}}}},
+            "/ping": {"get": {"parameters": [{"name": "host", "in": "query", "schema": {"type": "string"}}],
+                              "responses": {"200": {"description": "ok"}}}},
+            "/search": {"get": {"parameters": [{"name": "q", "in": "query", "schema": {"type": "string"}}],
+                                "responses": {"200": {"description": "ok"}}}},
+            "/fetch": {"get": {"parameters": [{"name": "url", "in": "query", "schema": {"type": "string"}}],
+                               "responses": {"200": {"description": "ok"}}}},
             "/greet": {"get": {
                 "parameters": [{"name": "name", "in": "query",
                                 "schema": {"type": "string"}}],
