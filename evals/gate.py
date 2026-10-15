@@ -77,7 +77,18 @@ class _Cap:
         self.lines.append(str(msg))
 
 
-def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None):
+def _two_user_auth(base_url: str) -> dict:
+    """Register + log in two ordinary users on the target and return QAX's supplied-identity auth dict."""
+    import requests
+    toks = []
+    for name in ("alice", "bob"):
+        cred = {"email": f"{name}@example.com", "password": "Secret123!"}
+        requests.post(f"{base_url}/auth/register", json=cred, timeout=5)
+        toks.append(requests.post(f"{base_url}/auth/login", json=cred, timeout=5).json()["access_token"])
+    return {"token": toks[0], "token_b": toks[1], "header": "Authorization", "scheme": "Bearer"}
+
+
+def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None, auth=None):
     """Scan the live target. Quick = deterministic/zero-LLM; deep = credit-gated."""
     import json
 
@@ -95,7 +106,7 @@ def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None):
     t0 = time.time()
     kw = dict(max_router_files=1, max_endpoints=6) if deep else {}
     res = OrchestratorService(ctx or QAXContext.from_env()).run(
-        empty, base_url, deep=deep, use_cache=False, progress=prog, **kw)
+        empty, base_url, deep=deep, use_cache=False, progress=prog, auth=auth, **kw)
     if deep:
         from services import usage as _usage
         usage = _usage.snapshot()
@@ -144,6 +155,8 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
         from services.context import QAXContext
         res_nokey, rec_nokey = _scan(f"http://127.0.0.1:{port}",
                                      ctx=dataclasses.replace(QAXContext.from_env(), anthropic_key=""))
+        # access-revocation needs TWO supplied identities: scan once more with them.
+        res_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
@@ -176,6 +189,16 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     typed_missing = sorted(_TYPED_PROBES - probes)
     checks.append(("typed probes: all 5 fired on the vulnerable target", not typed_missing,
                    f"fired={sorted(_TYPED_PROBES & probes)} missing={typed_missing or 'none'}"))
+    revoked = [b for b in res_auth.confirmed if b.get("probe") == "access-revocation"]
+    checks.append(("access-revocation fired with two supplied identities (stale access after revoke)",
+                   len(revoked) == 1, f"findings={[b.get('title') for b in revoked] or 'none'}"))
+    ar_gaps = [n for n in res_auth.not_tested if n.get("probe") == "access-revocation"]
+    checks.append(("access-revocation actually exercised (no 'could not run' gap)", not ar_gaps,
+                   f"gaps={[(n['kind'], n['reason'][:50]) for n in ar_gaps] or 'none'}"))
+    ar_noauth = [n for n in res.not_tested if n.get("probe") == "access-revocation"
+                 and n.get("kind") == "missing-prerequisite"]
+    checks.append(("access-revocation says so when no second identity is supplied", len(ar_noauth) == 1,
+                   f"ledger={[(n['kind'], n.get('needs')) for n in ar_noauth] or 'none'}"))
     unexercised = [n for n in res.not_tested if n.get("probe") in _TYPED_PROBES]
     checks.append(("typed probes: actually exercised (no 'could not run' gap)", not unexercised,
                    f"gaps={[(n['probe'], n['kind']) for n in unexercised] or 'none'}"))
@@ -185,12 +208,16 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     proc = _boot(port, secure=True)
     try:
         sres, _ = _scan(f"http://127.0.0.1:{port}")
+        sres_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
     finally:
         proc.terminate()
     auth_bugs = [b for b in sres.confirmed
                  if b.get("probe") in ("jwt-flaws", "forged-token-replay", "forge-jwt", "bfla")]
     checks.append(("secure control: auth probes silent (0)", len(auth_bugs) == 0,
                    f"auth findings on fixed app={len(auth_bugs)}"))
+    ar_fp = [b.get("probe") for b in sres_auth.confirmed if b.get("probe") == "access-revocation"]
+    checks.append(("secure control: access-revocation silent (0)", not ar_fp,
+                   f"findings on fixed app={ar_fp or 0}"))
     typed_fp = [b.get("probe") for b in sres.confirmed if b.get("probe") in _TYPED_PROBES]
     checks.append(("secure control: typed probes silent (0)", not typed_fp,
                    f"typed findings on fixed app={typed_fp or 0}"))

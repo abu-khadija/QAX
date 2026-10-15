@@ -13,6 +13,11 @@ and stays SILENT when the flaw is fixed (QAX_SECURE=1 — the no-false-positive 
 (boolean-false, single-element-array, date-order, long-input, duplicate-rows); SECURE
 handles each correctly so the same probes must go silent (the no-false-positive control).
 
+Repo sharing (`/user`, `/user/repos`, `/repos/{owner}/{repo}` + `/collaborators/{name}`) plants STALE
+ACCESS AFTER REVOCATION: the vulnerable app keeps a "ever granted" cache, so a collaborator the owner
+REMOVED can still read the repo; SECURE checks current membership only. It needs two supplied
+identities (QAX's access-revocation probe), so the gate exercises it in a separate authenticated scan.
+
 Endpoints: /me (control), /admin/users, /billing/invoices (protected, swept),
 /health (public), /auth/register + /auth/login (register is required before login),
 /openapi.json (so QAX grounds the exact surface regardless of source modelling).
@@ -202,6 +207,68 @@ def create_order():
 
 
 _TASKS: list = []
+_REPOS: dict = {}       # (owner, name) -> {}
+_COLLAB: dict = {}      # (owner, name) -> {current collaborators}
+_EVER: dict = {}        # (owner, name) -> {everyone ever granted}  (the stale cache)
+
+
+@app.get("/user")
+def whoami():
+    sub = _auth()
+    return (jsonify({"login": sub}), 200) if sub else (jsonify({"error": "unauthorized"}), 401)
+
+
+@app.get("/user/repos")
+def my_repos():
+    sub = _auth()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    key = (sub, "proj")
+    _REPOS.setdefault(key, {})                    # every user owns one repo (lazily created)
+    return jsonify([{"owner": {"login": o}, "name": n} for (o, n) in _REPOS if o == sub]), 200
+
+
+@app.get("/repos/<owner>/<repo>")
+def get_repo(owner, repo):
+    sub = _auth()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    key = (owner, repo)
+    if key not in _REPOS:
+        return jsonify({"error": "not found"}), 404
+    allowed = sub == owner or sub in _COLLAB.get(key, set())
+    # VULNERABLE: a revoked collaborator is still honoured from a permission cache that is never
+    # invalidated. SECURE: current membership only.
+    if not SECURE and sub in _EVER.get(key, set()):
+        allowed = True
+    return (jsonify({"owner": owner, "name": repo}), 200) if allowed else (jsonify({"error": "not found"}), 404)
+
+
+@app.put("/repos/<owner>/<repo>/collaborators/<name>")
+def add_collaborator(owner, repo, name):
+    sub = _auth()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    key = (owner, repo)
+    if sub != owner or key not in _REPOS:
+        return jsonify({"error": "forbidden"}), 403
+    _COLLAB.setdefault(key, set()).add(name)
+    _EVER.setdefault(key, set()).add(name)
+    return "", 204
+
+
+@app.delete("/repos/<owner>/<repo>/collaborators/<name>")
+def remove_collaborator(owner, repo, name):
+    sub = _auth()
+    if not sub:
+        return jsonify({"error": "unauthorized"}), 401
+    key = (owner, repo)
+    if sub != owner or key not in _REPOS:
+        return jsonify({"error": "forbidden"}), 403
+    _COLLAB.get(key, set()).discard(name)         # the row is removed… (the _EVER cache is NOT, when vulnerable)
+    if SECURE:
+        _EVER.get(key, set()).discard(name)
+    return "", 204
 
 
 @app.post("/tasks")
@@ -284,6 +351,12 @@ def spec():
             "/orders": {"post": {"responses": {"201": {"description": "ok"}},
                                  "requestBody": {"content": {"application/json": {"schema": {"properties": {
                                      "item": {"type": "string"}, "quantity": {"type": "integer"}}}}}}}},
+            "/user": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
+            "/user/repos": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
+            "/repos/{owner}/{repo}": {"get": {"security": secured, "responses": {"200": {"description": "ok"}}}},
+            "/repos/{owner}/{repo}/collaborators/{collaborator}": {
+                "put": {"security": secured, "responses": {"204": {"description": "ok"}}},
+                "delete": {"security": secured, "responses": {"204": {"description": "ok"}}}},
             "/tasks": {
                 "get": {"parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer"}}],
                         "responses": {"200": {"description": "ok"}}},
