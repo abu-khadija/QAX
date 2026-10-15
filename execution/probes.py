@@ -264,6 +264,27 @@ def _skip(sess, probe: str, reason: str, kind: str = "missing-prerequisite",
         pass
 
 
+def _no_candidates(sess, probe: str, what: str) -> None:
+    """The app has nothing for this probe to test (informational — not a coverage gap)."""
+    _skip(sess, probe, f"no {what} in this app", kind="not-applicable")
+
+
+def _need_token(sess, probe: str, token, needed: bool = True) -> None:
+    """
+    Record a gap when some endpoints need auth but no token could be obtained: they are then
+    requested unauthenticated and the probe cannot say anything about their protected behaviour.
+    """
+    if needed and not token:
+        _skip(sess, probe, "some endpoints need auth, but no token was supplied and self-registration/"
+                           "login failed — those were requested without credentials", needs="auth-token")
+
+
+def _unreached(sess, probe: str, tried: int) -> None:
+    """Every request failed at the network level — QAX could not talk to the endpoint(s) at all."""
+    _skip(sess, probe, f"none of the {tried} candidate endpoint(s) could be reached (every request "
+                       f"failed at the network level), so nothing was actually tested")
+
+
 # Probes that WRITE to the target (create records / persist input) rather than only
 # reading. Surfaced so a scan can warn the operator exactly what will mutate the
 # target, and so an authorized-target gate can name them. (Read-only probes — sqli on
@@ -378,12 +399,17 @@ def host_header_injection_probe(model, base_url: str, *, session: requests.Sessi
     cands = [e for e in getattr(model, "endpoints", [])
              if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
              and "{" not in str(e.get("path", ""))]
+    if not cands:
+        _no_candidates(sess, "host-header-injection", "parameter-free GET endpoint")
+        return out
     token = None
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"hhi_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "host-header-injection", token)
 
     marker = f"qax{uuid.uuid4().hex[:10]}.evil.invalid"
     seen: set = set()
+    reached = 0
     for e in cands[:limit]:
         path = str(e.get("path", ""))
         if path in seen:
@@ -396,6 +422,7 @@ def host_header_injection_probe(model, base_url: str, *, session: requests.Sessi
             r = sess.get(f"{base}{path}", headers=headers, timeout=15, allow_redirects=False)
         except Exception:
             continue
+        reached += 1
         loc = str(r.headers.get("Location", ""))
         body = r.text or ""
         if marker in loc or f"//{marker}" in body or f"://{marker}" in body:
@@ -409,6 +436,8 @@ def host_header_injection_probe(model, base_url: str, *, session: requests.Sessi
                           f"to poison password-reset links and the web cache."),
                 target=path))
             break   # Host trust is a server-wide behavior — one proof suffices
+    if not out and not reached:
+        _unreached(sess, "host-header-injection", len(cands[:limit]))
     return out
 
 
@@ -437,11 +466,16 @@ def xxe_probe(model, base_url: str, *, session: requests.Session | None = None,
     cands = [e for e in getattr(model, "endpoints", [])
              if isinstance(e, dict) and str(e.get("method", "")).upper() in ("POST", "PUT", "PATCH")
              and "{" not in str(e.get("path", ""))]
+    if not cands:
+        _no_candidates(sess, "xxe", "write (POST/PUT/PATCH) endpoint without path parameters")
+        return out
     token = None
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"xxe_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "xxe", token)
 
     seen: set = set()
+    reached = 0
     for e in cands[:limit]:
         method = str(e.get("method", "POST")).upper()
         path = str(e.get("path", ""))
@@ -455,6 +489,7 @@ def xxe_probe(model, base_url: str, *, session: requests.Session | None = None,
             r = sess.request(method, f"{base}{path}", data=_XXE_PAYLOAD, headers=headers, timeout=15)
         except Exception:
             continue
+        reached += 1
         if "root:x:0:0" in (r.text or ""):
             out.append(ProbeFinding(
                 probe="xxe",
@@ -466,6 +501,8 @@ def xxe_probe(model, base_url: str, *, session: requests.Session | None = None,
                           f"(and often reach SSRF)."),
                 target=path))
             break
+    if not out and not reached:
+        _unreached(sess, "xxe", len(cands[:limit]))
     return out
 
 
@@ -514,11 +551,17 @@ def file_upload_probe(model, base_url: str, *, session: requests.Session | None 
         return any(k in hay for k in _UPLOAD_KW)
 
     cands = [e for e in getattr(model, "endpoints", []) if _is_upload(e)]
+    if not cands:
+        _no_candidates(sess, "file-upload", "file-upload endpoint")
+        return out
     token = None
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"upl_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "file-upload", token)
 
     seen: set = set()
+    reached = 0
+    accepted_no_url = 0
     for e in cands[:limit]:
         method = str(e.get("method", "POST")).upper()
         path = str(e.get("path", ""))
@@ -536,10 +579,12 @@ def file_upload_probe(model, base_url: str, *, session: requests.Session | None 
             r = sess.request(method, f"{base}{path}", files=files, headers=headers, timeout=15)
         except Exception:
             continue
+        reached += 1
         if not (200 <= r.status_code < 300):
-            continue
+            continue                       # rejected — the secure outcome for a dangerous extension
         url = _extract_upload_url(r.text or "", fname, base)
         if not url:
+            accepted_no_url += 1           # accepted, but we cannot fetch the file back to check it
             continue
         try:
             g = sess.get(url, headers=headers, timeout=15)
@@ -556,6 +601,13 @@ def file_upload_probe(model, base_url: str, *, session: requests.Session | None 
                           f"executes in the app's origin (stored XSS; often a path to RCE)."),
                 target=path))
             break
+    if not out:
+        if accepted_no_url:
+            _skip(sess, "file-upload", f"{accepted_no_url} upload(s) were accepted, but the response "
+                                       f"gave no URL to fetch the file back, so QAX could not check how "
+                                       f"it is served (stored XSS / code execution)")
+        elif not reached:
+            _unreached(sess, "file-upload", len(cands[:limit]))
     return out
 
 
@@ -590,12 +642,17 @@ def graphql_introspection_probe(model, base_url: str, *, session: requests.Sessi
         paths.append(p)
 
     seen: set = set()
+    reached = 0
     for p in paths:
         if p in seen or len(seen) >= limit:
             continue
         seen.add(p)
         try:
             r = sess.post(f"{base}{p}", json=_INTROSPECTION_QUERY, headers=headers, timeout=15)
+        except Exception:
+            continue
+        reached += 1                      # the server ANSWERED (even a 404/HTML) — it was reachable
+        try:
             data = r.json()
         except Exception:
             continue
@@ -611,6 +668,8 @@ def graphql_introspection_probe(model, base_url: str, *, session: requests.Sessi
                           f"every type, field and mutation — disable introspection in production."),
                 target=p))
             break
+    if not out and not reached:
+        _unreached(sess, "graphql-introspection", len(seen))
     return out
 
 
@@ -3026,11 +3085,16 @@ def xss_probe(model, base_url: str, *, session: requests.Session | None = None,
     cands = [e for e in getattr(model, "endpoints", [])
              if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
              and (e.get("query_params"))]
+    if not cands:
+        _no_candidates(sess, "xss", "GET endpoint with query parameters")
+        return out
     token = None
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"xss_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "xss", token)
 
     seen: set = set()
+    reached = 0
     for e in cands[:8]:
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         headers = _auth_headers(token, auth) if e.get("auth_required") else {}
@@ -3043,6 +3107,7 @@ def xss_probe(model, base_url: str, *, session: requests.Session | None = None,
                 r = sess.get(f"{base}{path}", params={qp: marker}, headers=headers, timeout=15)
             except Exception:
                 continue
+            reached += 1
             ct = str(r.headers.get("Content-Type", "")).lower()
             if "html" in ct and marker in (r.text or ""):
                 out.append(ProbeFinding(
@@ -3054,6 +3119,8 @@ def xss_probe(model, base_url: str, *, session: requests.Session | None = None,
                               f"browser — the output is not HTML-encoded."),
                     target=str(e.get("path", ""))))
                 break   # one proven param per endpoint is enough
+    if not out and not reached:
+        _unreached(sess, "xss", len(cands[:8]))
     return out
 
 
@@ -3084,15 +3151,22 @@ def ssti_probe(model, base_url: str, *, session: requests.Session | None = None,
     cands = [e for e in getattr(model, "endpoints", [])
              if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
              and e.get("query_params")]
+    if not cands:
+        _no_candidates(sess, "ssti", "GET endpoint with query parameters")
+        return out
     token = None
     if any(e.get("auth_required") for e in cands):
         token = _resolve_token(sess, base, recipe, model, f"ssti_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "ssti", token)
+    reached = [0]
 
     def render_of(path, qp, headers, expr):
         try:
-            return sess.get(f"{base}{path}", params={qp: expr}, headers=headers, timeout=15).text or ""
+            text = sess.get(f"{base}{path}", params={qp: expr}, headers=headers, timeout=15).text or ""
         except Exception:
             return ""
+        reached[0] += 1
+        return text
 
     seen: set = set()
     for e in cands[:8]:
@@ -3127,6 +3201,8 @@ def ssti_probe(model, base_url: str, *, session: requests.Session | None = None,
                               f"input reaches a template engine, which is typically RCE."),
                     target=str(e.get("path", ""))))
                 break
+    if not out and not reached[0]:
+        _unreached(sess, "ssti", len(cands[:8]))
     return out
 
 
