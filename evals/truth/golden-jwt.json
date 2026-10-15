@@ -121,6 +121,32 @@
         "forbidden request returns a server error",
         "/account"
       ]
+    },
+    {
+      "id": "cors-reflected-origin",
+      "match": [
+        "cors reflects an arbitrary origin"
+      ]
+    },
+    {
+      "id": "path-traversal",
+      "match": [
+        "path traversal",
+        "/download"
+      ]
+    },
+    {
+      "id": "open-redirect",
+      "match": [
+        "open redirect",
+        "/redirect"
+      ]
+    },
+    {
+      "id": "mass-assignment",
+      "match": [
+        "mass assignment"
+      ]
     }
   ]
 }

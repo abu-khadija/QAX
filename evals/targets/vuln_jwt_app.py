@@ -34,6 +34,7 @@ app = Flask(__name__)
 SECRET = b"super-secret-signing-key"
 SECURE = os.environ.get("QAX_SECURE") == "1"
 _USERS: dict = {}
+_FAILS: dict = {}
 
 
 def _b64u(raw: bytes) -> str:
@@ -85,7 +86,10 @@ def register():
             return jsonify({"error": "password too long"}), 422
         return jsonify({"error": "hash failed: password cannot be longer than 72 bytes"}), 500
     _USERS[body.get("email", "")] = body.get("password", "")
-    return jsonify({}), 201
+    # VULNERABLE: binds and echoes every client-supplied field (admin=true, role=admin ...) — mass
+    # assignment. SECURE: only the identity comes back.
+    rec = {"email": body.get("email", "")} if SECURE else {k: v for k, v in body.items() if k != "password"}
+    return jsonify(rec), 201
 
 
 @app.post("/auth/login")
@@ -94,6 +98,13 @@ def login():
     email = body.get("email", "")
     if email not in _USERS:                 # must register first
         return jsonify({"error": "no such user"}), 401
+    if _USERS[email] != body.get("password", ""):
+        # VULNERABLE: unlimited wrong-password attempts (no throttling / lockout). SECURE: 429 after 5.
+        if SECURE:
+            _FAILS[email] = _FAILS.get(email, 0) + 1
+            if _FAILS[email] > 5:
+                return jsonify({"error": "too many attempts"}), 429
+        return jsonify({"error": "invalid credentials"}), 401
     tok = _make_token(email)
     resp = make_response(jsonify({"access_token": tok}), 200)
     # VULNERABLE: the session cookie is readable by JavaScript (no HttpOnly). SECURE sets it.
@@ -169,6 +180,51 @@ def item(item_id):
 def not_found(_e):
     """VULNERABLE: the global handler for unknown routes itself fails (5xx instead of 404)."""
     return (jsonify({"error": "not found"}), 404) if SECURE else (jsonify({"error": "internal"}), 500)
+
+
+@app.after_request
+def _cors(resp):
+    """VULNERABLE: reflects ANY Origin with credentials allowed (CORS misconfiguration). SECURE: no CORS."""
+    origin = request.headers.get("Origin")
+    if origin and not SECURE:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+    return resp
+
+
+@app.get("/download")
+def download():
+    """VULNERABLE: the `file` query param is used as a filesystem path with no sanitising (traversal).
+    Simulated: a path naming /etc/passwd returns its contents. SECURE: rejects any path-like value."""
+    f = request.args.get("file", "readme.txt")
+    if SECURE and (".." in f or f.startswith(("/", "\\")) or ":" in f or "%2f" in f.lower()):
+        return jsonify({"error": "invalid file name"}), 400
+    if "etc/passwd" in f.replace("%2f", "/").replace("%2F", "/"):
+        return "root:x:0:0:root:/root:/bin/bash\n", 200, {"Content-Type": "text/plain"}
+    return "Hello from " + f, 200, {"Content-Type": "text/plain"}
+
+
+@app.get("/logs")
+def logs():
+    """VULNERABLE: returns every row and ignores ?limit= (unbounded, unpaginated list).
+    SECURE: paginates (default 50) and honours limit."""
+    rows = [{"id": i, "msg": f"event {i}"} for i in range(150)]
+    if SECURE:
+        try:
+            n = int(request.args.get("limit", 50))
+        except ValueError:
+            n = 50
+        rows = rows[:max(0, n)]
+    return jsonify(rows), 200
+
+
+@app.get("/redirect")
+def redirect_to():
+    """VULNERABLE: redirects to whatever `url` says (open redirect). SECURE: same-site paths only."""
+    url = request.args.get("url", "/")
+    if SECURE and not (url.startswith("/") and not url.startswith("//")):
+        return jsonify({"error": "invalid redirect target"}), 400
+    return "", 302, {"Location": url}
 
 
 @app.get("/greet")
@@ -401,6 +457,12 @@ def spec():
             "/items/{item_id}": {"get": {"parameters": [{"name": "item_id", "in": "path", "required": True,
                                                          "schema": {"type": "string"}}],
                                          "responses": {"200": {"description": "ok"}}}},
+            "/download": {"get": {"parameters": [{"name": "file", "in": "query", "schema": {"type": "string"}}],
+                                  "responses": {"200": {"description": "ok"}}}},
+            "/logs": {"get": {"parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer"}}],
+                              "responses": {"200": {"description": "ok"}}}},
+            "/redirect": {"get": {"parameters": [{"name": "url", "in": "query", "schema": {"type": "string"}}],
+                                  "responses": {"302": {"description": "redirect"}}}},
             "/greet": {"get": {
                 "parameters": [{"name": "name", "in": "query",
                                 "schema": {"type": "string"}}],

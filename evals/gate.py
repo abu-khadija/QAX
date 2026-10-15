@@ -40,7 +40,8 @@ _TYPED_PROBES = {"boolean-false", "single-element-array", "date-order", "long-in
 # Probes with a bug planted on the golden target (ROADMAP #26) — each must fire here and stay
 # silent on the SECURE app. Grown batch by batch until every probe has one.
 _PLANTED_PROBES = {"cookie-flags", "error-handling", "debug-disclosure", "excessive-data",
-                   "crash-fuzz", "auth-error"}
+                   "crash-fuzz", "auth-error", "cors", "path-traversal", "unpaginated-list",
+                   "open-redirect", "mass-assignment", "rate-limit"}
 
 APP = str(Path(__file__).parent / "targets" / "vuln_jwt_app.py")
 TRUTH = str(Path(__file__).parent / "truth" / "golden-jwt.json")

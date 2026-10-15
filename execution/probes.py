@@ -3297,10 +3297,14 @@ def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         hdr = _auth_headers(auth_tok, auth) if e.get("auth_required") else {}
         try:
+            # allow_redirects=False: if the app merely 302s to our URL, it is the SCANNER that would
+            # then fetch the callback — that is an open redirect, not the server making a request.
             if where == "query":
-                r = sess.get(f"{base}{path}", params={param: value}, headers=hdr, timeout=10)
+                r = sess.get(f"{base}{path}", params={param: value}, headers=hdr, timeout=10,
+                             allow_redirects=False)
             else:
-                r = sess.request(method, f"{base}{path}", json=nest_body({param: value}), headers=hdr, timeout=10)
+                r = sess.request(method, f"{base}{path}", json=nest_body({param: value}), headers=hdr,
+                                 timeout=10, allow_redirects=False)
         except Exception:
             return None
         reached[0] += 1

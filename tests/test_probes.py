@@ -801,7 +801,7 @@ class _SsrfSession:
     def __init__(self, vulnerable=True):
         self.vulnerable = vulnerable
 
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, timeout=None, **_kw):
         target = str((params or {}).get("q", ""))
         if self.vulnerable and target.startswith("http"):
             try:
@@ -818,6 +818,38 @@ def test_ssrf_confirmed_by_oob_callback():
         {"method": "GET", "path": "/api/vul/ssrf", "query_params": ["q"], "auth_required": False}])
     out = ssrf_probe(model, "http://x", session=_SsrfSession(vulnerable=True))
     assert len(out) == 1 and out[0].probe == "ssrf" and out[0].severity == "P2"
+
+
+def test_ssrf_not_reported_for_a_plain_open_redirect():
+    """A 302 to our listener URL must not count: with redirects followed it is the scanner, not the
+    server, that hits the callback (found by the golden target's /redirect endpoint)."""
+    import http.server
+    import threading
+
+    import requests
+
+    from execution.probes import ssrf_probe
+    from urllib.parse import parse_qs, urlparse
+
+    class _Redirector(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            url = parse_qs(urlparse(self.path).query).get("q", ["/"])[0]
+            self.send_response(302)
+            self.send_header("Location", url)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Redirector)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        model = AppModel(root="/x", endpoints=[
+            {"method": "GET", "path": "/go", "query_params": ["q"], "auth_required": False}])
+        out = ssrf_probe(model, f"http://127.0.0.1:{srv.server_address[1]}", session=requests.Session())
+    finally:
+        srv.shutdown()
+    assert out == []
 
 
 def test_ssrf_quiet_when_not_fetching():
