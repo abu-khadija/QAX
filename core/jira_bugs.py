@@ -304,7 +304,8 @@ class JiraBugFiler:
         """
         bid = bug.get("test_case_id") or bug.get("id") or "BUG"
         res = {"success": False, "test_case_id": bid, "jira_key": None, "error": None,
-               "duplicate_of": None, "dropped_fields": []}
+               "duplicate_of": None, "dropped_fields": [],
+               "summary": str(bug.get("title", ""))[:250]}
         try:
             screen = self.screen_fields()
             if self.configured() and screen is None and not self.dry_run:

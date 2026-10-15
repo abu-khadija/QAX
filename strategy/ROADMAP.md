@@ -88,8 +88,8 @@ the running app does"). Folded into the order above:
   standalone test-gen expansion — commoditized or owned by funded incumbents.
 
 **Opportunistic (externally gated — do the moment the trigger arrives, not in line):**
-- **B6 — real Jira/Xray filing** as soon as the owner's trial creds land (S1 made it
-  safe). Fold the result into the next B4 case study ("found + filed to Jira").
+- **B6 — real Jira/Xray filing** — Bug half DONE (SCRUM-5/6 filed from Gitea, see B6
+  below); Xray Test half waits on the owner installing the Xray trial app.
 
 **Deferred parallel:** **B9 — IP / legal / solo-founder** (owner's choice; still
 existential — revisit before external distribution).
@@ -184,11 +184,20 @@ Overlapping Phase-2/3 items are absorbed here.
       inference. Wired into the orchestrator's no-spec branch. +1 unit test. (Not
       gate-exercised — the golden target has a spec; verified by unit test.)
 
-- [ ] **B6 — Jira/Xray filing never proven live.** Risk: "files to Jira" is DRY_RUN
-      only. Task: with the owner's trial creds, file a real Bug + a real Xray Test
-      end-to-end, then restore DRY_RUN. Done when: one real issue + one real test
-      exist in a trial project, with screenshots in `strategy/`. (Absorbs Phase-2
-      Jira.)
+- [~] **B6 — Jira/Xray filing never proven live (Bug half DONE 2026-10-15).** Risk:
+      "files to Jira" is DRY_RUN only. Task: with the owner's trial creds, file a real
+      Bug + a real Xray Test end-to-end, then restore DRY_RUN. Done when: one real
+      issue + one real test exist in a trial project, with screenshots in `strategy/`.
+      (Absorbs Phase-2 Jira.)
+      **Bug half DONE:** owner's free Jira Cloud (team-managed project SCRUM). First
+      contact exposed 5 gaps, all fixed (commit a839a44): `priority` sent though not
+      on a team-managed Bug screen (→ would 400) — now screen-aware; live mode demanded
+      Xray creds for a plain Bug; fake dry run; no de-dup; one-line bug body. New
+      `core/jira_bugs.py` + `qax file-findings`, bug body in the owner's compact QA
+      format. **Filed live: SCRUM-5 (P2 host-header injection) and SCRUM-6 (P3 CSP)**
+      from the Gitea case study; re-run detected both as open duplicates (0 re-filed).
+      DRY_RUN stays true. **Remaining:** the Xray Test half needs the Xray app
+      installed on the site (separate trial + client id/secret) — owner's call.
 
 - [x] **B7 — business-logic bug probe (DONE).** `business_logic_probe`: a NEGATIVE
       quantity/amount accepted AND stored on a create endpoint — the first deterministic

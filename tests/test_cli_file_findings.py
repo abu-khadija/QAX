@@ -51,3 +51,12 @@ def test_enrich_adds_fix_and_qa_fields():
     from cli.file_findings import enrich
     b = enrich({"title": "x", "probe": "host-header-injection"})
     assert b["remediation"].get("fix") and "MUST" in b["qa"]["expected"]
+
+
+def test_render_live_shows_summary_not_internal_id():
+    out = {"results": [{"success": True, "jira_key": "SCRUM-5", "test_case_id": "QAX-X-1",
+                        "summary": "[P2] [Admin] Host header reflected"}],
+           "exported_count": 1, "duplicate_count": 0, "failed_count": 0}
+    text = render_results(out, dry_run=False, project="SCRUM")
+    assert "created SCRUM-5" in text and "[P2] [Admin] Host header reflected" in text
+    assert "QAX-X-1" not in text

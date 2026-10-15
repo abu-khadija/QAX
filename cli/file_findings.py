@@ -58,7 +58,7 @@ def render_results(out: dict, *, dry_run: bool, project: str) -> str:
     lines = [f"\n  QAX → Jira ({project}) · {mode}\n"]
     for r in out.get("results") or []:
         prev = (r.get("preview") or {}).get("fields") or {}
-        summary = prev.get("summary") or r.get("test_case_id")
+        summary = prev.get("summary") or r.get("summary") or r.get("test_case_id")
         if r.get("duplicate_of"):
             status = f"⏭  already open as {r['duplicate_of']} — not filed again"
         elif not r.get("success"):
