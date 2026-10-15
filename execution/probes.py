@@ -264,6 +264,16 @@ def _skip(sess, probe: str, reason: str, kind: str = "missing-prerequisite",
         pass
 
 
+_SSRF_WAIT = 3.0            # seconds to wait for the out-of-band callback after each injected URL
+
+
+def _is_local_target(base_url: str) -> bool:
+    """True when the target is on this machine (loopback) — an out-of-band callback to 127.0.0.1 can reach back."""
+    from urllib.parse import urlparse
+    host = (urlparse(base_url if "//" in base_url else "//" + base_url).hostname or "").lower()
+    return host in ("localhost", "::1") or host.startswith("127.") or host == "0.0.0.0"
+
+
 def _no_candidates(sess, probe: str, what: str) -> None:
     """The app has nothing for this probe to test (informational — not a coverage gap)."""
     _skip(sess, probe, f"no {what} in this app", kind="not-applicable")
@@ -2305,9 +2315,14 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
     path_cands = [e for e in gets if "{" in str(e.get("path", ""))]
     query_cands = [(e, qp) for e in gets for qp in (e.get("query_params") or [])
                    if any(k in str(qp).lower() for k in _FILE_PARAM_KW)]
+    if not path_cands and not query_cands:
+        _no_candidates(sess, "path-traversal", "GET endpoint with a path parameter or a file-like query parameter")
+        return out
     token = None
     if any(e.get("auth_required") for e in path_cands) or any(e.get("auth_required") for e, _ in query_cands):
         token = _resolve_token(sess, base, recipe, model, f"trav_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "path-traversal", token)
+    reached = 0
 
     def _signature_hit(r):
         return any(sig.search(r.text or "") for sig in _TRAVERSAL_SIGS)
@@ -2325,6 +2340,7 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
                 r = sess.get(f"{base}{path.replace('{' + param + '}', payload)}", headers=headers, timeout=15)
             except Exception:
                 continue
+            reached += 1
             if _signature_hit(r):
                 out.append(ProbeFinding(
                     probe="path-traversal",
@@ -2349,6 +2365,7 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
                 r = sess.get(f"{base}{path}", params={qp: payload}, headers=headers, timeout=15)
             except Exception:
                 continue
+            reached += 1
             if _signature_hit(r):
                 out.append(ProbeFinding(
                     probe="path-traversal",
@@ -2359,9 +2376,9 @@ def path_traversal_probe(model, base_url: str, *, session: requests.Session | No
                               f"builds a filesystem path without sanitisation."),
                     target=path))
                 break
+    if not out and not reached:
+        _unreached(sess, "path-traversal", len(path_cands[:limit]) + len(query_cands[:limit]))
     return out
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # QA-craft probes mined from the field manual (KB file 03 §3). These encode the
 # bug classes a human QA lead caught by hand that pure HTTP/injection probes miss.
@@ -2932,26 +2949,34 @@ def command_injection_probe(model, base_url: str, *, session: requests.Session |
     The unique token / timing delta is the control, so this is a proven P1, not a guess.
     """
     sess = session or requests.Session()
-    from core.auth_recipe import nest_body
+    from core.auth_recipe import derive_auth_recipe, nest_body
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
     cands = _cmd_candidates(model)
     if not cands:
+        _no_candidates(sess, "command-injection", "parameter whose name or path hints at a shell command")
         return out
+    auth_tok = None          # NB: not `token` — this probe reuses that name for its echo marker
+    if any(c[0].get("auth_required") for c in cands):
+        auth_tok = _resolve_token(sess, base, derive_auth_recipe(model), model,
+                                  f"cmd_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "command-injection", auth_tok)
 
     def send(e, method, param, where, value):
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        hdr = _auth_headers(auth_tok, auth) if e.get("auth_required") else {}
         try:
             if where == "query":
-                r = sess.get(f"{base}{path}", params={param: value}, timeout=20)
+                r = sess.get(f"{base}{path}", params={param: value}, headers=hdr, timeout=20)
             else:
-                r = sess.request(method, f"{base}{path}", json=nest_body({param: value}), timeout=20)
+                r = sess.request(method, f"{base}{path}", json=nest_body({param: value}), headers=hdr, timeout=20)
             return r
         except Exception:
             return None
 
     benign = "127.0.0.1"
     seen: set = set()
+    reached = 0
     for e, method, param, where in cands[:6]:
         sig = (str(e.get("path", "")), method, param)
         if sig in seen:
@@ -2964,6 +2989,7 @@ def command_injection_probe(model, base_url: str, *, session: requests.Session |
         base_time = time.time() - t0
         if base_r2 is None:
             continue
+        reached += 1
 
         # 1) output-based: a unique token echoed back proves execution.
         token = f"qaxcmd{uuid.uuid4().hex[:10]}"
@@ -2994,6 +3020,8 @@ def command_injection_probe(model, base_url: str, *, session: requests.Session |
                           f"command ({how}; HTTP {hit[2]}). User input reaches a shell without "
                           f"sanitisation — full remote code execution."),
                 target=str(e.get("path", ""))))
+    if not out and not reached:
+        _unreached(sess, "command-injection", len(seen))
     return out
 
 
@@ -3036,12 +3064,18 @@ def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
     scanner's 127.0.0.1, which holds when QAX runs against an app on the same host.
     """
     sess = session or requests.Session()
-    from core.auth_recipe import nest_body
+    from core.auth_recipe import derive_auth_recipe, nest_body
     base = base_url.rstrip("/")
     out: list[ProbeFinding] = []
     cands = _url_candidates(model)
     if not cands:
+        _no_candidates(sess, "ssrf", "parameter that takes a URL the server fetches")
         return out
+    auth_tok = None          # NB: not `token` — this probe reuses that name for its callback marker
+    if any(c[0].get("auth_required") for c in cands):
+        auth_tok = _resolve_token(sess, base, derive_auth_recipe(model), model,
+                                  f"ssrf_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "ssrf", auth_tok)
 
     import http.server
     import threading
@@ -3060,18 +3094,26 @@ def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
     try:
         srv = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
     except Exception:
+        _skip(sess, "ssrf", "could not start the local callback listener QAX needs to detect an "
+                            "outbound request")
         return out
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
+    reached = [0]
+
     def send(e, method, param, where, value):
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
+        hdr = _auth_headers(auth_tok, auth) if e.get("auth_required") else {}
         try:
             if where == "query":
-                return sess.get(f"{base}{path}", params={param: value}, timeout=10)
-            return sess.request(method, f"{base}{path}", json=nest_body({param: value}), timeout=10)
+                r = sess.get(f"{base}{path}", params={param: value}, headers=hdr, timeout=10)
+            else:
+                r = sess.request(method, f"{base}{path}", json=nest_body({param: value}), headers=hdr, timeout=10)
         except Exception:
             return None
+        reached[0] += 1
+        return r
 
     try:
         seen: set = set()
@@ -3082,7 +3124,7 @@ def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
             seen.add(sig)
             token = f"qaxssrf{uuid.uuid4().hex[:10]}"
             send(e, method, param, where, f"http://127.0.0.1:{port}/{token}")
-            deadline = time.time() + 3
+            deadline = time.time() + _SSRF_WAIT
             got = False
             while time.time() < deadline:
                 if any(token in h for h in hits):
@@ -3104,6 +3146,15 @@ def ssrf_probe(model, base_url: str, *, session: requests.Session | None = None,
             srv.shutdown()
         except Exception:
             pass
+    if not out:
+        if not reached[0]:
+            _unreached(sess, "ssrf", len(cands[:6]))
+        elif not _is_local_target(base):
+            # The callback listener lives on the SCANNER's 127.0.0.1; a remote target cannot reach it,
+            # so "no callback" proves nothing. Say so instead of reporting a clean result.
+            _skip(sess, "ssrf", "the target is not on this machine, so it cannot reach QAX's local callback "
+                                "listener — a missing callback proves nothing; test SSRF from a host the "
+                                "target can reach, or against a local/staging copy")
     return out
 
 
@@ -3279,12 +3330,19 @@ def stored_xss_probe(model, base_url: str, *, session: requests.Session | None =
             if text_fields:
                 writes.append((e, text_fields[:3], fields))
     reads = [e for e in eps if str(e.get("method", "")).upper() == "GET"]
-    if not writes or not reads:
+    if not writes:
+        _no_candidates(sess, "stored-xss", "write endpoint with a free-text field")
+        return out
+    if not reads:
+        _no_candidates(sess, "stored-xss", "GET endpoint to read a stored value back from")
         return out
 
     token = None
     if any(e.get("auth_required") for e, _, _ in writes) or any(e.get("auth_required") for e in reads):
         token = _resolve_token(sess, base, recipe, model, f"sxss_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+        _need_token(sess, "stored-xss", token)
+    reached = [0]
+    html_seen = [0]
 
     def _read_has(marker):
         for re_ in reads[:8]:
@@ -3294,7 +3352,10 @@ def stored_xss_probe(model, base_url: str, *, session: requests.Session | None =
                 r = sess.get(f"{base}{rpath}", headers=rheaders, timeout=15)
             except Exception:
                 continue
-            if "html" in str(r.headers.get("Content-Type", "")).lower() and marker in (r.text or ""):
+            reached[0] += 1
+            is_html = "html" in str(r.headers.get("Content-Type", "")).lower()
+            html_seen[0] += 1 if is_html else 0
+            if is_html and marker in (r.text or ""):
                 return re_
         return None
 
@@ -3309,6 +3370,7 @@ def stored_xss_probe(model, base_url: str, *, session: requests.Session | None =
             for kw in ({"data": body}, {"json": nest_body(body)}):  # form or JSON
                 try:
                     sess.request(method, f"{base}{wpath}", headers=wheaders, timeout=15, **kw)
+                    reached[0] += 1
                 except Exception:
                     pass
             hit = _read_has(marker)
@@ -3325,4 +3387,11 @@ def stored_xss_probe(model, base_url: str, *, session: requests.Session | None =
                 break
         if done:
             continue
+    if not out:
+        if not reached[0]:
+            _unreached(sess, "stored-xss", len(writes[:4]))
+        elif not html_seen[0]:
+            _skip(sess, "stored-xss", "no read endpoint returned an HTML page, so a stored-XSS sink in HTML "
+                                      "could not be observed (a JSON-only API is not an HTML sink)",
+                  kind="not-applicable")
     return out

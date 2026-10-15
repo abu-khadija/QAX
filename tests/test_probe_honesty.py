@@ -16,6 +16,12 @@ import execution.probes as P
 from services.results import AppModel
 
 
+@pytest.fixture(autouse=True)
+def _fast_ssrf_wait(monkeypatch):
+    """SSRF waits for an out-of-band callback after every injected URL; tests don't need 3 s each."""
+    monkeypatch.setattr(P, "_SSRF_WAIT", 0.05)
+
+
 class _Led:
     """A session that records the not-tested ledger; subclasses decide how the 'server' behaves."""
     def __init__(self):
@@ -46,6 +52,13 @@ def _m(*eps):
     return AppModel(root="/x", endpoints=list(eps))
 
 
+def _model_for(probe, ep):
+    """stored-XSS also needs a GET endpoint to read the stored value back from."""
+    if probe == "stored-xss":
+        return _m(ep, {"method": "GET", "path": "/comments"})
+    return _m(ep)
+
+
 def _gaps(sess, probe):
     return [s for s in sess._qax_skips if s["probe"] == probe]
 
@@ -65,7 +78,18 @@ _CASES = {
     "injection": (P.injection_probe, {"method": "GET", "path": "/search", "query_params": ["q"]}, True, True),
     "sqli": (P.sqli_probe, {"method": "GET", "path": "/users/{id}"}, True, True),
     "nosql": (P.nosql_probe, {"method": "POST", "path": "/find", "request_fields": ["name"]}, True, True),
+    "command-injection": (P.command_injection_probe, {"method": "GET", "path": "/diag", "query_params": ["host"]}, True, True),
+    "ssrf": (P.ssrf_probe, {"method": "GET", "path": "/preview", "query_params": ["url"]}, True, True),
+    "path-traversal": (P.path_traversal_probe, {"method": "GET", "path": "/files/{name}"}, True, True),
+    "stored-xss": (P.stored_xss_probe, {"method": "POST", "path": "/comments", "request_fields": ["content"]}, True, True),
 }
+# SSRF's callback listener lives on the scanner's loopback: only a LOCAL target can reach it, so its
+# "normal server" case must use a local URL (the remote case has its own test below).
+_BASE = {"ssrf": "http://127.0.0.1:1"}
+
+
+def _base(probe):
+    return _BASE.get(probe, "http://x")
 _IDS = list(_CASES)
 _NA = [k for k, v in _CASES.items() if v[2]]
 _TOK = [k for k, v in _CASES.items() if v[3]]
@@ -75,7 +99,7 @@ _TOK = [k for k, v in _CASES.items() if v[3]]
 def test_nothing_to_test_is_reported_as_not_applicable_not_a_gap(probe):
     fn = _CASES[probe][0]
     s = _Quiet()
-    assert fn(_m({"method": "DELETE", "path": "/x"}), "http://x", session=s) == []
+    assert fn(_m({"method": "DELETE", "path": "/x"}), _base(probe), session=s) == []
     g = _gaps(s, probe)
     assert len(g) == 1 and g[0]["kind"] == "not-applicable"
 
@@ -84,7 +108,7 @@ def test_nothing_to_test_is_reported_as_not_applicable_not_a_gap(probe):
 def test_an_endpoint_needing_auth_without_a_token_is_a_missing_prerequisite(probe):
     fn, ep = _CASES[probe][:2]
     s = _Quiet()
-    fn(_m({**ep, "auth_required": True}), "http://x", session=s)
+    fn(_model_for(probe, {**ep, "auth_required": True}), _base(probe), session=s)
     g = [x for x in _gaps(s, probe) if x["kind"] == "missing-prerequisite" and x.get("needs") == "auth-token"]
     assert g, _gaps(s, probe)
 
@@ -93,7 +117,7 @@ def test_an_endpoint_needing_auth_without_a_token_is_a_missing_prerequisite(prob
 def test_a_dead_server_is_reported_as_unreached_never_as_clean(probe):
     fn, ep = _CASES[probe][:2]
     s = _Dead()
-    assert fn(_m(ep), "http://x", session=s) == []
+    assert fn(_model_for(probe, ep), _base(probe), session=s) == []
     g = [x for x in _gaps(s, probe) if "could be reached" in x["reason"] or "could not exercise" in x["reason"]]
     assert g and g[0]["kind"] == "missing-prerequisite", _gaps(s, probe)
 
@@ -102,8 +126,9 @@ def test_a_dead_server_is_reported_as_unreached_never_as_clean(probe):
 def test_a_normal_server_that_simply_answers_produces_no_gap(probe):
     fn, ep = _CASES[probe][:2]
     s = _Quiet()
-    assert fn(_m(ep), "http://x", session=s) == []
-    assert _gaps(s, probe) == []                    # reachable + nothing wrong ≠ a coverage gap
+    assert fn(_model_for(probe, ep), _base(probe), session=s) == []
+    # reachable + nothing wrong ≠ a coverage GAP (a "not applicable" note is allowed, e.g. no HTML sink)
+    assert [g for g in _gaps(s, probe) if g["kind"] != "not-applicable"] == []
 
 
 def test_nosql_a_crashing_baseline_means_it_could_not_be_exercised():
@@ -155,3 +180,60 @@ def test_no_ledger_means_no_crash_and_no_output():
         post = request = get
     for fn, ep, *_ in _CASES.values():
         assert fn(_m(ep), "http://x", session=_Bare()) == []
+
+
+# ── batch 3 specifics ────────────────────────────────────────────────────────────
+
+def test_ssrf_remote_target_cannot_reach_the_local_callback_so_it_says_so():
+    s = _Quiet()
+    assert P.ssrf_probe(_m(_CASES["ssrf"][1]), "https://preview.example.com", session=s) == []
+    g = _gaps(s, "ssrf")
+    assert len(g) == 1 and "cannot reach QAX's local callback listener" in g[0]["reason"]
+    assert g[0]["kind"] == "missing-prerequisite"
+    # …but a LOCAL target can, so a quiet answer there is a genuine clean result.
+    q = _Quiet()
+    assert P.ssrf_probe(_m(_CASES["ssrf"][1]), "http://localhost:9", session=q) == [] and _gaps(q, "ssrf") == []
+
+
+def test_is_local_target():
+    for u in ("http://127.0.0.1:8000", "http://localhost", "http://[::1]:80", "127.0.0.1:9"):
+        assert P._is_local_target(u), u
+    for u in ("https://app.example.com", "http://10.0.0.5:8080", "http://192.168.1.2"):
+        assert not P._is_local_target(u), u
+
+
+def test_command_injection_and_ssrf_now_send_the_token_to_authenticated_endpoints():
+    seen = []
+
+    class _Rec(_Quiet):
+        def get(self, url, **k):
+            seen.append(k.get("headers") or {})
+            return super().get(url)
+        def request(self, *a, **k):
+            seen.append(k.get("headers") or {})
+            return super().request()
+    for probe in ("command-injection", "ssrf"):
+        seen.clear()
+        ep = {**_CASES[probe][1], "auth_required": True}
+        P_fn = _CASES[probe][0]
+        P_fn(_m(ep), _base(probe), session=_Rec(), auth={"token": "TKN"})
+        assert seen and all(h.get("Authorization") == "Bearer TKN" for h in seen), (probe, seen[:2])
+
+
+def test_stored_xss_json_only_api_is_not_applicable_not_a_gap():
+    class _JsonApi(_Quiet):
+        def get(self, *a, **k):
+            r = MagicMock(status_code=200, text='{"items": []}', headers={"Content-Type": "application/json"})
+            return r
+        def request(self, *a, **k):
+            return MagicMock(status_code=201, text="{}", headers={"Content-Type": "application/json"})
+    s = _JsonApi()
+    assert P.stored_xss_probe(_model_for("stored-xss", _CASES["stored-xss"][1]), "http://x", session=s) == []
+    g = _gaps(s, "stored-xss")
+    assert len(g) == 1 and g[0]["kind"] == "not-applicable" and "not an HTML sink" in g[0]["reason"]
+
+
+def test_stored_xss_without_a_read_endpoint_is_not_applicable():
+    s = _Quiet()
+    assert P.stored_xss_probe(_m(_CASES["stored-xss"][1]), "http://x", session=s) == []
+    assert _gaps(s, "stored-xss")[0]["kind"] == "not-applicable"
