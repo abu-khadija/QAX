@@ -51,15 +51,26 @@ class _Accepting(_Led):
     get = post = put = delete = request = _ok
 
 
+class _Hardened(_Quiet):
+    """A reachable app that sets the standard security headers (so security-headers has nothing to say)."""
+    def get(self, *a, **k):
+        r = self._answer()
+        r.status_code = 200
+        r.headers = {"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
+                     "Content-Security-Policy": "default-src 'self'"}
+        return r
+
+
 class _Dead(_Led):
     """Nothing is listening: every request fails at the network level."""
     def _boom(self, *a, **k): raise ConnectionError("refused")
     get = post = put = delete = request = _boom
 
 
-# malformed-input needs its valid BASELINE accepted before it can say anything; a server that rejects
-# everything is a genuine "could not exercise" gap, so its "normal server" case uses an accepting one.
-_OK = {"malformed-input": _Accepting}
+# malformed-input / search-robustness need their valid BASELINE accepted before they can say anything
+# (a server that rejects everything is a genuine "could not exercise" gap), and security-headers
+# reports missing headers — so their "normal server" cases use a server that behaves normally.
+_OK = {"malformed-input": _Accepting, "search-robustness": _Accepting, "security-headers": _Hardened}
 
 
 def _m(*eps):
@@ -102,6 +113,12 @@ _CASES = {
     "excessive-data": (P.excessive_data_probe, {"method": "GET", "path": "/items"}, True, True),
     "cookie-flags": (P.cookie_flags_probe, {"method": "GET", "path": "/x"}, True, False),
     "debug-disclosure": (P.debug_disclosure_probe, {"method": "GET", "path": "/items/{id}"}, True, True),
+    "error-handling": (P.error_handling_probe, {"method": "GET", "path": "/x"}, False, False),
+    "crash-fuzz": (P.crash_fuzz_probe, {"method": "GET", "path": "/x"}, True, False),
+    "security-headers": (P.security_headers_probe, {"method": "GET", "path": "/x"}, False, False),
+    "auth-error": (P.auth_error_probe, {"method": "GET", "path": "/me", "auth_required": True}, True, False),
+    "search-robustness": (P.search_robustness_probe, {"method": "GET", "path": "/search", "query_params": ["q"]}, True, True),
+    "unpaginated-list": (P.unpaginated_list_probe, {"method": "GET", "path": "/items"}, True, True),
 }
 # SSRF's callback listener lives on the scanner's loopback: only a LOCAL target can reach it, so its
 # "normal server" case must use a local URL (the remote case has its own test below).
@@ -355,3 +372,54 @@ def test_debug_disclosure_now_sends_the_token_to_authenticated_lookups():
     P.debug_disclosure_probe(_m({"method": "GET", "path": "/items/{id}", "auth_required": True}), "http://x",
                              session=_Rec(), auth={"token": "TKN"})
     assert seen and set(seen) == {"Bearer TKN"}
+
+
+# ── batch 5 specifics ────────────────────────────────────────────────────────────
+
+def test_unpaginated_list_with_little_data_is_not_applicable_not_clean():
+    s = _Responder({("GET", "/items"): (200, '[{"id": 1}, {"id": 2}]', {})})
+    assert P.unpaginated_list_probe(_m({"method": "GET", "path": "/items"}), "http://x", session=s) == []
+    g = _gaps(s, "unpaginated-list")
+    assert len(g) == 1 and g[0]["kind"] == "not-applicable" and "little data" in g[0]["reason"]
+
+
+def test_unpaginated_list_a_big_unbounded_collection_is_a_finding_without_a_gap():
+    import json as _j
+    big = _j.dumps([{"id": i} for i in range(150)])
+    s = _Responder({("GET", "/items"): (200, big, {})})
+    out = P.unpaginated_list_probe(_m({"method": "GET", "path": "/items"}), "http://x", session=s)
+    assert out and out[0].probe == "unpaginated-list" and _gaps(s, "unpaginated-list") == []
+
+
+def test_search_robustness_rejected_baseline_is_could_not_exercise():
+    s = _Quiet()                                  # the benign search request itself 404s
+    assert P.search_robustness_probe(_m(_CASES["search-robustness"][1]), "http://x", session=s) == []
+    g = _gaps(s, "search-robustness")
+    assert len(g) == 1 and "benign search request was rejected" in g[0]["reason"] and g[0]["needs"] == "valid-body"
+
+
+def test_crash_fuzz_no_registration_endpoint_is_not_applicable_and_a_5xx_is_a_finding():
+    s = _Responder({("POST", "/auth/register"): (404, "", {})})
+    assert P.crash_fuzz_probe(_m(), "http://x", session=s) == []
+    assert _gaps(s, "crash-fuzz")[0]["kind"] == "not-applicable"
+    s = _Responder({("POST", "/auth/register"): (500, "boom", {})})
+    out = P.crash_fuzz_probe(_m(), "http://x", session=s)
+    assert out and out[0].probe == "crash-fuzz" and _gaps(s, "crash-fuzz") == []
+
+
+def test_auth_error_and_error_handling_findings_do_not_also_claim_a_gap():
+    s = _Responder({("GET", "/me"): (500, "boom", {})})
+    out = P.auth_error_probe(_m({"method": "GET", "path": "/me", "auth_required": True}), "http://x", session=s)
+    assert out and out[0].probe == "auth-error" and _gaps(s, "auth-error") == []
+    class _Crash(_Quiet):
+        def get(self, *a, **k):
+            return MagicMock(status_code=500, text="x", headers={})
+    c = _Crash()
+    out = P.error_handling_probe(_m(), "http://x", session=c)
+    assert out and out[0].probe == "error-handling" and _gaps(c, "error-handling") == []
+
+
+def test_security_headers_missing_headers_is_a_finding_not_a_gap():
+    s = _Quiet()
+    out = P.security_headers_probe(_m(), "http://x", session=s)
+    assert out and out[0].probe == "security-headers" and _gaps(s, "security-headers") == []

@@ -2194,6 +2194,7 @@ def error_handling_probe(model, base_url: str, *, session: requests.Session | No
     try:
         r = sess.get(f"{base}{nonsense}", timeout=15)
     except Exception:
+        _unreached(sess, "error-handling", 1)
         return out
     if r.status_code >= 500:
         out.append(ProbeFinding(
@@ -2224,6 +2225,9 @@ def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None =
                       json=register_body(recipe, model, f"fuzz_{uuid.uuid4().hex[:8]}@example.com",
                                          password=big_password),
                       timeout=15)
+        if r.status_code in (404, 405):
+            _skip(sess, "crash-fuzz", f"no self-registration endpoint answered at {register} "
+                                      f"(HTTP {r.status_code}) — nothing to fuzz", kind="not-applicable")
         if r.status_code >= 500:
             out.append(ProbeFinding(
                 probe="crash-fuzz", title="Server error (5xx) on oversized password",
@@ -2234,6 +2238,7 @@ def crash_fuzz_probe(model, base_url: str, *, session: requests.Session | None =
                 target=register))
     except Exception as exc:  # pragma: no cover - network
         logger.warning("crash_fuzz failed: %s", exc)
+        _unreached(sess, "crash-fuzz", 1)
     return out
 
 
@@ -2250,6 +2255,7 @@ def security_headers_probe(model, base_url: str, *, session: requests.Session | 
     try:
         r = sess.get(base + "/", timeout=15)
     except Exception:
+        _unreached(sess, "security-headers", 1)
         return out
     h = {k.lower(): v for k, v in r.headers.items()}
     is_https = base.lower().startswith("https")
@@ -2625,9 +2631,14 @@ def auth_error_probe(model, base_url: str, *, session: requests.Session | None =
     out: list[ProbeFinding] = []
     bad = {"Authorization": "Bearer qax.invalid.token"}
     seen: set = set()
-    for e in [x for x in getattr(model, "endpoints", []) if isinstance(x, dict)
-              and x.get("auth_required")
-              and str(x.get("method", "")).upper() in ("GET", "POST", "PUT", "PATCH")][:8]:
+    cands = [x for x in getattr(model, "endpoints", []) if isinstance(x, dict)
+             and x.get("auth_required")
+             and str(x.get("method", "")).upper() in ("GET", "POST", "PUT", "PATCH")][:8]
+    if not cands:
+        _no_candidates(sess, "auth-error", "endpoint that requires authentication")
+        return out
+    reached = 0
+    for e in cands:
         method = str(e.get("method", "GET")).upper()
         path = str(e.get("path", ""))
         resolved = re.sub(r"\{[^}]+\}", "1", path)
@@ -2642,6 +2653,7 @@ def auth_error_probe(model, base_url: str, *, session: requests.Session | None =
                 r = sess.request(method, f"{base}{resolved}", json={}, headers=bad, timeout=15)
         except Exception:
             continue
+        reached += 1
         if r.status_code >= 500:
             out.append(ProbeFinding(
                 probe="auth-error",
@@ -2652,9 +2664,9 @@ def auth_error_probe(model, base_url: str, *, session: requests.Session | None =
                           f"must be denied, not crash the server — a 5xx here leaks internals and "
                           f"hides real faults."),
                 target=path))
+    if not out and not reached:
+        _unreached(sess, "auth-error", len(seen))
     return out
-
-
 # Characters the QA field manual (§3.F41) saw trigger a raw 405 from an unsanitised
 # search-engine query syntax — a distinctive signature that plain injection fuzzing
 # (which hunts 5xx + SQL errors) does not report.
@@ -2679,18 +2691,26 @@ def search_robustness_probe(model, base_url: str, *, session: requests.Session |
     out: list[ProbeFinding] = []
     eps = [e for e in getattr(model, "endpoints", []) if isinstance(e, dict)]
     token = None
+    searchable = []
+    for x in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:8]:
+        q_ = [q for q in (x.get("query_params") or []) if any(k == q.lower() or k in q.lower() for k in _SEARCH_KW)]
+        if q_:
+            searchable.append((x, q_))
+    if not searchable:
+        _no_candidates(sess, "search-robustness", "GET endpoint with a search/filter query parameter")
+        return out
+    exercised = 0
+    reached_ = [0]
 
-    for e in [x for x in eps if str(x.get("method", "")).upper() == "GET" and x.get("query_params")][:8]:
+    for e, searchy in searchable:
         qps = list(e.get("query_params") or [])
-        searchy = [q for q in qps if any(k == q.lower() or k in q.lower() for k in _SEARCH_KW)]
-        if not searchy:
-            continue
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         headers = {}
         if e.get("auth_required"):
             if token is None:
                 token = _resolve_token(sess, base, recipe, model,
                                        f"search_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+                _need_token(sess, "search-robustness", token)
             headers = _auth_headers(token, auth)
 
         def hit(value, _qp, _p=path, _h=headers, _all=qps):
@@ -2698,6 +2718,7 @@ def search_robustness_probe(model, base_url: str, *, session: requests.Session |
             params[_qp] = value
             try:
                 r = sess.get(f"{base}{_p}", params=params, headers=_h, timeout=15)
+                reached_[0] += 1
                 return r.status_code
             except Exception:
                 return None
@@ -2706,6 +2727,7 @@ def search_robustness_probe(model, base_url: str, *, session: requests.Session |
             base_status = hit("qaxprobe1", qp)
             if base_status is None or base_status >= 400:
                 continue                              # control must be accepted
+            exercised += 1
             trigger = next((c for c in _SEARCH_SPECIALS
                             if (lambda s: s is not None and (s == 405 or s >= 500))(hit(c, qp))), None)
             if trigger is not None:
@@ -2719,9 +2741,14 @@ def search_robustness_probe(model, base_url: str, *, session: requests.Session |
                               f"(emails, slash-separated terms) contain these characters; an unsanitised "
                               f"query syntax rejects them instead of escaping them."),
                     target=str(e.get("path", ""))))
+    if not out:
+        if not reached_[0]:
+            _unreached(sess, "search-robustness", len(searchable))
+        elif not exercised:
+            _skip(sess, "search-robustness", "could not exercise it: the benign search request was rejected "
+                                             "(4xx) on every candidate endpoint, so special characters had "
+                                             "nothing valid to be compared with", needs="valid-body")
     return out
-
-
 _LIST_KEYS = ("items", "data", "results", "records", "rows", "list", "content", "entries")
 
 
@@ -2759,7 +2786,12 @@ def unpaginated_list_probe(model, base_url: str, *, session: requests.Session | 
     cols = [e for e in getattr(model, "endpoints", [])
             if isinstance(e, dict) and str(e.get("method", "")).upper() == "GET"
             and "{" not in str(e.get("path", ""))]
+    if not cols:
+        _no_candidates(sess, "unpaginated-list", "parameter-free collection GET")
+        return out
     seen: set = set()
+    reached = 0
+    big = 0
     for e in cols[:8]:
         path = str(e.get("path", ""))
         if path in seen:
@@ -2770,9 +2802,14 @@ def unpaginated_list_probe(model, base_url: str, *, session: requests.Session | 
             if token is None:
                 token = _resolve_token(sess, base, recipe, model,
                                        f"page_{uuid.uuid4().hex[:8]}@example.com", auth=auth)
+                _need_token(sess, "unpaginated-list", token)
             headers = _auth_headers(token, auth)
         try:
             r = sess.get(f"{base}{path}", headers=headers, timeout=15)
+        except Exception:
+            continue
+        reached += 1
+        try:
             if r.status_code >= 400:
                 continue
             rows = _extract_list(r.json())
@@ -2780,6 +2817,7 @@ def unpaginated_list_probe(model, base_url: str, *, session: requests.Session | 
             continue
         if rows is None or len(rows) < THRESHOLD:
             continue
+        big += 1
         full = len(rows)
         # Control: ask for a single row via the common limit params. If honoured,
         # pagination works — stay silent.
@@ -2803,9 +2841,14 @@ def unpaginated_list_probe(model, base_url: str, *, session: requests.Session | 
                       f"request (still {full} rows). An unbounded list grows without limit as data "
                       f"accumulates — slow payloads, heavy DOM, and a denial-of-service lever."),
             target=path))
+    if not out:
+        if not reached:
+            _unreached(sess, "unpaginated-list", len(seen))
+        elif not big:
+            _skip(sess, "unpaginated-list", f"no collection returned {THRESHOLD}+ rows (the app has little "
+                                            f"data), so whether its lists are paginated could not be observed",
+                  kind="not-applicable")
     return out
-
-
 # Privileged fields a client should never be able to set at registration. If the
 # created record echoes one back as granted, the server mass-assigned it.
 _PRIV_FIELDS = {"admin": True, "is_admin": True, "isAdmin": True, "is_staff": True,
