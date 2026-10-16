@@ -297,13 +297,18 @@ class OrchestratorService:
         # Critic/Investigator RE-judge them — that over-confirmed debatable findings
         # (e.g. "accepts an empty title") as bugs. Only generated tests are investigated.
         generated = [t for t in executable if t.get("attack") != "coverage-template"]
-        try:
-            critic = CriticService(self.context).review(execution, generated)
-            investigation = InvestigatorService(self.context).investigate(
-                critic, generated, base_url=base_url)
-        except Exception as exc:
-            logger.warning("orchestrator verify legs skipped: %s", exc)
-            prog.emit("orchestrate", "info", f"verify skipped ({exc})")
+        # Privacy + determinism: a QUICK scan makes no AI call at all (README/QUICKSTART promise). Before
+        # this guard the Critic reviewed EVERY failed result — coverage templates included — so a quick
+        # scan with ANTHROPIC_API_KEY set sent the target's requests/responses to the provider.
+        if deep and generated:
+            try:
+                critic = CriticService(self.context).review(
+                    self._only_results_of(execution, generated), generated)
+                investigation = InvestigatorService(self.context).investigate(
+                    critic, generated, base_url=base_url)
+            except Exception as exc:
+                logger.warning("orchestrator verify legs skipped: %s", exc)
+                prog.emit("orchestrate", "info", f"verify skipped ({exc})")
 
         # 7) Unify confirmed bugs: Investigator (LLM) + probes + self-proving
         #    deterministic templates (a template that fails its own assertion is a
@@ -366,7 +371,7 @@ class OrchestratorService:
                     exe2 = ExecutionService(self.context).execute(
                         r2, mode="api", base_url=base_url, auth=auth)
                     gen2 = [t for t in round2_tests if t.get("attack") != "coverage-template"]
-                    crit2 = CriticService(self.context).review(exe2, gen2)
+                    crit2 = CriticService(self.context).review(self._only_results_of(exe2, gen2), gen2)
                     inv2 = InvestigatorService(self.context).investigate(crit2, gen2, base_url=base_url)
                     rounds = 2
                     seen = {(str(b.get("title", "")), str(b.get("target", ""))) for b in confirmed}
@@ -432,6 +437,17 @@ class OrchestratorService:
         return result
 
     # ── Re-verify ("reproduce 2/2", every anomaly gets a clean rerun) ──
+
+    @staticmethod
+    def _only_results_of(execution, tests: list) -> dict:
+        """The execution's batch dict restricted to the results of `tests` (the generated ones), so the
+        LLM Critic never sees — or re-judges — the deterministic coverage templates."""
+        raw = execution.to_batch_dict() if hasattr(execution, "to_batch_dict") else dict(execution or {})
+        keys = {(str(t.get("test_case_id", "")), str(t.get("title", ""))) for t in tests or []}
+        raw = dict(raw)
+        raw["results"] = [r for r in raw.get("results", []) or []
+                          if (str(r.get("test_case_id", "")), str(r.get("title", ""))) in keys]
+        return raw
 
     SMALL_SURFACE = 5
 

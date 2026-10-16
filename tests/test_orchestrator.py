@@ -734,3 +734,13 @@ def test_unify_carries_the_measured_number_into_the_confirmed_finding():
     confirmed = OrchestratorService._unify(None, ProbeResult(findings=[f]))
     assert confirmed[0]["reproduced"] == [3, 3]
     assert "reproduced" not in OrchestratorService._unify(None, ProbeResult(findings=[_pf()]))[0]
+
+
+def test_critic_only_sees_generated_tests_results():
+    """Regression: the Critic reviewed failed coverage TEMPLATES too (and shipped them to the AI provider)."""
+    from services.orchestrator_service import OrchestratorService
+    execution = {"results": [{"test_case_id": "COV-1", "title": "Coverage: x", "status": "FAIL"},
+                             {"test_case_id": "GEN-1", "title": "gen", "status": "FAIL"}]}
+    out = OrchestratorService._only_results_of(execution, [{"test_case_id": "GEN-1", "title": "gen"}])
+    assert [r["test_case_id"] for r in out["results"]] == ["GEN-1"]
+    assert len(execution["results"]) == 2                     # the caller's object is not mutated

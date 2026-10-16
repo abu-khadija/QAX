@@ -170,6 +170,47 @@ def _read_only_check(base_url: str) -> list[tuple[str, bool, str]]:
     ]
 
 
+def _no_ai_call_check(base_url: str) -> tuple[str, bool, str]:
+    """
+    Privacy promise (README/QUICKSTART): a QUICK scan sends nothing to an AI provider, even when a key is
+    configured. Proven: point the Anthropic client at a local listener with a fake key and count requests.
+    (It found a real leak: the Critic reviewed failed coverage templates and shipped them to the provider.)
+    """
+    import dataclasses
+    import http.server
+    import threading
+
+    from services.context import QAXContext
+    hits: list = []
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            hits.append(self.path)
+            self.send_response(500)
+            self.end_headers()
+
+        do_GET = do_POST
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    old = os.environ.get("ANTHROPIC_BASE_URL")
+    os.environ["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        ctx = dataclasses.replace(QAXContext.from_env(), anthropic_key="sk-ant-fake-qax-gate")
+        _scan(base_url, ctx=ctx)
+    finally:
+        srv.shutdown()
+        if old is None:
+            os.environ.pop("ANTHROPIC_BASE_URL", None)
+        else:
+            os.environ["ANTHROPIC_BASE_URL"] = old
+    return ("privacy: a quick scan makes ZERO AI-provider calls (even with a key set)", not hits,
+            f"provider requests={len(hits)}")
+
+
 def _pipeline_execute_check(base_url: str) -> tuple[str, bool, str]:
     """
     Verify the ORIGINAL pipeline's execute leg end to end (the other mode, not scan):
@@ -214,6 +255,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
         res_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
         src_res = _source_lane(f"http://127.0.0.1:{port}")
         ro_checks = _read_only_check(f"http://127.0.0.1:{port}")
+        ai_check = _no_ai_call_check(f"http://127.0.0.1:{port}")
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
@@ -245,6 +287,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     # against fakes: each planted bug in /tasks fires, none is silently skipped.
     typed_missing = sorted(_TYPED_PROBES - probes)
     checks.extend(ro_checks)
+    checks.append(ai_check)
     forge_hit = [f for f in getattr(src_res, "exploited", []) if f.probe == "forge-jwt"]
     checks.append(("source lane: forge-jwt proves the forgery with the leaked secret", bool(forge_hit),
                    f"findings={[f.title for f in forge_hit] or 'none'}"))
