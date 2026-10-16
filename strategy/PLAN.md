@@ -295,7 +295,7 @@ These references support the security and operating principles; review current g
 | Real applications | Partial | Five reported with zero confirmed false positives after fixes; Healthchecks sixth found host-header FP, fixed, and exposed spec-less discovery gap |
 | Jira | Partial / exercised | Two bugs filed live to founder’s trial site |
 | Xray | Not started | Never tested |
-| verify-fixes | Partial | Unit-tested; not run against real tickets |
+| verify-fixes | Exercised (read-only) | 2026-10-17: run against the 2 real trial tickets (SCRUM-5/6) as a read-only dry run — 1 STILL REPRODUCES, 1 no-longer-reproduces flagged "build unverified" and NOT auto-closed. No live write (needs owner's OK) |
 | GitHub PR gate | Partial | Built and run on golden target; not run on real repository pull requests |
 | Scorecard FP target | Target only | Less-than-15% is internal and unmeasured; matching still needs stricter semantics |
 | SSRF boundary | Partial by deployment context | Current egress boundary stays on target origin; hosted-grade DNS, private-range, metadata, and connect-time redirect controls absent |
