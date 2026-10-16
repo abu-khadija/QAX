@@ -292,7 +292,8 @@ These references support the security and operating principles; review current g
 | Mutation coverage | Done with qualification | Full sweep detected a lost CONFIRMED finding for 39/40 disabled probes; forge-jwt separately verified through source lane |
 | Read-only | Done | Zero added write requests on golden target; prior check caught 74 leaked POSTs |
 | Quick-scan AI boundary | Done | Local listener saw zero provider calls after fix, including with API key set |
-| Real applications | Partial | Five reported with zero confirmed false positives after fixes; Healthchecks sixth found host-header FP, fixed, and exposed spec-less discovery gap |
+| Real applications | Partial | Five with zero confirmed FPs after fixes; Healthchecks sixth found host-header FP + spec-less discovery gap. 2026-10-17: docs-page discovery landed — Healthchecks went 1→36 grounded endpoints, 0 FP |
+| Spec-less discovery | Improved 2026-10-17 | `paths_from_pages` reads the app's own home/docs pages for listed endpoints; Healthchecks 1→36. Next: more spec-less apps in the corpus |
 | Jira | Partial / exercised | Two bugs filed live to founder’s trial site |
 | Xray | Not started | Never tested |
 | verify-fixes | Exercised (read-only) | 2026-10-17: run against the 2 real trial tickets (SCRUM-5/6) as a read-only dry run — 1 STILL REPRODUCES, 1 no-longer-reproduces flagged "build unverified" and NOT auto-closed. No live write (needs owner's OK) |

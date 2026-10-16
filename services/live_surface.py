@@ -320,24 +320,92 @@ _COMMON_API_PATHS = tuple(dict.fromkeys(
     + ["/api", "/api/v1"]))
 
 
+# Pages an app commonly serves its own API reference on (read for path mentions when there is no spec).
+_DOC_PAGES = ("/", "/docs", "/docs/", "/docs/api", "/docs/api/", "/api/docs", "/api/docs/",
+              "/api", "/api/", "/documentation", "/help/api", "/developer", "/developers")
+# A path-like token in page text: a leading slash then path chars. Captured, then filtered and verified.
+_PATH_IN_TEXT = re.compile(r"(?<![\w.])(/[a-zA-Z0-9][a-zA-Z0-9_./:{}-]{1,120})")
+# A doc line like "GET /api/v3/checks/" ties a method to a path — the strongest signal in a docs page.
+_METHOD_PATH = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\b[\s`\"']{0,4}(/[a-zA-Z0-9][a-zA-Z0-9_./:{}-]{1,120})")
+_STATIC_SUFFIX = (".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2",
+                  ".ttf", ".map", ".webp", ".mp4", ".pdf", ".xml", ".txt", ".zip")
+_MAX_DOC_BYTES = 500_000
+_MAX_CANDIDATES = 80
+
+
+def _looks_like_api_path(p: str) -> bool:
+    """A path worth verifying: not a static asset, not a fragment/template artefact, has real segments."""
+    pl = p.lower()
+    if pl.endswith(_STATIC_SUFFIX) or "//" in p or p.count("/") > 8 or any(c in p for c in "<>$"):
+        return False
+    segs = [s for s in p.split("/") if s]
+    return bool(segs) and any(s.strip("{}.") for s in segs)   # at least one real (non-param, non-dot) segment
+
+
+def paths_from_pages(base_url: str, model, *, session: requests.Session | None = None) -> list[dict]:
+    """
+    Read the app's own home and API-docs pages and pull out the paths they mention, then keep the ones
+    that are actually live. Many apps that serve no OpenAPI still list their API in a docs page in plain
+    text ("GET /api/v3/checks/"); reading it turns a one-endpoint scan into the real surface. GET-only,
+    same host, bounded by page count and size. A path is kept only when `_route_exists` confirms it.
+    """
+    sess = session or requests.Session()
+    base = base_url.rstrip("/")
+    existing = {normalize_path_params(str(e.get("path", ""))) for e in getattr(model, "endpoints", [])
+                if isinstance(e, dict)}
+    method_hint: dict[str, str] = {}
+    candidates: list[str] = []
+    seen_pages: set = set()
+    for page in _DOC_PAGES:
+        if page in seen_pages:
+            continue
+        seen_pages.add(page)
+        try:
+            r = sess.get(base + page, timeout=10, allow_redirects=False)
+        except Exception:
+            continue
+        ct = str(getattr(r, "headers", {}) and r.headers.get("Content-Type", "")).lower()
+        if getattr(r, "status_code", 404) >= 400 or ("html" not in ct and "text" not in ct and "json" not in ct):
+            continue
+        text = (getattr(r, "text", "") or "")[:_MAX_DOC_BYTES]
+        for m, p in _METHOD_PATH.findall(text):
+            method_hint.setdefault(p.rstrip(".,);"), m.upper())
+        for p in _PATH_IN_TEXT.findall(text):
+            candidates.append(p.rstrip(".,);"))
+    out: list[dict] = []
+    found: set = set()
+    for p in dict.fromkeys(candidates):
+        if len(out) >= _MAX_CANDIDATES:
+            break
+        np = normalize_path_params(p)
+        if np in existing or np in found or not _looks_like_api_path(p):
+            continue
+        if _route_exists(base, p, sess):
+            found.add(np)
+            out.append({"method": method_hint.get(p, "GET"), "path": np,
+                        "auth_required": False, "source": "discovered-docs"})
+    return out
+
+
 def discover_endpoints(base_url: str, model, *, session: requests.Session | None = None) -> list[dict]:
     """
-    Spec-less discovery. When the app serves no OpenAPI, probe a small set of common
-    REST/GraphQL paths and return the ones that are actually LIVE (a definitive handler
-    response via `_route_exists`) and not already in the model — so the probes get a
-    real surface to work on instead of only unverified code inference. Discovery can be
-    generous: the probes have their own zero-false-positive controls, so an extra path
+    Spec-less discovery. When the app serves no OpenAPI, (1) read its own home/docs pages for the paths
+    they mention (`paths_from_pages`), then (2) probe a small set of common REST/GraphQL paths. Return the
+    live ones not already in the model, so the probes get a real surface instead of only code inference.
+    Discovery can be generous: the probes have their own zero-false-positive controls, so an extra path
     only costs a request, never a bogus finding.
     """
     sess = session or requests.Session()
     base = base_url.rstrip("/")
     existing = {normalize_path_params(str(e.get("path", "")))
                 for e in getattr(model, "endpoints", []) if isinstance(e, dict)}
-    out: list[dict] = []
+    out: list[dict] = paths_from_pages(base_url, model, session=sess)
+    seen = {d["path"] for d in out} | existing
     for p in _COMMON_API_PATHS:
-        if p in existing or p in {d["path"] for d in out}:
+        if p in seen:
             continue
         if _route_exists(base, p, sess):
+            seen.add(p)
             out.append({"method": "GET", "path": p, "auth_required": False, "source": "discovered"})
     return out
 

@@ -210,3 +210,50 @@ def test_endpoints_record_request_field_types_swagger2():
 
 def test_request_field_types_empty_without_a_body_schema():
     assert endpoints_from_spec({"openapi": "3.0.0", "paths": {"/x": {"get": {}}}})[0]["request_field_types"] == {}
+
+
+# ── A3: read the app's own docs pages for endpoints (spec-less) ─────────────────
+
+class _DocsSession:
+    """A spec-less app whose /docs/api/ page lists its API in text; the listed paths are live."""
+    _DOCS = ("The REST API:\n"
+             "GET /api/v3/checks/  list checks\n"
+             "POST /api/v3/checks/  create\n"
+             "GET /api/v3/channels/  list channels\n"
+             "See also /static/app.css and /favicon.ico\n")
+    _LIVE = {"/api/v3/checks/", "/api/v3/channels/"}
+
+    def get(self, url, timeout=None, allow_redirects=None, headers=None, params=None):
+        from urllib.parse import urlparse
+        path = urlparse(url).path
+        if path in ("/docs/api/", "/docs/api"):
+            return MagicMock(status_code=200, text=self._DOCS, headers={"Content-Type": "text/html"})
+        if path == "/":
+            return MagicMock(status_code=200, text="<a href='/docs/api/'>API</a>", headers={"Content-Type": "text/html"})
+        if path in self._LIVE:
+            return MagicMock(status_code=200, text="{}", headers={"Content-Type": "application/json"})
+        return MagicMock(status_code=404, text="nope", headers={"Content-Type": "text/html"})
+
+
+def test_paths_from_pages_reads_listed_live_endpoints_and_skips_assets():
+    from services.live_surface import paths_from_pages
+    disc = paths_from_pages("http://x", AppModel(root="/x", endpoints=[]), session=_DocsSession())
+    paths = {d["path"] for d in disc}
+    assert "/api/v3/checks/" in paths and "/api/v3/channels/" in paths
+    assert "/static/app.css" not in paths and "/favicon.ico" not in paths   # assets filtered
+    checks = next(d for d in disc if d["path"] == "/api/v3/checks/")
+    assert checks["method"] == "GET" and checks["source"] == "discovered-docs"   # method taken from the doc line
+
+
+def test_paths_from_pages_skips_what_is_already_modelled():
+    from services.live_surface import paths_from_pages
+    model = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/api/v3/checks/"}])
+    paths = {d["path"] for d in paths_from_pages("http://x", model, session=_DocsSession())}
+    assert "/api/v3/checks/" not in paths and "/api/v3/channels/" in paths
+
+
+def test_looks_like_api_path_filters():
+    from services.live_surface import _looks_like_api_path
+    assert _looks_like_api_path("/api/v3/checks/")
+    assert not _looks_like_api_path("/x.css") and not _looks_like_api_path("/a//b")
+    assert not _looks_like_api_path("/{}/{}")
