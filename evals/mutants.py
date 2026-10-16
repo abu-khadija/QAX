@@ -84,7 +84,9 @@ def run(only: set[str] | None = None) -> dict:
             r2, _ = gate._scan(base, auth=gate._two_user_auth(base))
         src = gate._source_lane(base)          # forge-jwt needs a modelled source (see gate._source_lane)
         return (signature(r1.to_dict()) | frozenset(("auth",) + x for x in signature(r2.to_dict()))
-                | frozenset(("source",) + x for x in signature(src.to_dict())))
+                | frozenset(("source",) + x for x in signature(
+                    {"confirmed": [{"probe": f.probe, "title": f.title} for f in src.exploited],
+                     "not_tested": getattr(src, "skipped", None) or []})))
 
     try:
         a, b = scan(), scan()

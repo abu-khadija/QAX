@@ -422,4 +422,4 @@ memory.
 - The A/B harness + scorecard → become the automated merge gate.
 - Before/after evidence captured in `strategy/ORCHESTRATOR_FIXES_EVIDENCE.md`.
 27. ✅ **Accepted / by-design findings — DONE 2026-10-16**: `core/accepted.py` + `--accepted` / `QAX_ACCEPTED` / default `.qax/accepted.json`; strict (reason + expiry ≤ 1 year + selector required, bad entries rejected loudly), always visible (ACCEPTED block, lapsed → counted again, unused → reported), wired into `scan`, the PR gate and (via the scan JSON) `file-findings`. 7 tests + e2e on the golden target.
-28. ✅ **forge-jwt source lane — DONE 2026-10-16**: gate hands ProbeService a hand-built AppModel leaking the secret; SECURE rotates it. Sweep = 40/40 once confirmed.
+28. ✅ **forge-jwt source lane — DONE 2026-10-16**: gate hands ProbeService a hand-built AppModel leaking the secret; SECURE rotates it. Sweep re-run: **40/40 DETECTS** (every probe has a planted bug the gate notices).
