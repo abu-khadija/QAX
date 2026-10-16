@@ -24,3 +24,11 @@ def test_render_sessions_empty_and_filled():
     out = render_sessions([{"mode": "smoke", "session_id": "S1", "timestamp": "2026-10-14T10:00:00",
                             "files_processed": 2, "total_valid": 5, "output_file": "o.json"}])
     assert "SMOKE" in out and "S1" in out and "Valid: 5" in out and "o.json" in out
+
+
+def test_run_record_has_version_commit_and_no_secrets():
+    from core.version import __version__, run_record
+    rec = run_record(read_only=True, token_supplied=True)
+    assert rec["qax_version"] == __version__ and "options" in rec
+    assert rec["options"] == {"read_only": True, "token_supplied": True}
+    assert rec["qax_commit"] is None or len(rec["qax_commit"]) >= 7

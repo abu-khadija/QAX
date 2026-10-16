@@ -2339,8 +2339,16 @@ def run_scan_command() -> None:
             # Record WHAT was scanned, so a finding filed later (file-findings) can
             # state its environment — a bug report without one is not reproducible.
             from core.build_fingerprint import build_fingerprint
+            from core.version import run_record
             _out = {**result.to_dict(), "target_url": args.url,
                     "scan_mode": "quick" if args.quick else "deep",
+                    # PLAN.md §6 run record: what produced this result (never the tokens themselves).
+                    **run_record(quick=bool(args.quick), read_only=bool(args.read_only),
+                                 reverify=int(args.reverify or 0), tour=bool(args.tour),
+                                 repo_supplied=bool(args.repo), token_supplied=bool(args.token),
+                                 token_b_supplied=bool(args.token_b), auth_header=args.auth_header,
+                                 auth_scheme=args.auth_scheme,
+                                 accepted_file=args.accepted or None),
                     "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
                     # Which build was scanned — so a later verify-fixes can tell "not fixed" from
                     # "not redeployed" (None = no stable component, i.e. unknown).
@@ -2374,6 +2382,10 @@ def main() -> None:
     """
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         show_help()
+        return
+    if sys.argv[1] in ("--version", "version"):
+        from core.version import __version__, commit
+        print(f"QAX {__version__}" + (f" ({commit()})" if commit() else ""))
         return
 
     command = sys.argv[1]
