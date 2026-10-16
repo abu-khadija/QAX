@@ -403,66 +403,6 @@ def _find_last_method(lines: list[str]) -> str:
 # Function Extractor
 # ─────────────────────────────────────────────────────────────────────────────
 
-def extract_functions(content: str, extension: str) -> list[str]:
-    """
-    Extract individual function or method definitions from source code.
-
-    Uses regex patterns appropriate for each language. This allows
-    analyzing one function at a time for very large files.
-
-    Supported languages:
-      - Python (.py): def and async def functions
-      - JavaScript/TypeScript (.js, .ts, .jsx, .tsx): function keyword and arrow functions
-      - Java/C# (.java, .cs): method definitions
-      - Generic: falls back to splitting on blank lines
-
-    Args:
-        content (str): The source code to extract functions from.
-        extension (str): File extension (e.g., ".py", ".js") to select the right pattern.
-
-    Returns:
-        list[str]: List of function code blocks as strings.
-                   Returns the full content as a single item if no functions found.
-    """
-    ext = extension.lower()
-    functions = []
-
-    if ext == ".py":
-        # Match Python function definitions (including async, methods, nested)
-        # Captures from 'def'/'async def' to the next 'def' or end of file
-        pattern = re.compile(
-            r"((?:@\w+[^\n]*\n)*\s*(?:async\s+)?def\s+\w+[^\n]+:(?:\n(?:[ \t][^\n]*)|\n)*)",
-            re.MULTILINE
-        )
-        matches = pattern.findall(content)
-        functions = [m.strip() for m in matches if m.strip()]
-
-    elif ext in (".js", ".ts", ".jsx", ".tsx"):
-        # Match JS/TS function declarations and arrow functions assigned to const/let
-        pattern = re.compile(
-            r"((?:export\s+)?(?:async\s+)?function\s+\w+\s*\([^)]*\)\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\})",
-            re.MULTILINE | re.DOTALL
-        )
-        matches = pattern.findall(content)
-        functions = [m.strip() for m in matches if m.strip()]
-
-    elif ext in (".java", ".cs"):
-        # Match Java/C# method definitions
-        pattern = re.compile(
-            r"((?:public|private|protected|static|void|async|override|virtual)\s+[^\n{]+\{[^}]*(?:\{[^}]*\}[^}]*)*\})",
-            re.MULTILINE | re.DOTALL
-        )
-        matches = pattern.findall(content)
-        functions = [m.strip() for m in matches if m.strip()]
-
-    # If no functions extracted, return the whole content as one block
-    if not functions:
-        logger.debug("No individual functions extracted for %s — returning full content", extension)
-        return [content]
-
-    logger.debug("Extracted %d functions from %s file", len(functions), extension)
-    return functions
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Testability Checker

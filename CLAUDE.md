@@ -19,7 +19,6 @@ are in `strategy/archive/`.
 core/
   claude_client.py        ✅
   code_reader.py          ✅
-  prompt_engine.py        ✅
   validator.py            ✅
   xray_client.py          ✅
   screenshot_capture.py   ✅

@@ -462,60 +462,6 @@ def validate_dual_steps(tc: dict) -> list[str]:
     return errors
 
 
-def validate_dual_steps_batch(test_cases: list[dict]) -> dict:
-    """
-    Run dual-step validation across all test cases in a batch.
-
-    Returns a summary of which test cases pass/fail the dual-step check,
-    separate from the main JSON schema validation.
-
-    Args:
-        test_cases (list[dict]): List of test case dictionaries.
-
-    Returns:
-        dict: Results with keys:
-            - "passed" (list): Test case IDs that passed dual-step validation
-            - "failed" (list): Dicts with test_case_id and list of errors
-            - "todo_selectors" (list): All selector_keys containing 'TODO_' that need filling in
-    """
-    passed = []
-    failed = []
-    todo_selectors = []
-
-    for tc in test_cases:
-        tc_id = tc.get("test_case_id", "UNKNOWN")
-        errors = validate_dual_steps(tc)
-
-        if errors:
-            failed.append({"test_case_id": tc_id, "errors": errors})
-        else:
-            passed.append(tc_id)
-
-        # Collect all TODO selectors that need to be filled in by the developer
-        auto_steps = tc.get("automation_steps", [])
-        for step in auto_steps:
-            selector = step.get("selector_key", "")
-            if selector.startswith("TODO_"):
-                todo_selectors.append({
-                    "test_case_id": tc_id,
-                    "step_number": step.get("step_number"),
-                    "selector_key": selector,
-                    "action": step.get("playwright_action"),
-                })
-
-    return {
-        "passed": passed,
-        "failed": failed,
-        "todo_selectors": todo_selectors,
-        "summary": {
-            "total": len(test_cases),
-            "passed_count": len(passed),
-            "failed_count": len(failed),
-            "todo_selector_count": len(todo_selectors),
-        }
-    }
-
-
 def generate_quality_report(validation_result: dict) -> str:
     """
     Generate a human-readable quality report from a validate_batch() result.
