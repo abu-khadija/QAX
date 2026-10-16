@@ -122,6 +122,24 @@ def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None, auth=None):
     return res, rec
 
 
+def _source_lane(base_url: str):
+    """
+    forge-jwt needs a MODELLED SOURCE with a hardcoded signing secret; a live-only scan has none and the
+    real model is LLM-built. This deterministic lane hands ProbeService a hand-built AppModel whose config
+    leaks the target's secret, and runs it against the live target: the probe must prove the forgery
+    (vulnerable) or be refused (SECURE app rotated the secret).
+    """
+    from services.context import QAXContext
+    from services.live_surface import endpoints_from_spec, fetch_openapi
+    from services.probe_service import ProbeService
+    from services.results import AppModel
+
+    model = AppModel(root="(golden source)", endpoints=endpoints_from_spec(fetch_openapi(base_url)),
+                     config=[{"key": "JWT_SECRET", "default": "super-secret-signing-key",
+                              "is_secret": True, "risk": "hardcoded signing secret"}])
+    return ProbeService(QAXContext.from_env()).run(model, base_url)
+
+
 def _pipeline_execute_check(base_url: str) -> tuple[str, bool, str]:
     """
     Verify the ORIGINAL pipeline's execute leg end to end (the other mode, not scan):
@@ -164,6 +182,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
                                      ctx=dataclasses.replace(QAXContext.from_env(), anthropic_key=""))
         # access-revocation needs TWO supplied identities: scan once more with them.
         res_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
+        src_res = _source_lane(f"http://127.0.0.1:{port}")
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
@@ -194,6 +213,9 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     # The five spec-typed probes must be proven on a RUNNING server, not just
     # against fakes: each planted bug in /tasks fires, none is silently skipped.
     typed_missing = sorted(_TYPED_PROBES - probes)
+    forge_hit = [f for f in getattr(src_res, "exploited", []) if f.probe == "forge-jwt"]
+    checks.append(("source lane: forge-jwt proves the forgery with the leaked secret", bool(forge_hit),
+                   f"findings={[f.title for f in forge_hit] or 'none'}"))
     planted_missing = sorted(_PLANTED_PROBES - probes)
     checks.append(("planted-bug probes all fired on the vulnerable target", not planted_missing,
                    f"fired={sorted(_PLANTED_PROBES & probes)} missing={planted_missing or 'none'}"))
@@ -219,6 +241,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     try:
         sres, _ = _scan(f"http://127.0.0.1:{port}")
         sres_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
+        ssrc_res = _source_lane(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
     auth_bugs = [b for b in sres.confirmed
@@ -228,6 +251,9 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     ar_fp = [b.get("probe") for b in sres_auth.confirmed if b.get("probe") == "access-revocation"]
     checks.append(("secure control: access-revocation silent (0)", not ar_fp,
                    f"findings on fixed app={ar_fp or 0}"))
+    forge_fp = [f.title for f in getattr(ssrc_res, "exploited", []) if f.probe == "forge-jwt"]
+    checks.append(("secure control: forge-jwt silent with the rotated secret (0)", not forge_fp,
+                   f"findings on fixed app={forge_fp or 0}"))
     planted_fp = sorted({b.get("probe") for b in sres.confirmed if b.get("probe") in _PLANTED_PROBES})
     checks.append(("secure control: planted-bug probes silent (0)", not planted_fp,
                    f"findings on fixed app={planted_fp or 0}"))

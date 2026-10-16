@@ -78,11 +78,13 @@ def run(only: set[str] | None = None) -> dict:
     base = f"http://127.0.0.1:{port}"
 
     def scan() -> frozenset:
-        """Both gate lanes: anonymous, and with two supplied identities (bola/access-revocation…)."""
+        """All gate lanes: anonymous, two supplied identities (bola/access-revocation…), modelled source."""
         with redirect_stdout(io.StringIO()):
             r1, _ = gate._scan(base)
             r2, _ = gate._scan(base, auth=gate._two_user_auth(base))
-        return signature(r1.to_dict()) | frozenset(("auth",) + x for x in signature(r2.to_dict()))
+        src = gate._source_lane(base)          # forge-jwt needs a modelled source (see gate._source_lane)
+        return (signature(r1.to_dict()) | frozenset(("auth",) + x for x in signature(r2.to_dict()))
+                | frozenset(("source",) + x for x in signature(src.to_dict())))
 
     try:
         a, b = scan(), scan()

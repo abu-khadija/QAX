@@ -31,8 +31,11 @@ import os
 from flask import Flask, jsonify, make_response, request
 
 app = Flask(__name__)
-SECRET = b"super-secret-signing-key"
 SECURE = os.environ.get("QAX_SECURE") == "1"
+# The signing secret is "hardcoded in the source" (the source lane of the gate tells QAX so). SECURE
+# rotates it to a value that is not in the source, so a token forged with the leaked secret is rejected.
+SECRET = os.urandom(32) if SECURE else b"super-secret-signing-key"
+LEAKED_SECRET = "super-secret-signing-key"
 _USERS: dict = {}
 _FAILS: dict = {}
 
