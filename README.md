@@ -82,7 +82,7 @@ scanned with 0 false alarms — QAX raised false alarms on two of them first; th
 ## Test-case generation (the original workflow)
 
 ```bash
-pip install -r requirements.txt          # full set, including the Streamlit UI
+pip install -r requirements.txt          # full set (test generation, execution, web UI)
 cp .env.example .env                     # fill in ANTHROPIC_API_KEY at minimum
 python main.py check-connection
 python main.py analyze --file your_file.cs --project example --dry-run   # nothing sent to Jira

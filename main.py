@@ -66,9 +66,9 @@ CHECK-CONNECTION — Test all API connections
   python main.py check-connection
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-UI — Launch Streamlit web interface
+WEB UI — the one supported interface (scan, plan preview, run history)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  python main.py ui
+  ./.venv-exec/bin/python -m web.server      →  http://127.0.0.1:8900
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PIPELINE — Generate → Export → Execute in one step
@@ -1936,57 +1936,6 @@ def run_pipeline_command() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# UI — Streamlit web interface
-# ══════════════════════════════════════════════════════════════════════════════
-
-def run_ui_command() -> None:
-    """
-    Launch the QAX Streamlit UI on localhost:8501.
-
-    DEPRECATED (PLAN.md Phase 1 item 8): `web/` (python -m web.server) is the one supported UI. This
-    Streamlit app is frozen — kept working for now, removed later with the owner's OK. It is not part of
-    the alpha and does not carry the scan honesty surfaces (NOT TESTED, read-only, plan preview).
-    """
-    import subprocess
-
-    print("\n  [QAX] NOTE: the Streamlit UI is deprecated and frozen. The supported UI is `web/`:")
-    print("        ./.venv-exec/bin/python -m web.server   →   http://127.0.0.1:8900\n")
-
-    ui_path = Path(__file__).parent / "ui" / "app.py"
-    if not ui_path.exists():
-        print(f"\n  [QAX] ERROR: UI file not found at {ui_path}")
-        print("  Make sure ui/app.py exists.\n")
-        sys.exit(1)
-
-    cmd = [
-        sys.executable, "-m", "streamlit", "run", str(ui_path),
-        "--theme.base",                    "dark",
-        "--theme.primaryColor",            "#7c3aed",
-        "--theme.backgroundColor",         "#0a0e1a",
-        "--theme.secondaryBackgroundColor","#111827",
-        "--theme.textColor",               "#f1f5f9",
-        "--server.port",                   "8501",
-        "--server.headless",               "true",
-        "--browser.gatherUsageStats",      "false",
-    ]
-
-    print("\n  ┌─────────────────────────────────────────┐")
-    print("  │  QAX  ·  Streamlit UI                   │")
-    print("  │  http://localhost:8501                  │")
-    print("  │  Press Ctrl-C to stop                  │")
-    print("  └─────────────────────────────────────────┘\n")
-
-    try:
-        subprocess.run(cmd, check=False)
-    except KeyboardInterrupt:
-        print("\n  [QAX] UI stopped.\n")
-    except FileNotFoundError:
-        print("\n  [QAX] ERROR: streamlit not found.")
-        print("  Install it with: pip install streamlit\n")
-        sys.exit(1)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # HELP
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2007,7 +1956,6 @@ def show_help() -> None:
     print("  check-connection Test all API connections (Claude + Jira + Xray)")
     print("  init-project     Create a new project config folder")
     print("  cache            Manage the file-level result cache (--stats / --clear)")
-    print("  ui               Launch the Streamlit web interface (localhost:8501)")
     print("  pipeline         Generate → Export → Execute in one step")
     print()
     print("Examples:")
@@ -2414,7 +2362,6 @@ def main() -> None:
         "check-connection": run_check_connection_command,
         "init-project":     run_init_project_command,
         "cache":            run_cache_command,
-        "ui":               run_ui_command,
         "pipeline":         run_pipeline_command,
         "scan":             run_scan_command,
         "file-findings":    run_file_findings_command,
@@ -2428,7 +2375,7 @@ def main() -> None:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 
