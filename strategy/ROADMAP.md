@@ -24,7 +24,7 @@ published in `strategy/evidence/`, the gate green.
 | A4 | **Evidence to 10 apps** (Django / Rails / Laravel / Express / Spring / .NET; A3's apps count). Per app: confirmed, FP after a manual check, NOT TESTED ratio, scan time, request count | todo | The "0 FP" claim needs it (G1) |
 | A5 | **Scale + 429/WAF**: measure time and requests; on 429 back off and record it in the ledger | todo | Measured during A4 (G3) |
 | A6 | **`verify-fixes` live** on SCRUM-5/6: dry run first, write only with the OK | todo | Waits on the owner's OK for the write |
-| A7 | **Release hygiene**: `pyproject.toml`, version 0.1.0, CHANGELOG, SECURITY.md, LICENSE | todo | The license type is the owner's call (tied to B9) |
+| A7 | **Release hygiene**: `pyproject.toml`, version 0.1.0, CHANGELOG, SECURITY.md, LICENSE = proprietary / all rights reserved (D12) | todo | Unblocked: an open license is decided later with counsel |
 
 ## Phase B — one clear product · target 2026-11-15
 Exit: two people who have never seen QAX finish scan → review → Jira on the golden target **without asking**.
@@ -40,18 +40,17 @@ Exit: two people who have never seen QAX finish scan → review → Jira on the 
 | B-7 | The new-user test with 2 people + fixing whatever confused them | todo |
 
 ## Phases C, D, E
-- **C — private alpha** (2026-11-16 → 12-06): 3–5 trusted people, on their own apps, `--read-only` by default.
-- **D — design-partner beta** (Dec → Jan): **entry condition is B9 (legal) settled in writing.**
-- **E — public** (target Feb 2027): v1.0 + B9 + the open benchmark (Q5).
+- **C — private alpha** (2026-11-16 → end of Dec, extended while B9 waits): 3–5 trusted people, on their own apps, `--read-only` by default.
+- **D — design-partner beta** (Jan → mid-Feb 2027): **entry condition is B9 (legal) settled in writing** — the owner expects early 2027.
+- **E — public** (target Mar 2027): v1.0 (≈ end Feb) + B9 + the open benchmark (Q5).
 
 Details and exit criteria: [PLAN_TO_V1.md §5–6](PLAN_TO_V1.md).
 
 ## Waiting on the owner
 | What | Blocks |
 |---|---|
-| B9: a lawyer on ownership + git history (EXAMPLE traces in old commits) | Phases D and E |
-| The LICENSE type | A7 |
-| OK before each clone of an external repo (A3/A4) and each write to Jira (A6) | A3, A4, A6 |
+| B9: a lawyer on ownership + git history (EXAMPLE traces in old commits) — owner: early 2027, will say if sooner | Phases D and E |
+| Each write to Jira (A6). Cloning permissive OSS apps for A3/A4 outside the repo: **approved 2026-10-16** | A6 |
 | The Xray trial app | finding → regression test → Xray (Q3 step 2) |
 
 ## Background track (when a phase is waiting)
