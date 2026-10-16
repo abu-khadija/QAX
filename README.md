@@ -46,6 +46,11 @@ python main.py scan --url https://your-app.example --quick --authorized \
 * A **quick** scan needs no API key. A **deep** scan (AI test generation, red-team, critic)
   needs `ANTHROPIC_API_KEY` in `.env` (about $0.5–1 per run).
 
+**Compare two scans:** `python main.py diff before.json after.json` → NEW · STILL THERE · GONE ·
+NOT RE-CHECKED · FLAKY? · ACCEPTED. A finding that disappeared is only GONE when its probe really ran on a
+changed build; if the probe could not run it is NOT RE-CHECKED, and if the build did not change it is
+FLAKY? — never "fixed". `--fail-on-new P1,P2` makes it a CI check.
+
 ## From finding to Jira, and back
 
 ```bash

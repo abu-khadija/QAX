@@ -2098,6 +2098,17 @@ def run_file_findings_command() -> None:
     from cli.file_findings import run as _run_file_findings
     sys.exit(_run_file_findings(sys.argv[2:]))
 
+def run_diff_command() -> None:
+    """
+    Handle the 'diff' subcommand — what changed between two `scan --out` results (new / still there /
+    gone / not re-checked / flaky / accepted). Logic lives in cli/diff.py.
+
+    Called when sys.argv[1] == "diff".
+    """
+    from cli.diff import run as _run_diff
+    sys.exit(_run_diff(sys.argv[2:]))
+
+
 def run_lint_tests_command() -> None:
     """
     Handle the 'lint-tests' subcommand — deterministic quality lint of a saved test-case file
@@ -2384,13 +2395,14 @@ def main() -> None:
         "verify-fixes":     run_verify_fixes_command,
         "demo":             run_demo_command,
         "lint-tests":       run_lint_tests_command,
+        "diff":             run_diff_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes, demo, lint-tests")
+        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, ui, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

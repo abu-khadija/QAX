@@ -19,8 +19,8 @@ published in `strategy/evidence/`, the gate green.
 | # | Task | Status | Why it is at this position |
 |---|---|---|---|
 | A1 | **`--read-only`** — ✅ DONE 2026-10-16: enforced at the HTTP session (only GET/HEAD/OPTIONS leave QAX), proven in the gate by counting requests on the server (0 writes); found + fixed 2 real gaps on the way: the family sweep wrote on an unguarded, untracked session, and ~150 probe-created records were never reported (LEFT ON THE TARGET said 16, the truth was 172) | ✅ | — |
-| A2 | **`qax diff a.json b.json`**: new / fixed / still there / accepted, keyed on the Jira fingerprint | ▶ next | Small. Needed to compare re-scans during A3–A5 |
-| A3 | **Auth types**: cookie session + CSRF, login form, API key in a header. Measure on 3 OSS apps first, then build what is missing | todo | The biggest real-world risk (G2) |
+| A2 | **`qax diff a.json b.json`** — ✅ DONE 2026-10-16: NEW / STILL THERE / GONE / NOT RE-CHECKED / FLAKY? / ACCEPTED, keyed on the Jira fingerprint; gone ≠ fixed unless the probe ran on a changed build; e2e vulnerable → fixed build = 40 GONE, 2 NOT RE-CHECKED (correctly) | ✅ | Small. Needed to compare re-scans during A3–A5 |
+| A3 ▶ | **Auth types**: cookie session + CSRF, login form, API key in a header. Measure on 3 OSS apps first, then build what is missing | todo | The biggest real-world risk (G2) |
 | A4 | **Evidence to 10 apps** (Django / Rails / Laravel / Express / Spring / .NET; A3's apps count). Per app: confirmed, FP after a manual check, NOT TESTED ratio, scan time, request count | todo | The "0 FP" claim needs it (G1) |
 | A5 | **Scale + 429/WAF**: measure time and requests; on 429 back off and record it in the ledger | todo | Measured during A4 (G3) |
 | A6 | **`verify-fixes` live** on SCRUM-5/6: dry run first, write only with the OK | todo | Waits on the owner's OK for the write |
