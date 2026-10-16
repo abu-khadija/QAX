@@ -14,7 +14,7 @@ Live at `http://127.0.0.1:5001`.
   the API's apparent contract. I did **not** encode knowledge of the planted vulns
   (no JWT-forgery / IDOR / injection tests), because a generalist asked to "write
   tests" wouldn't. The one security-ish test (wrong password → 401) is a standard
-  functional check any dev writes. Suite + raw run: `strategy/phase3/generic_agent_vampi_suite.py`.
+  functional check any dev writes. Suite + raw run: `strategy/evidence/phase3/generic_agent_vampi_suite.py`.
 - **QAX:** the deterministic scan already recorded in the scorecard ledger.
 
 ## Result

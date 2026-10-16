@@ -1,31 +1,17 @@
 # QAX — Project Context
 
 ## What this project is
-AI-powered QA automation tool.
-Reads ANY source code, generates test cases
-via Claude API, validates them, and pushes
-to Jira/Xray.
+QAX is the runtime proof layer: "Generate the tests. Prove the bugs. Ship to Jira."
+The core (the wedge) scans a RUNNING app with deterministic probes and reports only what it can
+prove; generating test cases from code/stories (→ Jira/Xray) is the on-ramp.
 Multi-project: works on any codebase.
 Formerly: example-qa-agent → QAFlow Agent → QAX
 
-## Current Status
-✅ Prompt 1 — Foundation (COMPLETE)
-✅ Prompt 4 — Enhancements 1-4 (COMPLETE)
-✅ Prompt 5 — Enhancements 5-6 (COMPLETE)
-✅ Prompt 2 — Integration (COMPLETE)
-✅ Prompt 3 — Execution + Playwright (COMPLETE)
-✅ Prompt 6 — Dashboard + CI/CD (COMPLETE)
-✅ Fix Session — All 5 fixes (COMPLETE)
-✅ Phase A — Core enhancements (COMPLETE)
-✅ Phase B — Smart Check layer (COMPLETE)
-
-## Pending Items
-- [ ] Add JIRA_EMAIL to .env
-- [ ] Add JIRA_API_TOKEN to .env
-- [ ] Add DEFAULT_PROJECT in .env
-- [ ] Fill selectors.json with real CSS selectors
-- [x] Phase B: Smart Check layer ✅
-- [ ] Phase C: AI Visual + Bug reporter
+## Current Status (2026-10-16)
+The plan is `strategy/PLAN_TO_V1.md` (decisions D1–D11, phases A–E, dates); the task board is
+`strategy/ROADMAP.md` (current phase, order, what waits on the owner). `strategy/README.md` indexes the rest.
+History of the earlier prompts/phases: `strategy/archive/ROADMAP_HISTORY_2026-10.md`.
+Now: Phase A (the truth on real apps), target 2026-11-01.
 
 ## File Structure
 core/

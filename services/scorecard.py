@@ -7,7 +7,7 @@ were confirmed, which LAYER caught each (deterministic probe vs generated test v
 coverage template), whether a deep scan actually finished end-to-end, duration,
 tests run, coverage, the LLM cost, and — when a ground-truth file for the target
 is supplied — recall against the documented bugs and the false-positive rate
-(target < 15%, per strategy/REALITY_CHECK.md).
+(target < 15%, per strategy/archive/REALITY_CHECK.md).
 
 Records are written per run and appended to a ledger so behaviour can be tracked
 over time and across repos. Pure logic + file IO; never raises into the scan.

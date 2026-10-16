@@ -1,7 +1,7 @@
 # Qodo: Competitive Intelligence Audit, and What It Means for QAX
 
 **Research date:** 2026-10-14. All Qodo pages were accessed on this date unless noted.
-**Method:** I fetched the live qodo.ai pages, docs.qodo.ai (the full doc index via `llms.txt`) and the trust center, and inspected the pricing and home pages visually in a real browser (desktop plus a 375px mobile view). I checked third-party sources for history, funding, pricing context and sentiment. For QAX, I read the repository (`strategy/ROADMAP.md`, `strategy/GTM_AND_ROADMAP.md`, `execution/probes.py`, the tests and the service layer) plus the project memory.
+**Method:** I fetched the live qodo.ai pages, docs.qodo.ai (the full doc index via `llms.txt`) and the trust center, and inspected the pricing and home pages visually in a real browser (desktop plus a 375px mobile view). I checked third-party sources for history, funding, pricing context and sentiment. For QAX, I read the repository (`strategy/ROADMAP.md`, `strategy/archive/GTM_AND_ROADMAP.md`, `execution/probes.py`, the tests and the service layer) plus the project memory.
 **Evidence labels used throughout:**
 - **[F]** = a fact confirmed by an official Qodo source.
 - **[3P]** = supported by a credible third-party source.
@@ -309,7 +309,7 @@ Market signal: **AI review is converging on usage-based pricing at roughly $1–
 - a CLI of about 2.7k lines (`main.py`), a Streamlit UI (`ui/app.py`, 2.3k lines) and a Flask server (`web/server.py`)
 - an eval gate (`make eval`) with golden target and truth files
 
-External validation (from `strategy/REALITY_CHECK_RESULTS.md` and project memory): 3 external stacks (Node, Go, Java) with 0 false positives; go-gin-vul recall 7/9; VAmPI 4–5/5; one real P1 found in an OSS Flask app. Jira filing is **built but never exercised live** (DRY_RUN, no credentials).
+External validation (from `strategy/evidence/REALITY_CHECK_RESULTS.md` and project memory): 3 external stacks (Node, Go, Java) with 0 false positives; go-gin-vul recall 7/9; VAmPI 4–5/5; one real P1 found in an OSS Flask app. Jira filing is **built but never exercised live** (DRY_RUN, no credentials).
 
 Maturity key: **E** = exists, **W** = works (shown on a real target), **T** = tested (automated), **R** = reliable (gate-proven repeatable), **S** = secure, **U** = usable by a stranger, **C** = commercially ready.
 
@@ -450,7 +450,7 @@ No current scores are claimed here beyond what's recorded in the repo.
 
 ## DELIVERABLE 10: QAX website blueprint
 
-> ⚠️ **Gate:** per `strategy/IP_CHECKLIST.md` and the IP memory, no public site, launch or open-sourcing before counsel clears IP.
+> ⚠️ **Gate:** per `strategy/legal/IP_CHECKLIST.md` and the IP memory, no public site, launch or open-sourcing before counsel clears IP.
 
 ### 10.1 Sitemap
 
