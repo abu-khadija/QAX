@@ -34,6 +34,11 @@ python main.py scan --url https://your-app.example --quick --authorized \
   measured "Reproduced 3/3" on the ticket); anything flaky is reported as *unstable*.
 * **`NOT TESTED`** lists the checks that could not run (no second user's token, a probe that
   crashed, …) with what would unblock them. A quiet result there means "unknown", not "safe".
+* **Known / by-design findings** go in `.qax/accepted.json` (or `--accepted FILE`, `QAX_ACCEPTED` in CI):
+  `{"accepted": [{"probe": "cors", "target": "/", "category": "by-design", "reason": "…", "expires": "2027-03-01"}]}`.
+  A `reason` and an `expires` date (at most a year ahead) are required; an entry without them is rejected.
+  Accepted findings are not counted, not blocking and not filed — but they are always listed under
+  **ACCEPTED**, an expired acceptance counts again, and an entry that matches nothing is reported.
 * A **quick** scan needs no API key. A **deep** scan (AI test generation, red-team, critic)
   needs `ANTHROPIC_API_KEY` in `.env` (about $0.5–1 per run).
 

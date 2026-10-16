@@ -2185,6 +2185,10 @@ def run_scan_command() -> None:
                         help="Header name for the token (default: Authorization).")
     parser.add_argument("--auth-scheme", default="Bearer",
                         help="Scheme prefix for the token (default: Bearer; use '' for a raw value / API key).")
+    parser.add_argument("--accepted", default=None, metavar="FILE",
+                        help="Known / by-design findings that must not be counted again (reason + expiry "
+                             "required per entry; they stay listed under ACCEPTED). Default: "
+                             ".qax/accepted.json when present.")
     parser.add_argument("--reverify", type=int, default=0, metavar="N",
                         help="Re-run the probes N more times and CONFIRM only findings that fire "
                              "in every pass (the rest are reported as unstable). Gives the bug "
@@ -2275,8 +2279,24 @@ def run_scan_command() -> None:
         print(f"\n  Scan failed: {result.error}\n")
         sys.exit(1)
 
+    # Known / by-design findings (core.accepted): split out BEFORE rendering so they are neither
+    # counted nor filed, but always listed with their reason.
+    _acc_text = ""
+    try:
+        from core import accepted as _acc
+        _loaded = _acc.load(args.accepted)
+        if _loaded["entries"] or _loaded["error"] or _loaded["invalid"]:
+            _info = _acc.split(list(result.confirmed or []), _loaded["entries"])
+            result.confirmed = _info["active"]
+            result.accepted = [{**a["finding"], "accepted": a["entry"]} for a in _info["accepted"]]
+            _acc_text = _acc.render(_info, _loaded)
+    except Exception as exc:
+        logger.warning("accepted-findings handling failed (nothing suppressed): %s", exc)
+
     from cli.scan_render import render_scan_result
     print(render_scan_result(result))   # S8: extracted, B1-aligned (deterministic vs AI leads)
+    if _acc_text:
+        print("\n" + _acc_text + "\n")
 
     # Scorecard — the honest, trackable number for this run.
     _truth = None

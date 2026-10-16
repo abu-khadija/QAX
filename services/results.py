@@ -455,6 +455,7 @@ class OrchestratorResult:
     # counterpart of the findings — "absence of a finding != a pass".
     not_tested: list = field(default_factory=list)
     left_on_target: list = field(default_factory=list)   # data-state ledger: created & not removed
+    accepted: list = field(default_factory=list)         # known/by-design findings (core.accepted) — not counted
     error: str | None = None
 
     @property
@@ -547,6 +548,7 @@ class OrchestratorResult:
             "silent_legs": self.silent_legs(),
             "not_tested": self.not_tested,
             "left_on_target": self.left_on_target,
+            "accepted": self.accepted,
             "evidence": self.evidence,
             "error": self.error,
             "success": self.success,

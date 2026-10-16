@@ -24,6 +24,7 @@ Env:
   QAX_TOKEN_B        a second, ORDINARY user's token (enables BOLA / BFLA / access-revocation)
   QAX_AUTH_SCHEME    token scheme (default "Bearer"; "token" for Gitea-style; "" for a raw API key)
   QAX_AUTH_HEADER    header name (default "Authorization")
+  QAX_ACCEPTED       path to the accepted-findings file (default .qax/accepted.json)
   QAX_FAIL_ON        comma list of severities that fail the build (default "P1,P2")
   QAX_REQUIRE_PROBES comma list of probes that MUST have run (e.g. "bola,bfla"); fail if not
   QAX_REVERIFY       N extra passes — confirm only what reproduces every time (default 0)
@@ -271,12 +272,26 @@ def main() -> int:
 
     not_tested = list(getattr(result, "not_tested", []) or [])
     unstable = [n for n in not_tested if n.get("kind") == "unstable"]
+    # Known / by-design findings (core.accepted, default .qax/accepted.json): not blocking, but listed.
+    confirmed_in = list(result.confirmed or [])
+    accepted_text = ""
+    try:
+        from core import accepted as _acc
+        loaded = _acc.load(os.getenv("QAX_ACCEPTED") or None)
+        if loaded["entries"] or loaded["error"] or loaded["invalid"]:
+            info = _acc.split(confirmed_in, loaded["entries"])
+            confirmed_in = info["active"]
+            accepted_text = _acc.render(info, loaded)
+    except Exception as exc:
+        print(f"QAX: accepted-findings handling failed (nothing suppressed): {exc}")
     md, claims, leads = format_comment(
-        url, list(result.confirmed or []), duration=dur,
+        url, confirmed_in, duration=dur,
         created=getattr(result, "created_records", 0), cleaned=getattr(result, "cleaned_records", 0),
         not_tested=not_tested, unstable=unstable, left=list(getattr(result, "left_on_target", []) or []),
         build=build, fail_on=fail_on)
 
+    if accepted_text:
+        md += "\n\n<details><summary>Known / accepted findings (not blocking)</summary>\n\n```\n" + accepted_text + "\n```\n</details>"
     # Required checks: a probe that was supposed to guard this PR but could not run is a FAILURE,
     # never a silent pass (the "green check that never ran the authorization probes" failure).
     missing = required_missing(required, not_tested)
