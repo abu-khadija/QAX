@@ -28,6 +28,60 @@ def _text_of(finding: dict) -> str:
     return " ".join(str(finding.get(k, "")) for k in ("title", "evidence", "target")).lower()
 
 
+def _norm(x) -> list[str]:
+    """A truth field that may be a string or a list → lowercase list."""
+    if not x:
+        return []
+    return [str(v).strip().lower() for v in (x if isinstance(x, list) else [x]) if str(v).strip()]
+
+
+def _entry_fits(finding: dict, ent: dict) -> int:
+    """
+    0 when `finding` cannot be this truth entry; otherwise a specificity score. Every constraint the
+    entry declares must hold: its probe class (`probe`), a target substring (`target`), and every
+    keyword (`match`) in title + evidence + target. PLAN.md §5: match by class and material
+    attributes, never keyword overlap alone (a "NoSQL injection" finding once matched "SQL injection").
+    """
+    probes, targets, kws = _norm(ent.get("probe")), _norm(ent.get("target")), _norm(ent.get("match"))
+    if not (probes or kws):
+        return 0
+    if probes and str(finding.get("probe") or "").lower() not in probes:
+        return 0
+    if targets and not any(t in str(finding.get("target") or "").lower() for t in targets):
+        return 0
+    text = _text_of(finding)
+    if kws and not all(k in text for k in kws):
+        return 0
+    return 100 * bool(probes) + 10 * bool(targets) + len(kws)
+
+
+def match_truth(claims: list, expected: list) -> dict:
+    """
+    Adjudicate confirmed claims against ground truth. Returns {"tp", "fp", "matched": set of entry
+    indexes, "ambiguous": [{"finding", "candidates"}], "keyword_only": [entry ids]}. A claim that fits
+    several entries goes to the most specific one; a TIE is recorded as ambiguous (needs review) —
+    it is never silently resolved by list order.
+    """
+    matched: set = set()
+    tp = fp = 0
+    ambiguous: list = []
+    for f in claims or []:
+        scored = [(_entry_fits(f, e), i) for i, e in enumerate(expected)]
+        scored = sorted((s, i) for s, i in scored if s > 0)
+        if not scored:
+            fp += 1
+            continue
+        best = scored[-1][0]
+        top = [i for s, i in scored if s == best]
+        if len(top) > 1:
+            ambiguous.append({"finding": str(f.get("title", "")),
+                              "candidates": [expected[i].get("id") for i in top]})
+        tp += 1
+        matched.add(top[0])
+    keyword_only = [e.get("id") for e in expected if not _norm(e.get("probe"))]
+    return {"tp": tp, "fp": fp, "matched": matched, "ambiguous": ambiguous, "keyword_only": keyword_only}
+
+
 def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
               usage: dict | None = None, truth: dict | None = None) -> dict:
     """
@@ -97,32 +151,21 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
 
     if truth and truth.get("expected"):
         expected = truth["expected"]
-        matched: set = set()
-        tps = fps = 0
-        for f in claims:  # recall + FP over confirmed claims only, not P3 leads
-            text = _text_of(f)
-            hit = None
-            for i, ent in enumerate(expected):
-                kws = [str(x).lower() for x in ent.get("match", [])]
-                if kws and all(kw in text for kw in kws):
-                    hit = i
-                    break
-            if hit is None:
-                fps += 1
-            else:
-                tps += 1
-                matched.add(hit)
+        m = match_truth(claims, expected)
         total = len(claims)
         rec["accuracy"] = {
             "documented": len(expected),
-            "caught": len(matched),
-            "recall_pct": round(100 * len(matched) / len(expected), 1) if expected else None,
-            "true_positives": tps,
-            "false_positives": fps,
-            "false_positive_pct": round(100 * fps / total, 1) if total else 0.0,
-            "fp_target_pct": 15,
+            "caught": len(m["matched"]),
+            "recall_pct": round(100 * len(m["matched"]) / len(expected), 1) if expected else None,
+            "true_positives": m["tp"],
+            "false_positives": m["fp"],
+            "false_positive_pct": round(100 * m["fp"] / total, 1) if total else 0.0,
+            "fp_target_pct": 15,      # an INTERNAL target (PLAN.md §5), not a measured claim
             "leads": len(leads),
-            "missed": [expected[i].get("id") for i in range(len(expected)) if i not in matched],
+            "missed": [expected[i].get("id") for i in range(len(expected)) if i not in m["matched"]],
+            "ambiguous": m["ambiguous"],
+            "keyword_only_entries": m["keyword_only"],
+            "matching": "probe class + target + keywords (keywords alone only for entries without a probe)",
         }
 
     return rec

@@ -275,6 +275,9 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
                    f"missed={acc.get('missed')}"))
     checks.append(("quick-scan false positives == 0", acc.get("false_positives") == 0,
                    f"false_positives={acc.get('false_positives')}"))
+    checks.append(("truth matching: class-aware, 0 ambiguous, no keyword-only entries",
+                   not acc.get("ambiguous") and not acc.get("keyword_only_entries"),
+                   f"ambiguous={acc.get('ambiguous') or 0} keyword_only={acc.get('keyword_only_entries') or 0}"))
     checks.append(("forged-token-replay fired (item 6)", "forged-token-replay" in probes,
                    f"probes={sorted(p for p in probes if p)}"))
     checks.append(pipe_check)   # original pipeline's execute leg, verified E2E

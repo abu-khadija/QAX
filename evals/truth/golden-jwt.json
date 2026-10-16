@@ -1,215 +1,247 @@
 {
   "target": "QAX golden JWT target (evals/targets/vuln_jwt_app.py)",
   "source": "purpose-built: JWT signature not verified \u2192 forged tokens accepted across the protected surface",
-  "note": "Ground truth for the eval gate (deterministic quick scan). Recall/FP are scored over CONFIRMED CLAIMS (P1/P2) only \u2014 P3 leads (e.g. missing security headers) are reported but not scored, so they do NOT belong here. A finding matches an entry when every keyword in 'match' is a substring of (title + evidence + target), case-insensitive. These are the deterministic (zero-LLM) P1 probe findings expected every run. The three spec-typed P2 classes on /tasks (boolean-false, single-element-array, long-input) are scored here; the two P3 ones (date-order, duplicate-rows) are checked by dedicated gate checks (typed probes fired / silent on the fixed app / actually exercised).",
+  "note": "Ground truth for the eval gate (deterministic quick scan). Recall/FP are scored over CONFIRMED CLAIMS (P1/P2) only \u2014 P3 leads (e.g. missing security headers) are reported but not scored, so they do NOT belong here. A finding matches an entry when every keyword in 'match' is a substring of (title + evidence + target), case-insensitive. These are the deterministic (zero-LLM) P1 probe findings expected every run. The three spec-typed P2 classes on /tasks (boolean-false, single-element-array, long-input) are scored here; the two P3 ones (date-order, duplicate-rows) are checked by dedicated gate checks (typed probes fired / silent on the fixed app / actually exercised). Matching (PLAN.md \u00a75): each entry declares its probe class; a finding matches only an entry of its own class whose keywords (and target, when given) all hold; ties are reported as ambiguous, never resolved by order.",
   "expected": [
     {
       "id": "jwt-alg-none",
       "match": [
         "alg=none"
-      ]
+      ],
+      "probe": "jwt-flaws"
     },
     {
       "id": "jwt-unverified-signature",
       "match": [
         "signature not verified"
-      ]
+      ],
+      "probe": "jwt-flaws"
     },
     {
       "id": "forged-token-replay",
       "match": [
         "forged jwt accepted"
-      ]
+      ],
+      "probe": "forged-token-replay"
     },
     {
       "id": "bfla",
       "match": [
         "function-level authorization"
-      ]
+      ],
+      "probe": "bfla"
     },
     {
       "id": "ssti",
       "match": [
         "server-side template injection"
-      ]
+      ],
+      "probe": "ssti"
     },
     {
       "id": "reflected-xss",
       "match": [
         "reflected xss"
-      ]
+      ],
+      "probe": "xss"
     },
     {
       "id": "host-header-injection",
       "match": [
         "host header reflected"
-      ]
+      ],
+      "probe": "host-header-injection"
     },
     {
       "id": "xxe",
       "match": [
         "xml external entity"
-      ]
+      ],
+      "probe": "xxe"
     },
     {
       "id": "graphql-introspection",
       "match": [
         "graphql introspection enabled"
-      ]
+      ],
+      "probe": "graphql-introspection"
     },
     {
       "id": "file-upload",
       "match": [
         "unrestricted file upload"
-      ]
+      ],
+      "probe": "file-upload"
     },
     {
       "id": "business-logic",
       "match": [
         "negative",
         "accepted and stored"
-      ]
+      ],
+      "probe": "business-logic"
     },
     {
       "id": "boolean-false",
       "match": [
         "cannot be set to false"
-      ]
+      ],
+      "probe": "boolean-false"
     },
     {
       "id": "single-element-array",
       "match": [
         "single-value",
         "works with two"
-      ]
+      ],
+      "probe": "single-element-array"
     },
     {
       "id": "long-input",
       "match": [
         "unhandled error on a 5000-character"
-      ]
+      ],
+      "probe": "long-input"
     },
     {
       "id": "excessive-data",
       "match": [
         "excessive data exposure",
         "/account"
-      ]
+      ],
+      "probe": "excessive-data"
     },
     {
       "id": "crash-fuzz-oversized-password",
       "match": [
         "oversized password"
-      ]
+      ],
+      "probe": "crash-fuzz"
     },
     {
       "id": "cookie-missing-httponly",
       "match": [
         "missing httponly"
-      ]
+      ],
+      "probe": "cookie-flags"
     },
     {
       "id": "debug-stack-trace",
       "match": [
         "stack trace",
         "/items/"
-      ]
+      ],
+      "probe": "debug-disclosure"
     },
     {
       "id": "auth-error-5xx",
       "match": [
         "forbidden request returns a server error",
         "/account"
-      ]
+      ],
+      "probe": "auth-error"
     },
     {
       "id": "cors-reflected-origin",
       "match": [
         "cors reflects an arbitrary origin"
-      ]
+      ],
+      "probe": "cors"
     },
     {
       "id": "path-traversal",
       "match": [
         "path traversal",
         "/download"
-      ]
+      ],
+      "probe": "path-traversal"
     },
     {
       "id": "open-redirect",
       "match": [
         "open redirect",
         "/redirect"
-      ]
+      ],
+      "probe": "open-redirect"
     },
     {
       "id": "mass-assignment",
       "match": [
         "mass assignment"
-      ]
+      ],
+      "probe": "mass-assignment"
     },
     {
       "id": "sqli-path",
       "match": [
         "produced a sql error",
         "/products/"
-      ]
+      ],
+      "probe": "sqli"
     },
     {
       "id": "sqli-body",
       "match": [
         "produced a sql error",
         "/lookup"
-      ]
+      ],
+      "probe": "sqli"
     },
     {
       "id": "nosql",
       "match": [
         "nosql injection",
         "/lookup"
-      ]
+      ],
+      "probe": "nosql"
     },
     {
       "id": "malformed-input",
       "match": [
         "unhandled server error",
         "/appointments"
-      ]
+      ],
+      "probe": "malformed-input"
     },
     {
       "id": "command-injection",
       "match": [
         "command injection",
         "/ping"
-      ]
+      ],
+      "probe": "command-injection"
     },
     {
       "id": "ssrf",
       "match": [
         "ssrf",
         "/fetch"
-      ]
+      ],
+      "probe": "ssrf"
     },
     {
       "id": "stored-xss",
       "match": [
         "stored xss",
         "/comments"
-      ]
+      ],
+      "probe": "stored-xss"
     },
     {
       "id": "bola",
       "match": [
         "broken object-level authorization",
         "/notes/"
-      ]
+      ],
+      "probe": "bola"
     },
     {
       "id": "persistence",
       "match": [
         "silent data loss",
         "/notes"
-      ]
+      ],
+      "probe": "persistence"
     }
   ]
 }

@@ -99,3 +99,38 @@ def test_usage_accumulates_and_prices_per_model():
 def test_usage_track_is_idempotent():
     assert usage.track() in (True, False)  # True normally; False only if SDK absent
     assert usage.track() in (True, False)  # second call must not raise
+
+
+# ── class-aware truth matching (PLAN.md §5) ───────────────────────────────────────────────────────
+
+def test_nosql_finding_never_matches_the_sql_injection_entry():
+    from services.scorecard import match_truth
+    expected = [{"id": "sqli", "probe": "sqli", "match": ["sql injection"]},
+                {"id": "nosql", "probe": "nosql", "match": ["nosql injection"]}]
+    nosql = {"probe": "nosql", "title": "NoSQL injection in POST /lookup", "target": "/lookup"}
+    m = match_truth([nosql], expected)
+    assert m["matched"] == {1} and m["fp"] == 0 and not m["ambiguous"]
+
+
+def test_keywords_alone_would_have_collided_and_wrong_class_is_a_false_positive():
+    from services.scorecard import match_truth
+    expected = [{"id": "sqli", "probe": "sqli", "match": ["sql injection"]}]
+    m = match_truth([{"probe": "nosql", "title": "NoSQL injection in POST /x"}], expected)
+    assert m["tp"] == 0 and m["fp"] == 1
+
+
+def test_target_constraint_and_ties_are_reported_as_ambiguous():
+    from services.scorecard import match_truth
+    expected = [{"id": "a", "probe": "sqli", "target": "/products/"},
+                {"id": "b", "probe": "sqli", "target": "/lookup"},
+                {"id": "c", "probe": "sqli"}, {"id": "d", "probe": "sqli"}]
+    m = match_truth([{"probe": "sqli", "title": "SQLi", "target": "/lookup"}], expected)
+    assert m["matched"] == {1} and not m["ambiguous"]                    # the target-specific entry wins
+    m2 = match_truth([{"probe": "sqli", "title": "SQLi", "target": "/other"}], expected)
+    assert m2["ambiguous"] and set(m2["ambiguous"][0]["candidates"]) == {"c", "d"}
+
+
+def test_entries_without_a_probe_still_work_but_are_listed_as_keyword_only():
+    from services.scorecard import match_truth
+    m = match_truth([{"title": "Reflected XSS on /greet"}], [{"id": "x", "match": ["reflected xss"]}])
+    assert m["tp"] == 1 and m["keyword_only"] == ["x"]
