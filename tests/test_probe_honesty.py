@@ -653,3 +653,52 @@ def test_a_put_that_echoes_an_id_is_not_a_created_record():
     s.request("POST", "http://t/api/tokens", json={})                    # an action, not a record
     s.request("POST", "http://t/api/posts", json={"text": "x"})          # a creation
     assert [a["collection"] for a in s._qax_created] == ["/api/posts"]
+
+
+def test_mass_assignment_strict_schema_rejection_is_a_pass_not_a_gap():
+    """A strict app answers 400 to extra privileged fields but 201 to a clean registration: the probe WAS
+    exercised and the app is safe — it must not report 'registration failed' (found on microblog-api)."""
+    import requests
+    from unittest.mock import MagicMock
+    from execution.probes import mass_assignment_probe
+    from services.results import AppModel
+
+    class S(requests.Session):
+        def post(self, url, json=None, **k):
+            extras = any(f in (json or {}) for f in ("admin", "is_admin", "role"))
+            return MagicMock(status_code=400 if extras else 201, json=lambda: {})
+    s = S(); s._qax_skips = []; s._qax_created = []
+    m = AppModel(root="/x", endpoints=[{"method": "POST", "path": "/api/users",
+                 "request_fields": ["username", "email", "password"], "required_fields": ["username", "email", "password"]}])
+    assert mass_assignment_probe(m, "http://t", session=s, auth={}) == []
+    assert not [x for x in s._qax_skips if x["probe"] == "mass-assignment"]      # no false 'could not run'
+    assert len(s._qax_created) == 1                                              # the clean user is tracked for cleanup
+
+
+def test_bola_uses_the_server_generated_id_and_a_valid_email():
+    import requests
+    from unittest.mock import MagicMock
+    from execution.probes import bola_probe
+    from services.results import AppModel
+    posts = {}
+
+    class S(requests.Session):
+        def post(self, url, json=None, headers=None, **k):
+            if url.endswith("/api/posts"):
+                assert json == {"text": json["text"]}
+                posts[7] = json["text"]
+                return MagicMock(status_code=201, json=lambda: {"id": 7})
+            return MagicMock(status_code=201, json=lambda: {"access_token": "t"}, text="{}")
+
+        def get(self, url, headers=None, **k):
+            mine = (headers or {}).get("Authorization", "").endswith("A")
+            if url.endswith("/api/posts/7"):
+                return MagicMock(status_code=200 if mine else 404, text=posts.get(7, "") if mine else "nope")
+            return MagicMock(status_code=404, text="")
+    s = S(); s._qax_skips = []; s._qax_created = []
+    m = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/api/posts", "request_fields": ["text"], "auth_required": True},
+        {"method": "GET", "path": "/api/posts/{id}", "auth_required": True}])
+    out = bola_probe(m, "http://t", session=s, auth={"token": "A", "token_b": "B"})
+    assert out == []                                          # B is blocked (404): safe, and it WAS exercised
+    assert not [x for x in s._qax_skips if x["probe"] == "bola" and x["kind"] == "missing-prerequisite"]

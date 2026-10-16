@@ -153,3 +153,22 @@ def test_cookie_auth_is_carried_by_the_probe_session_end_to_end():
         srv.shutdown()
     assert out_no == []                                   # unauthenticated: no sensitive field exposed
     assert out_yes and out_yes[0].probe == "excessive-data"   # cookie carried → authed content probed
+
+
+def test_cleanup_uses_the_server_assigned_id_from_the_create_response():
+    """Regression (microblog-api): a post created with {"text": ...} has no key in its body; the id the server
+    returned must be used to delete it instead of reporting 'could not work out its key'."""
+    from unittest.mock import MagicMock
+    from execution.probes import cleanup_artifacts, track_writes
+    from services.results import AppModel
+
+    class S:
+        def __init__(self): self._qax_created = []; self.deleted = []
+        def request(self, method, url, **kw):
+            r = MagicMock(status_code=201); r.json.return_value = {"id": 7}; return r
+        def delete(self, url, headers=None, timeout=None):
+            self.deleted.append(url); return MagicMock(status_code=204)
+    s = track_writes(S())
+    s.request("POST", "http://t/api/posts", json={"text": "x"}, headers={"Authorization": "Bearer A"})
+    m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/posts/{id}"}])
+    assert cleanup_artifacts(m, "http://t", s) == 1 and s.deleted == ["http://t/api/posts/7"]

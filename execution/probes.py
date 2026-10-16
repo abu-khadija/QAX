@@ -1323,6 +1323,20 @@ _NOT_A_RECORD = frozenset({"login", "logout", "token", "tokens", "refresh", "aut
                            "sessions", "signin", "sign-in", "verify", "search", "query", "graphql", "import"})
 
 
+def _response_id(resp):
+    """The id the server assigned in a create response ({"id": 7} or {"data": {"id": 7}}), or None."""
+    try:
+        j = resp.json()
+        j = j.get("data", j) if isinstance(j, dict) else j
+        if isinstance(j, dict):
+            for k in ("id", "uuid", "_id", "pk"):
+                if j.get(k) not in (None, ""):
+                    return str(j[k])
+    except Exception:
+        pass
+    return None
+
+
 def track_writes(sess):
     """
     Data-state honesty at the boundary (PLAN_TO_V1 D9): many probes POST payloads into
@@ -1357,9 +1371,13 @@ def track_writes(sess):
                         (kw.get("data") if isinstance(kw.get("data"), dict) else {})
                     coll = _collection_of(urlparse(str(url)).path)
                     reg = sess._qax_created
-                    if not any(x.get("collection") == coll and x.get("body") == body for x in reg):
+                    rid = _response_id(r)
+                    prior = next((x for x in reg if x.get("collection") == coll and x.get("body") == body), None)
+                    if prior is None:
                         reg.append({"collection": coll, "body": dict(body), "headers": dict(kw.get("headers") or {}),
-                                    "auto": True})
+                                    "auto": True, "resp_id": rid})
+                    elif rid is not None:
+                        prior.setdefault("resp_id", rid)
         except Exception:
             pass
         return r
@@ -1449,6 +1467,8 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
             key = next((body[f] for f in body if any(k in f.lower()
                         for k in ("username", "email", "title", "name", "id", "key", "slug"))), None)
         if key is None:
+            key = art.get("resp_id")       # server-generated id captured from the create response
+        if key is None:
             left.append(_left(art, "could not work out its key to delete it"))
             continue
         url = f"{base}{path.replace('{' + param + '}', str(key))}"
@@ -1482,6 +1502,22 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
     # token across probes. BOLA's two-user control needs genuinely distinct users, and
     # sharing one "primary" user across probes defeats it (B would read its own object).
     return _auth_token(sess, base, recipe, model, identity)
+
+
+def _plausible_value(field: str, unique: str):
+    """A value an API will ACCEPT for a field, judged by its name (email, url, phone, date) — or None when
+    the name says nothing. A flat "test" for every field made strict apps reject the probe's own create
+    request (found on microblog-api: email='test' -> 400), so BOLA/persistence silently could not run."""
+    lf = str(field).lower().rsplit(".", 1)[-1]
+    if "email" in lf:
+        return f"{unique.lower()}@example.com"
+    if any(k in lf for k in ("url", "link", "website", "uri", "avatar", "image", "photo", "picture")):
+        return "https://example.com/qax.png"
+    if any(k in lf for k in ("phone", "mobile", "msisdn")):
+        return "+10000000000"
+    if any(k in lf for k in _DATE_KW):
+        return "2020-01-01T00:00:00"
+    return None
 
 
 def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
@@ -1522,8 +1558,9 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         pf = field_names(post.get("request_fields"))
         key_field = next((f for f in pf if f.lower() == param.lower()), None) \
             or next((f for f in pf if any(k in f.lower() for k in ("title", "name", "id", "slug", "key"))), None)
-        if key_field:
-            pairs.append((post, ge, prefix, param, key_field, pf))
+        # No key field in the create body = the SERVER generates the id (the common case: POST /posts
+        # {"text": ...} -> {"id": 7}); the probe then reads the id back from the create response.
+        pairs.append((post, ge, prefix, param, key_field, pf))
     if not pairs:
         _no_candidates(sess, "bola", "create endpoint paired with a read-by-key GET")
         return out
@@ -1553,10 +1590,13 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
                 body[f] = "Secret123!"
             elif any(k in lf for k in ("age", "count", "number", "qty")):
                 body[f] = 1
+            elif _plausible_value(f, key) is not None:
+                body[f] = _plausible_value(f, key)     # a valid email/url/date the API will accept
             else:
                 body[f] = "test"
         if marker not in str(body):  # make sure a detectable secret is present
-            placed = next((f for f in pf if f != key_field), None)
+            placed = next((f for f in pf if f != key_field and _plausible_value(f, key) is None), None) \
+                or next((f for f in pf if f != key_field), None)
             if not placed:
                 continue  # key-only resource: nothing private to leak, can't prove
             body[placed] = marker
@@ -1570,6 +1610,18 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
                 continue
             created_ok += 1
             _record_created(sess, prefix, body, auth_a)
+            if key_field is None:
+                # Server-generated id: take it from the create response.
+                try:
+                    cj = cr.json()
+                    cj = cj.get("data", cj) if isinstance(cj, dict) else cj
+                    key = next((str(cj[k]) for k in ("id", "uuid", "_id", "pk") if isinstance(cj, dict) and k in cj), None)
+                except Exception:
+                    key = None
+                if not key:
+                    _skip(sess, "bola", f"{prefix}: the create response carried no id, so the object could not "
+                                        f"be read back by key", kind="missing-prerequisite")
+                    continue
             read_path = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
             ar = sess.get(read_path, headers=auth_a, timeout=15)
             if ar.status_code >= 400:  # control: A must be able to read its own object
@@ -2734,6 +2786,8 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
                 body[f] = "2020-01-01T00:00:00"
             elif any(k in lf for k in _SERVER_OWNED):
                 body[f] = f"qax{uuid.uuid4().hex[:8]}"   # satisfy it, but don't track
+            elif _plausible_value(f, key) is not None:
+                body[f] = _plausible_value(f, key)       # valid email/url the API will accept; not tracked
             else:
                 tok = f"qaxkeep{uuid.uuid4().hex[:10]}"
                 markers[f] = tok
@@ -3073,6 +3127,18 @@ def mass_assignment_probe(model, base_url: str, *, session: requests.Session | N
         _unreached(sess, "mass-assignment", 1)
         return out
     if r.status_code >= 300:
+        # Control: does the SAME registration, without the privileged fields, succeed? If so the app REFUSED
+        # the extra fields (strict schema -> 400/422) — the secure behaviour, not a broken registration.
+        if r.status_code in (400, 422):
+            clean_id = f"massassign_{uuid.uuid4().hex[:8]}@example.com"
+            clean = register_body(recipe, model, clean_id)
+            try:
+                cr = sess.post(f"{base}{recipe['register_path']}", json=clean, timeout=15)
+            except Exception:
+                cr = None
+            if cr is not None and cr.status_code < 300:
+                _record_created(sess, _collection_of(recipe["register_path"]), clean, {})
+                return out        # exercised: the privileged fields were rejected — no finding, no gap
         _registration_failed(sess, "mass-assignment", recipe["register_path"], r.status_code)
         return out
     _record_created(sess, _collection_of(recipe["register_path"]), body, {})
