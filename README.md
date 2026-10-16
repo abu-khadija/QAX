@@ -34,6 +34,10 @@ python main.py scan --url https://your-app.example --quick --authorized \
   measured "Reproduced 3/3" on the ticket); anything flaky is reported as *unstable*.
 * **`NOT TESTED`** lists the checks that could not run (no second user's token, a probe that
   crashed, …) with what would unblock them. A quiet result there means "unknown", not "safe".
+* **`--read-only`** (or `QAX_READ_ONLY=1` in CI) sends no write request at all — only GET/HEAD/OPTIONS
+  leave QAX (enforced on the HTTP session and proven in `make eval` by counting requests on the server).
+  Checks that need to create data, register users or log in are listed under NOT TESTED. Use it for a
+  first scan of a staging you do not own; pair it with `--token`.
 * **Known / by-design findings** go in `.qax/accepted.json` (or `--accepted FILE`, `QAX_ACCEPTED` in CI):
   `{"accepted": [{"probe": "cors", "target": "/", "category": "by-design", "reason": "…", "expires": "2027-03-01"}]}`.
   A `reason` and an `expires` date (at most a year ahead) are required; an entry without them is rejected.

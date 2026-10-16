@@ -80,9 +80,14 @@ class ProbeService:
         auth: dict | None = None,
         cleanup: bool = True,
         progress: ProgressReporter | None = None,
+        read_only: bool = False,
     ) -> ProbeResult:
         """
         Run the probes relevant to this app against the live target.
+
+        `read_only=True` (PLAN_TO_V1 D9): the shared session refuses every write request
+        (core.read_only.guard) — nothing but GET/HEAD/OPTIONS leaves QAX, and each probe that
+        needed a write is listed in the not-tested ledger as kind "read-only".
 
         Args:
             model (AppModel): The whole-system model (selects which probes to run).
@@ -123,6 +128,12 @@ class ProbeService:
         shared = requests.Session()
         shared._qax_created = []  # probes append every test record they write here
         shared._qax_skips = []    # probes record WHY they could not run (not-tested ledger)
+        if read_only:
+            from core.read_only import guard
+            guard(shared)
+        else:
+            from execution.probes import track_writes
+            track_writes(shared)      # every accepted creation is registered → cleanup + LEFT ON THE TARGET
 
         # Resolve ONE shared "utility" user for the read-only probes that only need a
         # valid login (sqli, injection, path-traversal, ...), so they don't each
@@ -439,6 +450,9 @@ class ProbeService:
             prog.emit("probe", "info", f"test-data cleanup: removed {cleaned}/{created} record(s)")
 
         skipped = list(getattr(shared, "_qax_skips", []) or [])
+        if read_only:
+            from core.read_only import blocked, ledger_entries
+            skipped = ledger_entries(blocked(shared), skipped)
         leftover = leftover_artifacts(shared, "cleanup was disabled") if created else []
         result = ProbeResult(findings=findings, created_records=created, cleaned_records=cleaned,
                              skipped=skipped, leftover=leftover)

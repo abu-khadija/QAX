@@ -2202,6 +2202,11 @@ def run_scan_command() -> None:
                              "First run seeds it; later runs flag screens whose rendering changed.")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
+    parser.add_argument("--read-only", action="store_true",
+                        help="Send NO write request (only GET/HEAD/OPTIONS): probes and tests that need to "
+                             "create data, register users or log in are not run and are listed under NOT "
+                             "TESTED. Use it for a first scan of a staging you do not own. Works best with "
+                             "--token (no self-registration needed).")
     parser.add_argument("--authorized", action="store_true",
                         help="Confirm you OWN or are explicitly permitted to actively test this "
                              "target. A scan runs active, data-MUTATING probes (it creates test "
@@ -2272,6 +2277,7 @@ def run_scan_command() -> None:
         tour=args.tour,
         visual_baseline=args.visual_baseline,
         reverify=max(0, int(args.reverify or 0)),
+        read_only=args.read_only,
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

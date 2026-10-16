@@ -1278,9 +1278,58 @@ def _record_created(sess, collection: str, body: dict, headers: dict) -> None:
         reg = getattr(sess, "_qax_created", None)
         if reg is None:
             return
-        reg.append({"collection": collection, "body": dict(body or {}), "headers": dict(headers or {})})
+        entry = {"collection": collection, "body": dict(body or {}), "headers": dict(headers or {})}
+        same = next((a for a in reg if a.get("collection") == collection and a.get("body") == entry["body"]), None)
+        if same is not None:          # already captured at the session boundary (track_writes)
+            same.update(entry)
+            same.pop("auto", None)
+            return
+        reg.append(entry)
     except Exception:
         pass
+
+
+def track_writes(sess):
+    """
+    Data-state honesty at the boundary (PLAN_TO_V1 D9): many probes POST payloads into
+    create endpoints without registering what they created, so "LEFT ON THE TARGET" under-reported.
+    This wraps the session so EVERY write the server accepted as a creation — HTTP 201, or a 2xx whose
+    JSON body carries an id — is registered (probes that also call _record_created are de-duplicated).
+    Logins, lookups, GraphQL and other non-creating 2xx answers are not records. Idempotent; never raises.
+    """
+    if getattr(sess, "_qax_tracking", False) or getattr(sess, "_qax_created", None) is None:
+        return sess
+    from urllib.parse import urlparse
+    real = sess.request
+
+    def _request(method, url, *a, **kw):
+        r = real(method, url, *a, **kw)
+        try:
+            m = str(method or "").upper()
+            code = getattr(r, "status_code", 0)
+            if m in ("POST", "PUT", "PATCH") and 200 <= code < 300:
+                created = code == 201
+                if not created:
+                    try:
+                        j = r.json()
+                        created = isinstance(j, dict) and any(k in j for k in ("id", "uuid", "_id"))
+                    except Exception:
+                        created = False
+                if created:
+                    body = kw.get("json") if isinstance(kw.get("json"), dict) else \
+                        (kw.get("data") if isinstance(kw.get("data"), dict) else {})
+                    coll = _collection_of(urlparse(str(url)).path)
+                    reg = sess._qax_created
+                    if not any(x.get("collection") == coll and x.get("body") == body for x in reg):
+                        reg.append({"collection": coll, "body": dict(body), "headers": dict(kw.get("headers") or {}),
+                                    "auto": True})
+        except Exception:
+            pass
+        return r
+
+    sess.request = _request
+    sess._qax_tracking = True
+    return sess
 
 
 _ID_FIELDS = ("username", "email", "title", "name", "id", "key", "slug")

@@ -78,6 +78,32 @@ def _auth():
     return _subject(tok) if tok else None
 
 
+_METHODS: dict = {}     # eval instrumentation: requests received per HTTP method
+_WRITES: dict = {}      # eval instrumentation: write requests per "METHOD /path"
+
+
+@app.before_request
+def _count_method():
+    """Eval-only: count every request by method, so the gate can prove a --read-only scan sent no write."""
+    if not request.path.startswith("/__qax_eval"):
+        _METHODS[request.method] = _METHODS.get(request.method, 0) + 1
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            k = f"{request.method} {request.path}"
+            _WRITES[k] = _WRITES.get(k, 0) + 1
+
+
+@app.get("/__qax_eval/methods")
+def _methods():
+    """Eval-only (not in the spec): the per-method request counts."""
+    return jsonify(_METHODS), 200
+
+
+@app.get("/__qax_eval/writes")
+def _writes():
+    """Eval-only (not in the spec): write requests per "METHOD /path" (to locate a read-only leak)."""
+    return jsonify(_WRITES), 200
+
+
 @app.post("/auth/register")
 def register():
     body = request.get_json(silent=True) or {}

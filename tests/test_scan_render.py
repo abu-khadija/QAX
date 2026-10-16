@@ -65,14 +65,18 @@ def test_render_lists_records_left_on_the_target():
         {"collection": "/orgs", "key": None, "why": "delete was refused (HTTP 403)"}])
     text = render_scan_result(r)
     assert "LEFT ON THE TARGET" in text and "created 5 test record(s) and could not remove 2" in text
-    assert "/api/v1/user/repos qax_repo1 — no DELETE endpoint" in text and "/orgs — delete was refused" in text
+    assert "/api/v1/user/repos ×1 e.g. qax_repo1 — no DELETE endpoint" in text
+    assert "/orgs ×1 — delete was refused" in text
 
 
-def test_render_caps_a_long_leftover_list_and_is_silent_when_nothing_is_left():
+def test_render_groups_a_long_leftover_list_and_is_silent_when_nothing_is_left():
     from cli.scan_render import render_scan_result
     from services.results import OrchestratorResult
-    many = [{"collection": "/c", "key": f"k{i}", "why": "w"} for i in range(20)]
-    assert "and 8 more" in render_scan_result(OrchestratorResult(left_on_target=many))
+    many = [{"collection": "/c", "key": f"k{i}", "why": "w"} for i in range(20)] + \
+           [{"collection": "/d", "key": None, "why": "w2"}]
+    text = render_scan_result(OrchestratorResult(left_on_target=many))
+    assert "/c ×20 e.g. k0, k1, k2 — w" in text and "/d ×1 — w2" in text   # grouped: nothing silently dropped
+    assert text.index("/c ×20") < text.index("/d ×1")                        # biggest group first
     assert "LEFT ON THE TARGET" not in render_scan_result(OrchestratorResult())
 
 

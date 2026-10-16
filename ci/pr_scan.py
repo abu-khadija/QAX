@@ -27,6 +27,7 @@ Env:
   QAX_ACCEPTED       path to the accepted-findings file (default .qax/accepted.json)
   QAX_FAIL_ON        comma list of severities that fail the build (default "P1,P2")
   QAX_REQUIRE_PROBES comma list of probes that MUST have run (e.g. "bola,bfla"); fail if not
+  QAX_READ_ONLY      "1" = send no write request (GET/HEAD/OPTIONS only); write probes listed as NOT TESTED
   QAX_REVERIFY       N extra passes — confirm only what reproduces every time (default 0)
   QAX_DEEP           "1" to run the deep LLM pass (needs ANTHROPIC_API_KEY; default off)
   QAX_COMMENT_PATH   where to write the PR comment (default "pr_comment.md")
@@ -251,8 +252,9 @@ def main() -> int:
 
     t0 = time.time()
     try:
+        read_only = os.getenv("QAX_READ_ONLY", "").strip().lower() in ("1", "true", "yes")
         result = OrchestratorService(ctx).run(scan_repo, url, deep=deep, tour=False,
-                                              auth=auth, reverify=reverify)
+                                              auth=auth, reverify=reverify, read_only=read_only)
     except Exception as exc:
         _write_comment(f"## 🛡️ QAX security scan\n\n⚠️ Scan error: {exc}. Not blocking the PR.\n")
         print(f"QAX: scan error: {exc}")

@@ -63,11 +63,18 @@ def render_scan_result(result) -> str:
         created = getattr(result, "created_records", 0) or len(left)
         lines.append(f"\n  ⚠ LEFT ON THE TARGET — QAX created {created} test record(s) and could not remove "
                      f"{len(left)} (remove them by hand):")
-        for item in left[:12]:
-            ident = f" {item['key']}" if item.get("key") else ""
-            lines.append(f"    · {item.get('collection') or '?'}{ident} — {item.get('why')}")
-        if len(left) > 12:
-            lines.append(f"    · … and {len(left) - 12} more (see left_on_target in the --out JSON)")
+        groups: dict = {}
+        for item in left:
+            g = groups.setdefault((item.get("collection") or "?", item.get("why")), [])
+            if item.get("key"):
+                g.append(str(item["key"]))
+            else:
+                g.append("")
+        for (coll, why), keys in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            named = [k for k in keys if k][:3]
+            more = f" e.g. {', '.join(named)}" if named else ""
+            lines.append(f"    · {coll} ×{len(keys)}{more} — {why}")
+        lines.append("    (every record is listed in left_on_target in the --out JSON)")
     return "\n".join(lines) + "\n"
 
 
@@ -77,6 +84,8 @@ _NEEDS_HINT = {
     "auth-token": "supply a valid token with --token (QAX could not self-register or log in)",
     "valid-body": "QAX could not build a request this app accepts — an example valid request body "
                   "for the create endpoints would unblock it",
+    "write-permission": "this was a --read-only scan; re-run without --read-only once you may write "
+                        "test data to this target (QAX creates disposable records and lists what it left)",
 }
 
 

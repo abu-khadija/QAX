@@ -65,6 +65,7 @@ class OrchestratorService:
         visual_baseline: str | None = None,
         progress: ProgressReporter | None = None,
         reverify: int = 0,
+        read_only: bool = False,
     ) -> OrchestratorResult:
         """
         Run the autonomous pipeline over a repo against a live app.
@@ -162,15 +163,22 @@ class OrchestratorService:
             model, use_knowledge_pass=deep, progress=prog)
 
         # 3) Prove the exploits HTTP steps can't express (JWT forgery, crashes) — free.
-        probe_result = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog)
+        probe_result = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog,
+                                                      read_only=read_only)
         if reverify > 0 and probe_result.exploited:
-            probe_result = self._reverify(probe_result, model, base_url, auth, reverify, prog)
+            probe_result = self._reverify(probe_result, model, base_url, auth, reverify, prog,
+                                          read_only=read_only)
+        ro_skips: list[dict] = []      # read-only: what was NOT run outside the probes
 
         # 3b) Tour the live UI (browser-driven) and turn what the browser sees —
         #     uncaught JS errors, failed API calls — into findings. Needs Playwright
         #     (exec venv, Python 3.11/3.12); degrades to nothing when unavailable.
         ui_confirmed: list[dict] = []
         ui_screens: list[dict] = []
+        if tour and read_only:
+            ro_skips.append({"probe": "ui-tour", "kind": "read-only", "needs": "write-permission",
+                             "reason": "not run: --read-only (the browser tour can submit forms)"})
+            tour = False
         if tour:
             try:
                 from services.tour_service import TourService
@@ -274,6 +282,8 @@ class OrchestratorService:
         #    when there are failures; wrapped so a missing key/credit degrades to
         #    the probe-proven bugs instead of crashing the scan.
         executable = [t for t in tests if t.get("api_steps")]
+        if read_only:
+            executable = self._read_only_cases(executable, ro_skips, prog)
         if tests and not executable:
             prog.emit("orchestrate", "warn",
                       "SILENT-GAP: tests were generated but none are executable "
@@ -308,8 +318,10 @@ class OrchestratorService:
         #     endpoint for it with the per-class cap lifted. Deterministic and bounded,
         #     and it starts ONLY from confirmed bugs — never suspects — so a false
         #     positive can't compound across the family.
+        fam_side = {"created": 0, "cleaned": 0, "leftover": [], "not_tested": []}
+        self._family_side = fam_side
         try:
-            family = self._expand_families(confirmed, model, base_url, auth=auth)
+            family = self._expand_families(confirmed, model, base_url, auth=auth, read_only=read_only)
             if family:
                 confirmed += family
                 prog.emit("orchestrate", "info",
@@ -348,9 +360,11 @@ class OrchestratorService:
                     prog.emit("orchestrate", "step",
                               f"round 2 — {len(repaired)} setup-repaired + "
                               f"{len(round2_tests) - len(repaired)} re-attack test(s)")
+                    r2 = [t for t in round2_tests if t.get("api_steps")]
+                    if read_only:
+                        r2 = self._read_only_cases(r2, ro_skips, prog)
                     exe2 = ExecutionService(self.context).execute(
-                        [t for t in round2_tests if t.get("api_steps")], mode="api",
-                        base_url=base_url, auth=auth)
+                        r2, mode="api", base_url=base_url, auth=auth)
                     gen2 = [t for t in round2_tests if t.get("attack") != "coverage-template"]
                     crit2 = CriticService(self.context).review(exe2, gen2)
                     inv2 = InvestigatorService(self.context).investigate(crit2, gen2, base_url=base_url)
@@ -396,13 +410,19 @@ class OrchestratorService:
             confirmed=confirmed, coverage=coverage, rounds=rounds,
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens, legs=legs, evidence=evidence,
-            not_tested=list(getattr(probe_result, "skipped", []) or []),
-            left_on_target=list(getattr(probe_result, "leftover", []) or []),
-            created_records=getattr(probe_result, "created_records", 0),
-            cleaned_records=getattr(probe_result, "cleaned_records", 0))
+            not_tested=list(getattr(probe_result, "skipped", []) or []) + ro_skips + fam_side["not_tested"],
+            left_on_target=list(getattr(probe_result, "leftover", []) or []) + fam_side["leftover"],
+            created_records=getattr(probe_result, "created_records", 0) + fam_side["created"],
+            cleaned_records=getattr(probe_result, "cleaned_records", 0) + fam_side["cleaned"])
+        ro_gaps = [g for g in result.coverage_gaps if g.get("kind") == "read-only"]
         for gap in result.coverage_gaps:
+            if gap.get("kind") != "read-only":
+                prog.emit("orchestrate", "warn",
+                          f"NOT TESTED — {gap['probe']}: {gap['reason']}")
+        if ro_gaps:
             prog.emit("orchestrate", "warn",
-                      f"NOT TESTED — {gap['probe']}: {gap['reason']}")
+                      f"NOT TESTED (--read-only) — {len(ro_gaps)} check(s) needed to write: "
+                      + ", ".join(sorted({str(g['probe']) for g in ro_gaps})))
         silent = result.silent_legs()
         if silent:
             prog.emit("orchestrate", "warn",
@@ -412,7 +432,20 @@ class OrchestratorService:
 
     # ── Re-verify ("reproduce 2/2", every anomaly gets a clean rerun) ──
 
-    def _reverify(self, first, model, base_url: str, auth, extra_passes: int, prog):
+    @staticmethod
+    def _read_only_cases(tests: list, ro_skips: list, prog) -> list:
+        """Read-only run: keep only test cases whose every step is GET/HEAD/OPTIONS; record the rest."""
+        from core.read_only import NEEDS, safe_cases
+        safe, unsafe = safe_cases(tests)
+        if unsafe:
+            prog.emit("orchestrate", "info", f"read-only: {len(unsafe)} test(s) not run (they send write requests)")
+            ro_skips.append({"probe": "coverage", "kind": "read-only", "needs": NEEDS,
+                             "reason": f"{len(unsafe)} generated/coverage test(s) not run: they send write "
+                                       f"requests (e.g. {unsafe[0].get('title', '')[:70]})"})
+        return safe
+
+    def _reverify(self, first, model, base_url: str, auth, extra_passes: int, prog,
+                  read_only: bool = False):
         """
         Re-run the probe battery `extra_passes` more times and keep as CONFIRMED only the
         findings that fire in EVERY pass (stamped `reproduced=[hits, passes]` — a MEASURED
@@ -431,7 +464,8 @@ class OrchestratorService:
         try:
             for n in range(extra_passes):
                 prog.emit("orchestrate", "step", f"re-verifying probe findings — pass {n + 2} of {passes}")
-                r = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog)
+                r = ProbeService(self.context).run(model, base_url, auth=auth, progress=prog,
+                                                   read_only=read_only)
                 results.append(r)
                 for k in {key(f) for f in r.exploited}:
                     if k in seen:
@@ -1044,7 +1078,7 @@ class OrchestratorService:
         return None
 
     def _expand_families(self, confirmed: list[dict], model: AppModel, base_url: str,
-                         *, auth: dict | None = None) -> list[dict]:
+                         *, auth: dict | None = None, read_only: bool = False) -> list[dict]:
         """
         For each CONFIRMED class, re-run its probe over EVERY matching endpoint (cap
         lifted) and return the sibling bugs not already confirmed. Deterministic,
@@ -1070,6 +1104,16 @@ class OrchestratorService:
             return []
         out: list[dict] = []
         sess = requests.Session()
+        # The sweep WRITES (injection/bola create records): track them like the probe battery does, so
+        # they are cleaned up and anything left is reported — and honour --read-only.
+        sess._qax_created = []
+        sess._qax_skips = []
+        if read_only:
+            from core.read_only import guard
+            guard(sess)
+        else:
+            from execution.probes import track_writes
+            track_writes(sess)
         for cid, fn in todo:
             try:
                 for f in fn(model, base_url, session=sess, auth=auth, limit=self._FAMILY_SWEEP_LIMIT):
@@ -1080,7 +1124,27 @@ class OrchestratorService:
                                     "probe": getattr(f, "probe", ""), "target": getattr(f, "target", "")})
             except Exception as exc:
                 logger.warning("family expansion for %s failed: %s", cid, exc)
+        self._family_bookkeeping(model, base_url, sess, read_only)
         return out
+
+    def _family_bookkeeping(self, model: AppModel, base_url: str, sess, read_only: bool) -> None:
+        """Clean up what the family sweep created, and record leftovers / read-only refusals."""
+        side = getattr(self, "_family_side", None)
+        if not isinstance(side, dict):
+            return
+        from execution.probes import cleanup_artifacts, leftover_artifacts
+        created = len(getattr(sess, "_qax_created", []) or [])
+        if created:
+            side["created"] += created
+            try:
+                side["cleaned"] += cleanup_artifacts(model, base_url, sess)
+            except Exception as exc:
+                logger.warning("family sweep cleanup failed: %s", exc)
+            side["leftover"] += leftover_artifacts(sess, "family sweep: not cleaned")
+        if read_only:
+            from core.read_only import blocked, ledger_entries
+            side["not_tested"] += [dict(e, probe=f"family-sweep:{e['probe']}")
+                                   for e in ledger_entries(blocked(sess), [])]
 
     @classmethod
     def _unresolved_suspects(cls, findings, confirmed: list[dict],

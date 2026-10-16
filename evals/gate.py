@@ -95,7 +95,7 @@ def _two_user_auth(base_url: str) -> dict:
     return {"token": toks[0], "token_b": toks[1], "header": "Authorization", "scheme": "Bearer"}
 
 
-def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None, auth=None):
+def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None, auth=None, read_only: bool = False):
     """Scan the live target. Quick = deterministic/zero-LLM; deep = credit-gated."""
     import json
 
@@ -113,7 +113,7 @@ def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None, auth=None):
     t0 = time.time()
     kw = dict(max_router_files=1, max_endpoints=6) if deep else {}
     res = OrchestratorService(ctx or QAXContext.from_env()).run(
-        empty, base_url, deep=deep, use_cache=False, progress=prog, auth=auth, **kw)
+        empty, base_url, deep=deep, use_cache=False, progress=prog, auth=auth, read_only=read_only, **kw)
     if deep:
         from services import usage as _usage
         usage = _usage.snapshot()
@@ -138,6 +138,36 @@ def _source_lane(base_url: str):
                      config=[{"key": "JWT_SECRET", "default": "super-secret-signing-key",
                               "is_secret": True, "risk": "hardcoded signing secret"}])
     return ProbeService(QAXContext.from_env()).run(model, base_url)
+
+
+def _read_only_check(base_url: str) -> list[tuple[str, bool, str]]:
+    """
+    PLAN_TO_V1 D9 / ROADMAP A1: a --read-only scan must send NO write request. Proven on the server side:
+    the target counts requests per method; the scan (with supplied tokens, so no self-registration is
+    needed) must add zero non-GET/HEAD/OPTIONS requests, must still report read-only findings, and must
+    list what it did not run (kind "read-only") instead of staying silent about it.
+    """
+    import json as _json
+    auth = _two_user_auth(base_url)          # the gate's own registrations happen BEFORE the snapshot
+
+    def counts():
+        return _json.loads(urllib.request.urlopen(base_url + "/__qax_eval/methods", timeout=5).read())
+
+    before = counts()
+    res, _ = _scan(base_url, auth=auth, read_only=True)
+    after = counts()
+    writes = {m: after.get(m, 0) - before.get(m, 0) for m in after
+              if m not in ("GET", "HEAD", "OPTIONS") and after.get(m, 0) != before.get(m, 0)}
+    found = sorted({b.get("probe") for b in res.confirmed})
+    ro = sorted({n.get("probe") for n in res.not_tested if n.get("kind") == "read-only"})
+    return [
+        ("read-only: zero write requests reached the target", not writes,
+         f"write requests by method={writes or 0}"),
+        ("read-only: read probes still confirm findings", bool(found) and "cors" in found,
+         f"probes={found}"),
+        ("read-only: what was not run is listed (kind read-only)", "mass-assignment" in ro or "bola" in ro,
+         f"read-only entries={ro}"),
+    ]
 
 
 def _pipeline_execute_check(base_url: str) -> tuple[str, bool, str]:
@@ -183,6 +213,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
         # access-revocation needs TWO supplied identities: scan once more with them.
         res_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
         src_res = _source_lane(f"http://127.0.0.1:{port}")
+        ro_checks = _read_only_check(f"http://127.0.0.1:{port}")
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
         proc.terminate()
@@ -213,6 +244,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     # The five spec-typed probes must be proven on a RUNNING server, not just
     # against fakes: each planted bug in /tasks fires, none is silently skipped.
     typed_missing = sorted(_TYPED_PROBES - probes)
+    checks.extend(ro_checks)
     forge_hit = [f for f in getattr(src_res, "exploited", []) if f.probe == "forge-jwt"]
     checks.append(("source lane: forge-jwt proves the forgery with the leaked secret", bool(forge_hit),
                    f"findings={[f.title for f in forge_hit] or 'none'}"))
