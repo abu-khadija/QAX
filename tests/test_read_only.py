@@ -116,3 +116,40 @@ def test_track_writes_registers_accepted_creations_only():
     _record_created(s, "/notes", {"title": "a"}, {"Authorization": "Bearer t"})   # explicit record: de-duplicated
     assert len(s._qax_created) == 2 and s._qax_created[0]["headers"] == {"Authorization": "Bearer t"}
     assert "auto" not in s._qax_created[0]
+
+
+def test_cookie_auth_is_carried_by_the_probe_session_end_to_end():
+    """A session cookie supplied via auth['cookie'] reaches an authed endpoint through the shared probe
+    session — proven against a tiny live app that gates content on the cookie."""
+    import socket
+    import threading
+    import wsgiref.simple_server as ws
+
+    import requests
+
+    from execution.probes import excessive_data_probe, seed_cookies
+    from services.results import AppModel
+
+    def app(environ, start_response):
+        authed = "sid=secret-sess" in environ.get("HTTP_COOKIE", "")
+        body = b'{"password": "leaked"}' if authed else b'{"error": "login required"}'
+        start_response("200 OK", [("Content-Type", "application/json")])
+        return [body]
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    srv = ws.make_server("127.0.0.1", port, app)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    model = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/account", "auth_required": True}])
+    try:
+        # no cookie → the endpoint returns the "login required" body, nothing sensitive is seen
+        sess = requests.Session()
+        out_no = excessive_data_probe(model, base, session=sess, auth={})
+        # with the cookie → the probe session carries it and sees the leaked credential
+        sess2 = requests.Session()
+        seed_cookies(sess2, "sid=secret-sess")
+        out_yes = excessive_data_probe(model, base, session=sess2, auth={"cookie": "sid=secret-sess"})
+    finally:
+        srv.shutdown()
+    assert out_no == []                                   # unauthenticated: no sensitive field exposed
+    assert out_yes and out_yes[0].probe == "excessive-data"   # cookie carried → authed content probed

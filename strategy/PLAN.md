@@ -301,7 +301,7 @@ These references support the security and operating principles; review current g
 | Scorecard FP target | Target only | Less-than-15% is internal and unmeasured; matching still needs stricter semantics |
 | SSRF boundary | Partial by deployment context | Current egress boundary stays on target origin; hosted-grade DNS, private-range, metadata, and connect-time redirect controls absent |
 | Product delivery model | Confirmed current state | Self-hosted CLI and local web UI; single-tenant; .env secrets; no hosted mode, tenants, or billing |
-| Current engineering sequence | In progress | Spec-less endpoint discovery, then cookie-session and CSRF auth |
+| Current engineering sequence | In progress | Spec-less discovery done (docs-page reading); cookie-session auth: mechanism done + unit/live-tested (read-only), full CSRF-protected writes from a cookie still pending; next: 10-app corpus, 429/WAF, UI plan preview |
 | Phase 0 demos | Ready | Target window 2026-10-17 to 2026-10-23; show to 2–3 QA/dev practitioners |
 | Self-hosted private alpha | Planned | 2026-11-16 to 2026-12-31, gated on Phase 1 |
 | Company design-partner beta | Blocked | Wait for founder’s IP/legal review, expected early 2027 |

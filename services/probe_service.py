@@ -128,6 +128,9 @@ class ProbeService:
         shared = requests.Session()
         shared._qax_created = []  # probes append every test record they write here
         shared._qax_skips = []    # probes record WHY they could not run (not-tested ledger)
+        if auth and auth.get("cookie"):
+            from execution.probes import seed_cookies
+            seed_cookies(shared, auth.get("cookie"))   # cookie-session auth: every probe request carries it
         if read_only:
             from core.read_only import guard
             guard(shared)

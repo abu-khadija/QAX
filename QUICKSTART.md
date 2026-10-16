@@ -51,7 +51,7 @@ python main.py scan --url https://staging.your-app.example --quick --authorized 
 |---|---|
 | `Authorization: Token <key>` | `--auth-scheme Token` |
 | `X-Api-Key: <key>` (or another header) | `--auth-header X-Api-Key --auth-scheme ""` |
-| A session cookie only | `--auth-header Cookie --auth-scheme "" --token "sessionid=<value>"` (read-only scans only; not yet verified on a real app, so please tell us if it works) |
+| A session cookie | `--cookie "sessionid=<value>; ..."` (best with `--read-only`; full CSRF-protected writes from a cookie are not supported yet) |
 
 ## 3. Reading the result
 

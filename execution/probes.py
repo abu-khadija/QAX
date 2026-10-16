@@ -1256,10 +1256,28 @@ def _search_token(data, token_field, _depth: int = 0):
     return None
 
 
+_COOKIE_AUTH = "__qax_cookie_session__"   # sentinel: this request is authenticated by a session cookie
+
+
+def seed_cookies(sess, cookie_str: str | None) -> None:
+    """Put a supplied 'name=value; n2=v2' cookie string on the session jar, so every request carries it."""
+    if not cookie_str:
+        return
+    for part in str(cookie_str).split(";"):
+        if "=" in part:
+            name, value = part.split("=", 1)
+            name = name.strip()
+            if name:
+                try:
+                    sess.cookies.set(name, value.strip())
+                except Exception:
+                    pass
+
+
 def _auth_headers(token, auth: dict | None = None) -> dict:
     """Build the auth header for a token, honouring a supplied header name/scheme."""
-    if not token:
-        return {}
+    if not token or token == _COOKIE_AUTH:
+        return {}       # unauthenticated, or authenticated by a session cookie already on the jar
     auth = auth or {}
     header = auth.get("header") or "Authorization"
     scheme = auth.get("scheme", "Bearer") if "scheme" in auth else "Bearer"
@@ -1450,6 +1468,8 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
         return auth["token_b"]
     if slot == "primary" and auth.get("token"):
         return auth["token"]
+    if slot == "primary" and auth.get("cookie"):
+        return _COOKIE_AUTH    # a session cookie authenticates one user (user A); it is on the session jar
     # NB: each call self-registers a FRESH user on purpose — do not cache/share the
     # token across probes. BOLA's two-user control needs genuinely distinct users, and
     # sharing one "primary" user across probes defeats it (B would read its own object).

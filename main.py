@@ -2213,6 +2213,10 @@ def run_scan_command() -> None:
                              "First run seeds it; later runs flag screens whose rendering changed.")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
+    parser.add_argument("--cookie", default=None, metavar="\"name=value; ...\"",
+                        help="Authenticate with a session cookie instead of a token (copy it from your "
+                             "browser's DevTools). Carried on every request. Best with --read-only; a full "
+                             "scan of a CSRF-protected app from a cookie is not supported yet.")
     parser.add_argument("--read-only", action="store_true",
                         help="Send NO write request (only GET/HEAD/OPTIONS): probes and tests that need to "
                              "create data, register users or log in are not run and are listed under NOT "
@@ -2273,10 +2277,11 @@ def run_scan_command() -> None:
     _usage.track()
     _usage.reset()
     _auth = None
-    if args.token or args.token_b:
+    if args.token or args.token_b or args.cookie:
         _auth = {"token": args.token, "token_b": args.token_b,
-                 "header": args.auth_header, "scheme": args.auth_scheme}
-        print(f"  (using a supplied auth token via '{args.auth_header}')\n")
+                 "header": args.auth_header, "scheme": args.auth_scheme, "cookie": args.cookie}
+        _how = "a session cookie" if (args.cookie and not args.token) else f"a supplied token via '{args.auth_header}'"
+        print(f"  (authenticating with {_how})\n")
     _t0 = time.time()
     result = OrchestratorService(ctx).run(
         repo_path, args.url,
@@ -2346,7 +2351,8 @@ def run_scan_command() -> None:
                     **run_record(quick=bool(args.quick), read_only=bool(args.read_only),
                                  reverify=int(args.reverify or 0), tour=bool(args.tour),
                                  repo_supplied=bool(args.repo), token_supplied=bool(args.token),
-                                 token_b_supplied=bool(args.token_b), auth_header=args.auth_header,
+                                 token_b_supplied=bool(args.token_b), cookie_supplied=bool(args.cookie),
+                                 auth_header=args.auth_header,
                                  auth_scheme=args.auth_scheme,
                                  accepted_file=args.accepted or None),
                     "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
