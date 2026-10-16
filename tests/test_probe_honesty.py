@@ -628,3 +628,28 @@ def test_a_tiny_known_surface_is_reported_as_a_gap():
     assert gap and gap[0]["needs"] == "api-surface" and "only 1 endpoint" in gap[0]["reason"]
     big = AppModel(root="/x", endpoints=[{"method": "GET", "path": f"/p{i}"} for i in range(5)])
     assert OrchestratorService._surface_gap(big) == []
+
+
+# ── found on microblog-api (A4) ───────────────────────────────────────────────────────────────────
+
+def test_a_has_password_flag_is_not_an_exposed_credential():
+    from execution.probes import _sensitive_keys
+    assert _sensitive_keys({"has_password": True, "password_set": "yes", "password_policy": "min 8"}) == set()
+    assert _sensitive_keys({"password": "hunter2"}) == {"password"}            # a real value still counts
+    assert _sensitive_keys({"user": {"password_hash": "abc", "api_secret": "x"}}) == {"password_hash", "api_secret"}
+    assert _sensitive_keys({"password": True}) == set()                         # a boolean can never be the secret
+
+
+def test_a_put_that_echoes_an_id_is_not_a_created_record():
+    from unittest.mock import MagicMock
+    from execution.probes import track_writes
+
+    class S:
+        def __init__(self): self._qax_created = []
+        def request(self, method, url, **kw):
+            r = MagicMock(status_code=200); r.json.return_value = {"id": 1}; return r
+    s = track_writes(S())
+    s.request("PUT", "http://t/api/me", json={"about_me": "x"})        # update of an existing resource
+    s.request("POST", "http://t/api/tokens", json={})                    # an action, not a record
+    s.request("POST", "http://t/api/posts", json={"text": "x"})          # a creation
+    assert [a["collection"] for a in s._qax_created] == ["/api/posts"]

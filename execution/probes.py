@@ -1318,6 +1318,11 @@ def _record_created(sess, collection: str, body: dict, headers: dict) -> None:
         pass
 
 
+# POST targets that are actions, not record creation (they may echo an id but create nothing to clean up).
+_NOT_A_RECORD = frozenset({"login", "logout", "token", "tokens", "refresh", "auth", "authenticate", "session",
+                           "sessions", "signin", "sign-in", "verify", "search", "query", "graphql", "import"})
+
+
 def track_writes(sess):
     """
     Data-state honesty at the boundary (PLAN_TO_V1 D9): many probes POST payloads into
@@ -1336,9 +1341,12 @@ def track_writes(sess):
         try:
             m = str(method or "").upper()
             code = getattr(r, "status_code", 0)
-            if m in ("POST", "PUT", "PATCH") and 200 <= code < 300:
+            path_tail = urlparse(str(url)).path.rstrip("/").rsplit("/", 1)[-1].lower()
+            if m in ("POST", "PUT", "PATCH") and 200 <= code < 300 and path_tail not in _NOT_A_RECORD:
                 created = code == 201
-                if not created:
+                # A 2xx that merely echoes an id is a creation only for POST: a PUT/PATCH updates an
+                # EXISTING resource (found on microblog-api: PUT /api/me was reported as 'left on the target').
+                if not created and m == "POST":
                     try:
                         j = r.json()
                         created = isinstance(j, dict) and any(k in j for k in ("id", "uuid", "_id"))
@@ -1572,6 +1580,19 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
             continue
         compared += 1
         if br.status_code < 300 and marker in (br.text or ""):
+            # Shared-by-design control: if user B can also see A's object in the collection LISTING, the
+            # content is public/shared (a feed, a post) and a per-id read is not an authorization bug.
+            try:
+                lr = sess.get(f"{base}{prefix}", headers=auth_b, timeout=15)
+                shared = lr.status_code < 300 and (marker in (lr.text or "") or key in (lr.text or ""))
+            except Exception:
+                shared = False
+            if shared:
+                _skip(sess, "bola", f"{prefix}: user B can read user A's object, but it is also in B's own "
+                                    f"listing of {prefix}, so it is shared by design (not an ownership bug). "
+                                    f"If it should be private, the LISTING leaks it too — check both.",
+                      kind="not-applicable")
+                continue
             out.append(ProbeFinding(
                 probe="bola", title=f"Broken object-level authorization in GET {ge['path']}",
                 exploited=True, severity="P1",
@@ -2097,13 +2118,30 @@ _SENSITIVE_OUT = ("password", "passwd", "pwd", "secret", "private_key", "private
                   "cardnumber", "cvv", "cvc", "salt", "password_hash", "pwd_hash")
 
 
+# Names that DESCRIBE a secret without being one: has_password, password_set, password_policy, ...
+_FLAG_NAME = re.compile(r"^(has|is|can|needs|requires|uses|with|no)_|"
+                        r"_(set|required|enabled|changed(_at)?|updated(_at)?|expires?(_at|_in)?|url|link|hint|"
+                        r"policy|min_length|max_length|strength|reset_url|count|type|field|label)$")
+
+
+def _is_secret_value(k: str, v) -> bool:
+    """A response field names a credential only if its VALUE could be one: a non-empty string/number,
+    under a name that is not a flag or metadata about a secret. (Found on microblog-api: `has_password:
+    true` — a boolean saying the user has a password — was reported four times as 'credentials exposed'.)"""
+    if isinstance(v, bool) or v is None or v in ("", [], {}):
+        return False
+    if _FLAG_NAME.search(str(k).lower()):
+        return False
+    return isinstance(v, (str, int, float))
+
+
 def _sensitive_keys(data, found: set | None = None) -> set:
     """Recursively collect response keys that name a credential/secret with a value."""
     found = found if found is not None else set()
     if isinstance(data, dict):
         for k, v in data.items():
             kl = str(k).lower()
-            if any(s in kl for s in _SENSITIVE_OUT) and v not in (None, "", [], {}):
+            if any(s in kl for s in _SENSITIVE_OUT) and _is_secret_value(k, v):
                 found.add(str(k))
             _sensitive_keys(v, found)
     elif isinstance(data, list):

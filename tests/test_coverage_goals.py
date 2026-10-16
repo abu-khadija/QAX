@@ -159,10 +159,10 @@ def test_idor_template_supplied_skips_registration():
     tpls = cg.idor_templates(_model(), supplied=True)
     assert tpls
     steps = tpls[0]["api_steps"]
-    # Only create(token_a) + attack(token_b) — no four register/login steps.
-    assert len(steps) == 2
-    assert steps[0]["use_auth"] == "token_a" and steps[1]["use_auth"] == "token_b"
-    assert steps[1]["expected_status"] == [403, 404]
+    # create(token_a) + [GET only: listing control(token_b)] + attack(token_b) — no four register/login steps.
+    assert len(steps) == 3 and steps[1].get("listed_id")
+    assert steps[0]["use_auth"] == "token_a" and steps[-1]["use_auth"] == "token_b"
+    assert steps[-1]["expected_status"] == [403, 404]
 
 
 def test_all_templates_threads_supplied_flag():
@@ -287,3 +287,32 @@ def test_setup_failed_coverage_test_not_counted_as_failed():
                                   {"step_number": 2, "method": "GET", "path": "/a/1",
                                    "expected_status": [403, 404], "use_auth": "token_b"}]}])
     assert batch["setup"] == 1 and batch["failed"] == 0
+
+
+def test_get_idor_template_has_a_listing_control_before_the_attack():
+    from services.coverage_goals import idor_templates
+    from services.results import AppModel
+    m = AppModel(root="/x", endpoints=[
+        {"method": "POST", "path": "/api/posts", "request_fields": ["text"], "auth_required": True},
+        {"method": "GET", "path": "/api/posts/{id}", "auth_required": True},
+        {"method": "PUT", "path": "/api/posts/{id}", "request_fields": ["text"], "auth_required": True}])
+    t = {x["title"]: x for x in idor_templates(m, supplied=True)}
+    get_steps = t["Coverage: GET /api/posts/{id} blocks another user (IDOR)"]["api_steps"]
+    ctrl = [s for s in get_steps if s.get("listed_id")]
+    assert ctrl and ctrl[0]["use_auth"] == "token_b" and ctrl[0]["path"] == "/api/posts"
+    assert get_steps[-1]["expected_status"] == [403, 404]          # the attack is still the LAST step
+    put_steps = t["Coverage: PUT /api/posts/{id} blocks another user (IDOR)"]["api_steps"]
+    assert not [s for s in put_steps if s.get("listed_id")]        # writing someone else's data is never "shared"
+
+
+def test_shared_by_design_idor_is_not_confirmed_but_a_private_one_is():
+    from services.orchestrator_service import OrchestratorService as O
+    class Ex:
+        def __init__(self, listed): self.results = [{"test_case_id": "COV-IDOR-0001", "title": "Coverage: GET /p/{id} blocks another user (IDOR)",
+            "status": "FAIL", "steps": [{"step_number": 3, "status": "PASS", "response_code": 200, "listed": listed},
+                                        {"step_number": 4, "status": "FAIL", "response_code": 200, "error": "Expected status [403, 404], got 200"}]}]
+    tc = {"test_case_id": "COV-IDOR-0001", "title": "Coverage: GET /p/{id} blocks another user (IDOR)", "attack": "coverage-template",
+          "api_steps": [{"step_number": 3, "method": "GET", "path": "/p", "listed_id": "{{rid}}"},
+                        {"step_number": 4, "method": "GET", "path": "/p/{{rid}}", "expected_status": [403, 404]}]}
+    assert O._confirmed_from_templates(Ex(True), [tc], []) == []                       # listed -> shared by design
+    assert len(O._confirmed_from_templates(Ex(False), [tc], [])) == 1                   # not listed -> private -> bug

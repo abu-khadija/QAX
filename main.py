@@ -2106,6 +2106,9 @@ def run_scan_command() -> None:
                              "First run seeds it; later runs flag screens whose rendering changed.")
     parser.add_argument("--dry-run", action="store_true",
                         help="No external side effects (exports); the scan still runs.")
+    parser.add_argument("--spec", default=None, metavar="URL|PATH|FILE",
+                        help="Where the app's OpenAPI/Swagger document is, when it is not at a standard path "
+                             "(a URL, a path on the app like /apispec.json, or a local file).")
     parser.add_argument("--cookie", default=None, metavar="\"name=value; ...\"",
                         help="Authenticate with a session cookie instead of a token (copy it from your "
                              "browser's DevTools). Carried on every request. Best with --read-only; a full "
@@ -2187,6 +2190,7 @@ def run_scan_command() -> None:
         visual_baseline=args.visual_baseline,
         reverify=max(0, int(args.reverify or 0)),
         read_only=args.read_only,
+        spec_url=args.spec,
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

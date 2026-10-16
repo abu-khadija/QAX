@@ -169,6 +169,14 @@ def idor_templates(model, recipe: dict | None = None, cap: int = 6,
         steps.append({"step_number": n, "method": "POST", "path": collection,
                       "body": {create_field: "owned by A"}, "expected_status": [200, 201],
                       "use_auth": "token_a", "save": {"rid": "id"}})
+        # CONTROL (GET only): can userB LIST the collection and see A's object there? Then the content is shared
+        # by design (a feed, a public profile), and reading it by id is not an authorization bug. Recorded,
+        # never asserted (found on microblog-api: a public post read by another user was reported as P1).
+        if method == "GET":
+            steps.append({"step_number": n + 1, "method": "GET", "path": collection,
+                          "expected_status": list(range(100, 600)), "use_auth": "token_b",
+                          "listed_id": "{{rid}}"})
+            n += 1
         # userB attacks it — the secure response is 403 or 404, never 2xx
         attack = {"step_number": n + 1, "method": method,
                   "path": path.replace("{" + _param_name(path) + "}", "{{rid}}") if _param_name(path) else path,

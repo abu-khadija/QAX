@@ -66,6 +66,7 @@ class OrchestratorService:
         progress: ProgressReporter | None = None,
         reverify: int = 0,
         read_only: bool = False,
+        spec_url: str | None = None,
     ) -> OrchestratorResult:
         """
         Run the autonomous pipeline over a repo against a live app.
@@ -128,7 +129,7 @@ class OrchestratorService:
         #     keeps config/secrets/risks; the live OpenAPI spec supplies exact paths.
         try:
             from services.live_surface import ground_endpoints, recover_base_path
-            live = ground_endpoints(base_url)
+            live = ground_endpoints(base_url, spec_url=spec_url)
             if live:
                 model.endpoints = live
                 prog.emit("orchestrate", "info",
@@ -1394,6 +1395,12 @@ class OrchestratorService:
             # is a body-assertion on a 200, so it still qualifies.)
             code = fstep.get("response_code")
             if not (isinstance(code, int) and 200 <= code < 300):
+                continue
+            # Shared-by-design control: when the other user could LIST the resource (an IDOR template's
+            # `listed_id` step), reading it by id is intended — do not claim an authorization bug.
+            ctrl = next((cs for cs in steps if cs.get("listed_id") is not None), None)
+            if ctrl and any(s.get("step_number") == ctrl.get("step_number") and s.get("listed") is True
+                            for s in (r.get("steps") or [])):
                 continue
             title = str(r.get("title", ""))
             if title in seen_titles:

@@ -66,7 +66,7 @@ def _all_probe_names() -> list[str]:
     return sorted(set(names))
 
 
-def _scan_plan(url: str, auth, read_only: bool) -> dict:
+def _scan_plan(url: str, auth, read_only: bool, spec_url: str | None = None) -> dict:
     """Preview the surface + the checks that will run. Read-only: discovers endpoints, attacks nothing."""
     import requests
 
@@ -80,7 +80,7 @@ def _scan_plan(url: str, auth, read_only: bool) -> dict:
         from execution.probes import seed_cookies
         seed_cookies(sess, auth.get("cookie"))
     base = url.rstrip("/")
-    spec = fetch_openapi(base, session=sess)
+    spec = fetch_openapi(base, session=sess, spec_url=spec_url)
     if spec:
         eps = endpoints_from_spec(spec)
         source = "OpenAPI/Swagger spec"
@@ -177,11 +177,11 @@ def plan():
     only read requests to discover the surface — it never attacks. So the operator approves before any
     active probe runs.
     """
-    url, repo, auth, read_only = _inputs()
+    url, repo, auth, read_only, spec_url = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     try:
-        plan = _scan_plan(url, auth, read_only)
+        plan = _scan_plan(url, auth, read_only, spec_url)
     except Exception as exc:
         return jsonify({"error": f"Could not build a plan: {exc}"}), 502
     return jsonify(plan)
@@ -236,10 +236,11 @@ def _inputs():
     scheme = src.get("auth_scheme", "Bearer")
     scheme = "" if scheme == "" else (str(scheme).strip() or "Bearer")
     read_only = str(src.get("read_only", "")).strip().lower() in ("1", "true", "yes", "on")
+    spec_url = str(src.get("spec", "")).strip() or None
     auth = None
     if token or token_b or cookie:
         auth = {"token": token, "token_b": token_b, "cookie": cookie, "header": header, "scheme": scheme}
-    return url, repo, auth, read_only
+    return url, repo, auth, read_only, spec_url
 
 
 _UNAUTHORIZED_TARGET = ("Confirm you own this app or are authorized to test it — QAX sends "
@@ -289,7 +290,8 @@ def _supply_chain_leads(repo: str) -> list:
     return out
 
 
-def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, progress=None) -> dict:
+def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, spec_url: str | None = None,
+              progress=None) -> dict:
     """Run a quick scan and return the UI payload, or {'error': ...}."""
     from services import scorecard, usage
     from services.context import QAXContext
@@ -309,7 +311,8 @@ def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, progress=No
         # A read-only scan must not drive the UI tour either (it can submit forms), so the orchestrator
         # turns the tour off under read_only; passing tour=True is still honoured for a full scan.
         result = OrchestratorService(ctx).run(repo, url, deep=False, auth=auth, tour=not read_only,
-                                              read_only=read_only, visual_baseline=visual_baseline,
+                                              read_only=read_only, spec_url=spec_url,
+                                              visual_baseline=visual_baseline,
                                               progress=progress)
     except Exception as exc:
         return {"error": f"Scan failed: {exc}"}
@@ -374,12 +377,12 @@ def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, progress=No
 
 @app.post("/api/scan")
 def scan():
-    url, repo, auth, read_only = _inputs()
+    url, repo, auth, read_only, spec_url = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
         return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
-    payload = _run_scan(url, repo, auth, read_only=read_only)
+    payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url)
     return (jsonify(payload), 502) if payload.get("error") else jsonify(payload)
 
 
@@ -472,7 +475,7 @@ def export():
 
 @app.get("/api/scan/stream")
 def scan_stream():
-    url, repo, auth, read_only = _inputs()
+    url, repo, auth, read_only, spec_url = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
@@ -481,7 +484,7 @@ def scan_stream():
 
     def work():
         try:
-            payload = _run_scan(url, repo, auth, read_only=read_only, progress=_QueueProgress(q))
+            payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, progress=_QueueProgress(q))
             q.put({"type": "error", "error": payload["error"]} if payload.get("error")
                   else {"type": "result", "payload": payload})
         except Exception as exc:

@@ -55,13 +55,48 @@ _SPEC_PATHS = [
     "/swagger/?format=openapi", "/api/schema/", "/api/schema", "/schema/",
     # Gitea/Gogs serve their Swagger 2.0 spec here (found scanning Gitea, 2026-10-15).
     "/swagger.v1.json",
+    # apifairy / APIFlask / Flask-Smorest serve theirs here (found scanning microblog-api, 2026-10-17).
+    "/apispec.json", "/api/apispec.json", "/api/swagger.json", "/api/openapi.json",
 ]
 
 
-def fetch_openapi(base_url: str, *, session: requests.Session | None = None) -> dict | None:
-    """Fetch and parse the app's OpenAPI/Swagger spec, or None if none is served."""
+def _spec_from_override(spec_url: str, base: str, sess) -> dict | None:
+    """A user-supplied --spec: an absolute URL, a path on the app ("/apispec.json"), or a local file."""
+    import json as _json
+    import os as _os
+    try:
+        if "://" not in spec_url and _os.path.isfile(spec_url):
+            text = open(spec_url, encoding="utf-8").read()
+        else:
+            url = spec_url if "://" in spec_url else base + ("" if spec_url.startswith("/") else "/") + spec_url
+            r = sess.get(url, timeout=15)
+            if r.status_code != 200:
+                return None
+            text = r.text
+        try:
+            spec = _json.loads(text)
+        except Exception:
+            import yaml  # optional
+            spec = yaml.safe_load(text)
+        if isinstance(spec, dict) and (spec.get("openapi") or spec.get("swagger")) and spec.get("paths"):
+            return spec
+    except Exception:
+        pass
+    return None
+
+
+def fetch_openapi(base_url: str, *, session: requests.Session | None = None,
+                  spec_url: str | None = None) -> dict | None:
+    """
+    Fetch and parse the app's OpenAPI/Swagger spec, or None if none is served. `spec_url` (the --spec
+    flag) overrides the search: a URL, a path on the app, or a local file — for specs in unusual places.
+    """
     sess = session or requests.Session()
     base = base_url.rstrip("/")
+    if spec_url:
+        got = _spec_from_override(spec_url, base, sess)
+        if got:
+            return got
     for p in _SPEC_PATHS:
         try:
             r = sess.get(f"{base}{p}", timeout=10)
@@ -130,6 +165,18 @@ def _query_params(op: dict, item: dict, spec: dict) -> list[str]:
     return names
 
 
+def _sendable(fields: list, types: dict) -> list:
+    """
+    The request fields a client may actually SEND: drop the ones the spec marks `readOnly` (server-owned:
+    id, created_at, avatar_url, has_password ...). OpenAPI says a readOnly property "SHOULD NOT be sent in
+    a request"; strict apps reject it ("Unknown field"). Found on microblog-api: QAX sent every field,
+    self-registration got HTTP 400, and four probes (mass-assignment, rate-limit, BOLA, persistence)
+    silently could not run. The readOnly flag stays in `request_field_types` for the probes that need it.
+    """
+    ro = {k for k, v in (types or {}).items() if isinstance(v, dict) and v.get("readOnly")}
+    return [f for f in (fields or []) if (f if isinstance(f, str) else (f or {}).get("name")) not in ro]
+
+
 def endpoints_from_spec(spec: dict) -> list[dict]:
     """
     Convert an OpenAPI/Swagger spec into QAX AppModel endpoints — the EXACT paths
@@ -158,7 +205,7 @@ def endpoints_from_spec(spec: dict) -> list[dict]:
                 # auth-bypass coverage check won't cry wolf on a public GET it covered.
                 "auth_explicit": bool(auth_explicit),
                 "query_params": _query_params(op, item, spec),
-                "request_fields": _request_fields(op, spec),
+                "request_fields": _sendable(_request_fields(op, spec), _request_field_types(op, spec)),
                 "required_fields": _required_request_fields(op, spec),
                 "request_field_types": _request_field_types(op, spec),
                 "response_fields": _response_fields(op, spec),
@@ -293,13 +340,14 @@ def _response_fields(op: dict, spec: dict) -> list[str]:
     return []
 
 
-def ground_endpoints(base_url: str, *, session: requests.Session | None = None) -> list[dict]:
+def ground_endpoints(base_url: str, *, session: requests.Session | None = None,
+                     spec_url: str | None = None) -> list[dict]:
     """
     Return the running app's TRUE endpoints from its live OpenAPI spec, or [] if it
     serves none (caller then keeps the code-derived endpoints, ideally after a live
     path check).
     """
-    spec = fetch_openapi(base_url, session=session)
+    spec = fetch_openapi(base_url, session=session, spec_url=spec_url)
     if not spec:
         return []
     eps = endpoints_from_spec(spec)

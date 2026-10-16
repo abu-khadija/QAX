@@ -210,6 +210,10 @@
         <div class="field"><label for="cookie">Session cookie (optional)</label>
           <input id="cookie" placeholder="sessionid=...; csrftoken=..." autocomplete="off" spellcheck="false"></div>
       </div>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label for="specurl">OpenAPI spec location (optional)</label>
+          <input id="specurl" placeholder="/apispec.json — only if your spec is not at a standard path" autocomplete="off" spellcheck="false"></div>
+      </div>
     </details>
     <label class="consent" for="readonly">
       <input type="checkbox" id="readonly" checked>
@@ -393,7 +397,7 @@ function runScan(){
   $('live').innerHTML=''; $('scanmsg').textContent='Scanning '+url+' …';
   $('scanning').style.display='block';
   if(_es) _es.close();
-  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim(), token_b:$('tokenb').value.trim(), cookie:$('cookie').value.trim(), read_only:$('readonly').checked?'true':'false', authorized:'true'});
+  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim(), token_b:$('tokenb').value.trim(), cookie:$('cookie').value.trim(), spec:$('specurl').value.trim(), read_only:$('readonly').checked?'true':'false', authorized:'true'});
   _es=new EventSource('/api/scan/stream?'+qs.toString());
   _es.onmessage=(e)=>{
     let m; try{ m=JSON.parse(e.data); }catch{ return; }
@@ -606,7 +610,7 @@ async function previewPlan(){
   try{
     const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({url, token:$('token').value.trim(), token_b:$('tokenb').value.trim(),
-        cookie:$('cookie').value.trim(), read_only:$('readonly').checked})});
+        cookie:$('cookie').value.trim(), spec:$('specurl').value.trim(), read_only:$('readonly').checked})});
     const p=await r.json();
     if(!r.ok){ box.innerHTML='<div class="hk">⚠ '+esc(p.error||'Could not build a plan')+'</div>'; return; }
     const c=p.checks||{}, s=p.surface||{};

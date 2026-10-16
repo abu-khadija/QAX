@@ -257,3 +257,15 @@ def test_looks_like_api_path_filters():
     assert _looks_like_api_path("/api/v3/checks/")
     assert not _looks_like_api_path("/x.css") and not _looks_like_api_path("/a//b")
     assert not _looks_like_api_path("/{}/{}")
+
+
+def test_read_only_fields_are_not_offered_as_request_fields():
+    """Regression (microblog-api): server-owned readOnly fields must not be sent, or strict apps 400 and four
+    probes silently cannot run."""
+    spec = {"openapi": "3.0.0", "paths": {"/users": {"post": {"requestBody": {"content": {"application/json": {
+        "schema": {"type": "object", "required": ["username", "password"], "properties": {
+            "id": {"type": "integer", "readOnly": True}, "username": {"type": "string"},
+            "password": {"type": "string"}, "created_at": {"type": "string", "readOnly": True}}}}}}}}}}
+    e = endpoints_from_spec(spec)[0]
+    assert e["request_fields"] == ["username", "password"]
+    assert e["request_field_types"]["id"]["readOnly"] is True      # kept for the probes that need to know

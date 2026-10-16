@@ -457,6 +457,7 @@ class APIRunner:
         body     = self._render(step.get("body"), variables)
         expected = step.get("expected_status")
         save     = step.get("save") or {}
+        data     = None                      # parsed JSON body of the response, when there is one
 
         result = {
             "step_number":   step.get("step_number", 0),
@@ -525,8 +526,29 @@ class APIRunner:
             result["status"] = "FAIL"
             result["error"]  = str(exc)
 
+        # CONTROL step: "is this id listed in the body?" — recorded, never asserted. Lets a template tell a
+        # private object from one that is shared by design (the other user can list it).
+        if step.get("listed_id") is not None:
+            try:
+                want = str(self._render(step["listed_id"], variables))
+                result["listed"] = self._id_in_body(data, want)
+            except Exception:
+                result["listed"] = None
+
         result["duration_ms"] = int((time.time() - t0) * 1000)
         return result
+
+    @classmethod
+    def _id_in_body(cls, data, want: str) -> bool:
+        """True when any object in the JSON `data` has an id-like key whose value equals `want`."""
+        keys = ("id", "uuid", "_id", "pk", "key", "slug", "name", "username")
+        if isinstance(data, dict):
+            if any(k in data and str(data[k]) == want for k in keys):
+                return True
+            return any(cls._id_in_body(v, want) for v in data.values())
+        if isinstance(data, list):
+            return any(cls._id_in_body(v, want) for v in data)
+        return False
 
     @staticmethod
     def _status_matches(expected, actual: int) -> bool:
