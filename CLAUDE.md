@@ -73,9 +73,8 @@ execution/
   claude_healer.py        ✅
   results_reporter.py     ✅
   api_runner.py           ✅ (HTTP execution mode)
-dashboard/
-  app.py                  ✅
-  templates/index.html    ✅
+web/
+  server.py               ✅ (the one supported UI)
 ci/
   github_action.yml       ✅
   gitlab_ci.yml           ✅

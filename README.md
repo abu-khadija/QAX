@@ -209,13 +209,6 @@ python main.py feedback --stats
 python main.py feedback --optimize
 ```
 
-### dashboard — Real-time web dashboard
-
-```bash
-python main.py dashboard          # starts on http://localhost:5000
-python main.py dashboard --port 8080
-```
-
 ### check-connection — Test all API connections
 
 ```bash
@@ -362,8 +355,8 @@ execution/
   test_executor.py       Test execution orchestration
   claude_healer.py       Self-healing selectors via Claude
   results_reporter.py    HTML report generation
-dashboard/
-  app.py                 Flask web dashboard
+web/
+  server.py              The one supported UI (scan, plan preview, run history, Jira export)
 configs/
   smoke.json             Smoke test suite config
   regression.json        Regression test suite config
@@ -380,6 +373,6 @@ output/                  Generated test cases and reports (gitignored)
 - jsonschema
 - requests
 - playwright (optional — for execution and screenshots, requires Python 3.11/3.12)
-- flask (optional — for dashboard)
+- flask (the web UI and the demo)
 - sqlite3 (built-in — for feedback store)
 - pytest

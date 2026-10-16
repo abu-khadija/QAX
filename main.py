@@ -48,12 +48,6 @@ FEEDBACK — Review and improve generated test cases
   python main.py feedback --optimize
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DASHBOARD — Real-time web dashboard
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  python main.py dashboard
-  python main.py dashboard --port 8080
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DISCOVER — Auto-discover CSS selectors from live app
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   python main.py discover --url URL --page PAGE_NAME
@@ -1130,61 +1124,6 @@ def _collect_test_cases_for_execute(args) -> list[dict]:
 # DASHBOARD COMMAND
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_dashboard_command() -> None:
-    """
-    Handle the 'dashboard' subcommand.
-
-    DEPRECATED (PLAN.md Phase 1 item 8): the one supported UI is `web/` (python -m web.server), which now
-    carries run history. This feedback/sessions dashboard is frozen — kept working, removed later with the
-    owner's OK.
-
-    Starts the Flask web dashboard on localhost, opens it in the user's
-    browser automatically, and keeps it running until Ctrl+C.
-
-    The dashboard is read-only — it reads from:
-      - output/feedback.db   (FeedbackStore SQLite database)
-      - output/sessions/     (session JSON files)
-      - output/test_cases_*.json (generated test case files)
-
-    No API calls to Jira, Xray, or Claude are made.
-    DRY_RUN has no effect on the dashboard.
-
-    Called when sys.argv[1] == "dashboard".
-    """
-    parser = argparse.ArgumentParser(
-        prog="qax dashboard",
-        description="Start the QAX web dashboard.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python main.py dashboard
-  python main.py dashboard --port 8080
-        """
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=5000,
-        help="Port to run the dashboard on. Default: 5000"
-    )
-    args = parser.parse_args(sys.argv[2:])
-
-    try:
-        from dashboard.app import DashboardApp, FLASK_AVAILABLE
-    except ImportError:
-        print("\n  ✗ Dashboard module not found.")
-        print("    Make sure dashboard/ folder is present.")
-        sys.exit(1)
-
-    if not FLASK_AVAILABLE:
-        print("\n  ✗ Flask is not installed.")
-        print("    Install with: pip install flask")
-        print("    Then re-run: python main.py dashboard\n")
-        sys.exit(1)
-
-    app = DashboardApp()
-    app.start(port=args.port)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHECK-CONNECTION COMMAND
@@ -1951,7 +1890,6 @@ def show_help() -> None:
     print("  run              Config-driven pipeline with session tracking")
     print("  execute          Run test cases with Playwright browser")
     print("  feedback         Record QA decisions and improve output quality")
-    print("  dashboard        Real-time web dashboard (localhost:5000)")
     print("  discover         Auto-discover CSS selectors from a live app")
     print("  check-connection Test all API connections (Claude + Jira + Xray)")
     print("  init-project     Create a new project config folder")
@@ -1971,7 +1909,6 @@ def show_help() -> None:
     print("  python main.py execute --suite smoke --headless false")
     print("  python main.py execute --file output/test_cases_20250101.json")
     print("  python main.py feedback --stats")
-    print("  python main.py dashboard")
     print("  python main.py check-connection")
     print("  python main.py init-project --name PROJECT_NAME")
     print()
@@ -2335,7 +2272,6 @@ def main() -> None:
       run              — Config-driven pipeline with session tracking
       execute          — Run test cases with Playwright browser
       feedback         — Record QA decisions, view stats, optimize prompts
-      dashboard        — Start the real-time web dashboard
       discover         — Auto-discover CSS selectors from a live app
       check-connection — Verify Claude + Jira + Xray connectivity
       init-project     — Create a new project config folder
@@ -2357,7 +2293,6 @@ def main() -> None:
         "run":              run_run_command,
         "execute":          run_execute_command,
         "feedback":         run_feedback_command,
-        "dashboard":        run_dashboard_command,
         "discover":         run_discover_command,
         "check-connection": run_check_connection_command,
         "init-project":     run_init_project_command,
@@ -2375,7 +2310,7 @@ def main() -> None:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, dashboard, discover, check-connection, init-project, cache, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
+        print("  Valid commands: analyze, run, execute, feedback, discover, check-connection, init-project, cache, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

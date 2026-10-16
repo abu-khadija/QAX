@@ -4,6 +4,12 @@ QAX follows [semantic versioning](https://semver.org/). Before 1.0, minor versio
 Every scan written with `--out` records the exact version and commit that produced it
 (`qax_version`, `qax_commit`), and `python main.py --version` prints both.
 
+## [Unreleased]
+
+### Removed
+- The Streamlit UI (`python main.py ui`) and the feedback dashboard (`python main.py dashboard`). `web/` is the one supported UI.
+- Dead code: `core/prompt_engine.py` and two unused functions.
+
 ## [0.1.0] — 2026-10-17
 
 First versioned release, for the self-hosted private alpha (see `strategy/PLAN.md`).
