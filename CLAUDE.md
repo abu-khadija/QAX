@@ -7,11 +7,13 @@ prove; generating test cases from code/stories (→ Jira/Xray) is the on-ramp.
 Multi-project: works on any codebase.
 Formerly: example-qa-agent → QAFlow Agent → QAX
 
-## Current Status (2026-10-16)
-The plan is `strategy/PLAN_TO_V1.md` (decisions D1–D11, phases A–E, dates); the task board is
-`strategy/ROADMAP.md` (current phase, order, what waits on the owner). `strategy/README.md` indexes the rest.
-History of the earlier prompts/phases: `strategy/archive/ROADMAP_HISTORY_2026-10.md`.
-Now: Phase A (the truth on real apps), target 2026-11-01.
+## Current Status (2026-10-17)
+The single plan and status/decision log is `strategy/PLAN.md` (founder-approved final plan:
+self-hosted validation → company beta after IP/legal review → hosted-mode security gate → minimum
+SaaS → public launch). Do not maintain a competing roadmap; update its status/decision log at each gate.
+Now: Phase 0 (external demos, 2026-10-17 → 10-23) in parallel with Phase 1 (spec-less endpoint
+discovery, then cookie-session + CSRF auth). `strategy/README.md` indexes the rest; superseded plans
+are in `strategy/archive/`.
 
 ## File Structure
 core/

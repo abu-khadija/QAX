@@ -1,0 +1,321 @@
+# QAX Roadmap: Self-Hosted Validation to Public SaaS
+
+**Status:** Revised draft for founder review  
+**Updated:** 2026-10-17  
+**Verified baseline reported by founder:** commit 436d039  
+**Purpose:** Single execution plan and status/decision log for reaching a public SaaS launch.
+
+> Evidence note: the run results in this plan were supplied by the founder as verified on commit 436d039. They have not been rerun by this reviewer in this session. Keep the evidence attached to the commit and update this plan at every phase gate.
+
+## 1. Goal and product boundary
+
+The long-term goal remains a public SaaS launch and announcement. The revised sequence delays hosted infrastructure until self-hosted use establishes demand and the product’s workflow is useful.
+
+QAX today is a self-hosted CLI with a local web UI. It is single-tenant and reads secrets from .env. There is no hosted mode, customer tenancy, or billing.
+
+The initial product hypothesis is a QA or development team that needs to find actionable web-application security defects in an authorized staging environment, with evidence they can review and a practical path to Jira. Treat this as a hypothesis to validate, not established market demand.
+
+For now, keep the product claim narrow: a self-hosted scanner that runs deterministic probes, reports evidence-backed findings, and can support a human-reviewed workflow. Test generation is an adjacent path; do not let it distract from proving the scan-to-evidence workflow. Publish only capabilities supported by measured results.
+
+## 2. Current evidence baseline
+
+The following is the founder’s report of runs against commit 436d039 on 2026-10-17:
+
+- Test suite: 768 passed, 3 skipped. The merge gate, make eval, passed.
+- Golden target: 32 documented planted bugs; recall 32/32 and zero false positives. Its SECURE twin stayed silent for every probe.
+- Mutation sweep: the last full sweep detected loss of a CONFIRMED finding for 39 of 40 individually disabled probes. The forge-jwt probe was verified separately through a new source lane. Together, the founder reports every probe has a planted bug the gate catches. Preserve the distinction between the full sweep and the separate source-lane check.
+- Read-only: the golden server counted requests by HTTP method; a --read-only scan added zero write requests. The check caught 74 leaked POST requests before the fix.
+- Quick scans: zero AI-provider calls even when an API key was set. A local listener observed three calls before the fix and zero after it.
+- Five real applications were scanned from external clones with permissive licenses: DRF RealWorld, Node/Express RealWorld, Go/Gin RealWorld, Java/Spring RealWorld, and Gitea 28.1. The reported outcome after fixes was zero confirmed false positives across those five.
+- Healthchecks was the sixth application, scanned on 2026-10-17. It exposed and led to a fix for a host-header false positive. Without an OpenAPI specification, QAX discovered only one endpoint. Spec-less endpoint discovery is the current blocker.
+- Jira: two bugs were filed live to the founder’s trial site.
+- Xray has never been tested.
+- verify-fixes has unit-test coverage but has not been run against real tickets.
+- The GitHub PR gate was built and run against the golden target, not against pull requests in a real repository.
+- Scorecard truth matching uses keyword-substring matching. A NoSQL injection finding was matched to a SQL injection truth entry; that case was fixed, but the matching method still needs stricter semantic rules.
+- The less-than-15% false-positive figure in scorecard.py is an internal target, not a measured result.
+- The scanner has an egress boundary: it does not send tokens or requests off the target origin. Hosted-grade SSRF protections are absent, including DNS rebinding defenses, private-range and metadata blocking, and redirect validation at connection time. These are required before scans run from QAX infrastructure, not a launch prerequisite for the current self-hosted product.
+- Product surface: QAX is self-hosted, single-tenant CLI plus local web UI; secrets come from .env. No hosted mode, tenant isolation, or billing exists.
+
+## 3. Execution rules
+
+1. Work through phase gates. Dates are planning windows, not permission to advance without meeting the exit criteria.
+2. Run the first external demos during 2026-10-17 to 2026-10-23. In parallel, continue the current endpoint-discovery work.
+3. Use only applications and environments the operator is authorized to test. For external alpha users, default to read-only against their own staging systems. Self-hosting reduces QAX’s data custody and infrastructure egress exposure; it does not remove target-side risk, local secret risk, or data sent by an explicitly invoked deep AI workflow.
+4. Explain what data leaves the user’s machine, what is sent to an AI provider, and what Jira actions may write before a user enables those workflows.
+5. Record metrics with definitions and denominators. Do not use a dashboard target as if it were a measured result.
+6. Keep one run record for every evidence run: version/commit, target scope, discovered endpoints, checks executed and skipped, finding evidence, read-only/write activity, AI calls and cost, and Jira mode/results.
+7. Do not use employer code, credentials, or data without the right and permission. Company beta waits for the founder’s IP/legal review expected in early 2027.
+8. Treat a benchmark as specific to its corpus and method. Never claim general recall or false-positive performance from the golden target or five clean applications.
+9. This file is the single reference for phases, dates, decisions, and status. Update the decision log at each gate; do not maintain a competing roadmap.
+10. No public announcement or hosted scanning before the relevant release gates pass.
+
+## 4. Phases, dates, and exit criteria
+
+### Phase 0 — External demo and problem discovery
+
+**Window:** 2026-10-17 to 2026-10-23  
+**Status:** Ready to start  
+**Intent:** Show the current demo to 2–3 QA or development practitioners and learn whether the workflow addresses a recurring, valuable problem. This is a demo and discovery step, not a promise of production readiness.
+
+**Actions**
+
+- Show qax demo without requiring installation.
+- Ask about their current testing and triage process, where evidence gets lost, what they trust, and what they currently pay for or maintain.
+- Observe which result they consider useful and what they need before running on an authorized staging target.
+- Capture objections, requested workflow changes, and whether they would try a self-hosted alpha.
+- Do not count compliments, feature requests, or hypothetical interest as purchase evidence.
+
+**Exit criteria**
+
+- Complete 2–3 demos, or document specific outreach/access blockers and a dated next attempt.
+- Save concise notes with the role, workflow, pain, current alternative, trust concerns, requested next step, and any willingness-to-try or willingness-to-pay signal.
+- Identify the next product question from evidence. If the problem or target user remains unclear, repeat discovery before expanding product scope.
+
+### Phase 1 — Self-hosted evidence and alpha readiness
+
+**Window:** 2026-10-19 to 2026-11-15  
+**Status:** In progress  
+**Current work order:** spec-less endpoint discovery, then cookie-session and CSRF authentication.
+
+**Actions, in sequence**
+
+1. **Improve spec-less endpoint discovery.** Use Healthchecks as a regression case. Report when coverage is incomplete instead of implying the application was meaningfully scanned. Measure discovery against a known endpoint inventory where available.
+2. **Add and validate cookie-session plus CSRF coverage.** Then assess login forms and API-key headers using authorized applications. Do not label an auth mode supported until its request flow, failure cases, and findings are verified.
+3. **Strengthen scorecard truth matching.** Stop relying on keyword substrings as the adjudicator. Match by normalized vulnerability class and relevant attributes; mark ambiguous matches for human review. Add regressions for SQL versus NoSQL injection and other near-neighbor classes.
+4. **Expand real-application evidence from five to at least ten permissively licensed applications.** Include spec-less applications where feasible. Inspect candidate findings and record denominators, app/version, scope, discovered endpoints, confirmed findings, false positives, not-tested checks, runtime, and request behavior. Preserve the current result as “zero confirmed false positives reported on five applications,” not a general rate.
+5. **Measure rate-limit and WAF behavior.** Use bounded retries and clear stopped/limited states. Do not attempt to bypass WAF controls.
+6. **Exercise verify-fixes against real trial tickets.** Start with a dry run that shows the proposed verification and expected writes. Only perform live ticket changes with explicit operator authorization.
+7. **Make the local UI usable for an alpha.** Show a plan preview before a scan: target, scope, endpoints, probes, read-only mode, expected writes, and missing prerequisites. Add a run history with finding evidence and status. Keep a clear distinction between confirmed, accepted, not tested, and unexecuted.
+8. **Consolidate the operator path and quickstart.** Make one documented command path from setup to preview, read-only scan, result review, and optional Jira filing. Record any unsupported or confusing path; avoid presenting multiple local UIs as one coherent product.
+9. **Review release hygiene.** Prepare versioning, changelog, security contact/process, and license decision in coordination with the founder’s IP/legal review. A license file by itself does not establish ownership or resolve third-party rights.
+
+**Exit criteria**
+
+- The current test suite and make eval pass on the release candidate; preserve commit-level output.
+- Golden and SECURE controls pass; mutation evidence records 39/40 from the last full sweep and the separate forge-jwt source-lane verification.
+- Read-only regression still measures zero write requests; per-run ledger agrees with server-side method counts.
+- Spec-less discovery reports its known coverage limits and passes a documented regression corpus.
+- SQL/NoSQL and other ambiguous truth cases cannot be silently accepted by substring overlap.
+- At least ten real applications have run records with reviewed findings and explicit denominators; no claim of broad accuracy is made from this set.
+- Supported auth modes have reproducible evidence, including failures and CSRF behavior where relevant.
+- verify-fixes has at least one real-ticket dry-run reviewed; any live write is separately authorized and recorded.
+- A new alpha user can configure a target and understand the scan plan before execution, using the quickstart without founder-led screen sharing. Record setup time and unresolved blockers.
+
+### Phase 2 — Self-hosted private alpha
+
+**Window:** 2026-11-16 to 2026-12-31  
+**Status:** Planned; gated on Phase 1  
+**Participants:** Start with 3–5 trusted QA or development practitioners.
+
+**Actions**
+
+- Give each participant the self-hosted package and quickstart. They run it on their own authorized staging applications; default to --read-only.
+- Explain the local data flow, optional AI data flow, Jira write behavior, limitations, and how to stop a run.
+- Capture setup success, first useful result, not-tested checks, reviewed false positives, runtime, support burden, and repeat usage.
+- Ask users to show their real workflow and current alternative; do not interpret praise as product-market evidence.
+- Triage every reported false positive and add a regression when reproducible.
+
+**Exit criteria**
+
+- At least three participants complete a run against an authorized application.
+- At least two complete setup and first-run review without step-by-step founder assistance; target first useful result within ten minutes, or document the measured cause when it takes longer.
+- Every reported finding is reviewed or explicitly marked unresolved; there are no untriaged high-impact false positives.
+- The run records are complete enough to reproduce the scope and explain what ran and what did not.
+- Evidence shows whether users return for another cycle and whether a company design-partner beta is justified. If alpha use is weak, fix the concrete blocker or stop and reassess before building hosted infrastructure.
+
+### Phase 3 — IP/legal review and self-hosted design-partner beta
+
+**Window:** 2027-01-01 to 2027-02-15, subject to counsel availability  
+**Status:** Blocked on IP/legal review; companies wait for this review.
+
+**Entry conditions**
+
+- A qualified legal review addresses ownership and provenance of code, prior-employer boundaries, third-party dependencies and licenses, rights to benchmark data, distribution terms, and any applicable privacy or security commitments.
+- The founder confirms in writing what code and data may be used. Do not include employer code or data without explicit rights.
+- Define the beta agreement, authorized-scope requirements, support expectations, and data-flow disclosures.
+
+**Actions**
+
+- Work with a small number of design-partner companies on their authorized staging systems.
+- Start with self-hosted execution and read-only defaults. Keep any Jira writes behind preview and explicit confirmation.
+- Track weekly use, repeat cycles, reviewed findings, false-positive resolution time, installation friction, and support hours.
+- Validate Jira in their workflow. Keep Xray out of scope until a partner has a concrete need and the integration can be tested end to end.
+- Treat the PR gate as unvalidated on real repository pull requests. Add it to beta only if partners identify it as necessary to their core workflow.
+
+**Exit criteria**
+
+- At least one design partner returns in a later testing cycle and completes a useful run.
+- At least one buyer gives concrete willingness-to-pay evidence, such as a budget discussion or a conditional purchase path, rather than praise alone.
+- Findings and false positives are adjudicated with recorded denominators; no unresolved high-severity product or security issue remains for the agreed beta scope.
+- If the PR gate is included, it has been run on a real repository’s pull requests for at least four weeks without the team disabling it because of noise.
+- The founder makes an explicit decision to proceed to hosted-mode design, continue self-hosted, or stop/reposition.
+
+### Phase 4 — Hosted-mode architecture and security gate
+
+**Window:** 2027-02-16 to 2027-03-31, only after Phase 3 evidence supports hosted investment  
+**Status:** Deferred; not started  
+**Intent:** Decide whether QAX should host scans, provide a hosted control plane with a customer-run runner, or remain self-hosted. Do not assume the first option.
+
+**Required design and verification**
+
+- Threat model and data-flow map for tenants, repositories, target URLs, credentials, code, AI providers, artifacts, logs, and integrations.
+- SSRF defenses before any scan originates from QAX infrastructure: resolve and validate public address ranges, block loopback/private/link-local and cloud metadata destinations for IPv4 and IPv6, revalidate redirects and the actual connection destination, and address DNS rebinding. Enforce egress policy at the runner/network boundary.
+- Per-job runner isolation, resource/time limits, cleanup, and a documented failure/kill path.
+- Strict authorized-target scope and least-privilege Git/Jira credentials. Prevent secrets from appearing in logs, URLs, screenshots, or reports.
+- Tenant isolation across data, queues, storage, jobs, logs, artifacts, and backups. Validate with negative cross-tenant tests.
+- Retention, deletion, backup/restore, incident response, AI-provider disclosures, prompt-injection boundaries, structured-output validation, and cost limits.
+- Decide scan placement based on partner evidence and security review. Self-hosted is the default if hosted execution cannot meet the gate.
+
+**Exit criteria**
+
+- Founder approves a written architecture, threat model, and data-flow design.
+- Security tests demonstrate SSRF and redirect protections at connection time, isolation between tenants, safe secret handling, and bounded runner behavior.
+- Delete, backup, restore, incident, and operational procedures have been exercised.
+- Unit economics and an operating-cost model are credible for the beta use case.
+- No hosted scan is enabled before every required security finding is fixed and the gate is documented as passed.
+
+### Phase 5 — Minimum hosted SaaS build
+
+**Window:** 2027-04-01 to 2027-06-30; planning estimate of roughly 8–12 weeks after approved architecture, not a delivery promise  
+**Status:** Not started; depends on Phase 4  
+**Intent:** Build only the hosted workflow needed for the validated customer job.
+
+**Likely minimum scope**
+
+- Account/workspace and tenant identity, authorization, and isolation that match the approved design.
+- A clear workflow to configure a project/target, preview a run, execute or connect the approved runner, review evidence, and see history and diffs.
+- Human review and confirmation before Jira or other consequential writes.
+- Usage metering, quotas, alerts, and spend caps for scans, AI, and storage.
+- Operational monitoring, job failure handling, support access controls, backups, restore, deletion, and rollback.
+- Onboarding, quickstart, privacy/data-flow explanation, and support path.
+
+**Explicitly defer unless evidence changes**
+
+- Broad multi-provider AI support, native mobile testing, extensive PR governance, Xray, or features requested only by analogy to competitors.
+- Do not charge for or announce an integration before it is exercised end to end.
+
+**Exit criteria**
+
+- A new customer can complete onboarding and the primary workflow without founder intervention.
+- Tenant-isolation, authorization, deletion, failure, recovery, metering, and hosted security-gate checks pass.
+- Costs and support time are measured on representative beta use, with limits that prevent uncontrolled spend.
+- The hosted workflow does not overstate endpoint coverage, test execution, or finding certainty.
+
+### Phase 6 — Commercial readiness and public launch
+
+**Window:** 2027-05-01 to 2027-07-31 as a provisional target, gated on Phase 5; may move  
+**Status:** Not started; target only, not a commitment  
+**Intent:** Launch and announce only when the product can be operated and supported responsibly.
+
+**Actions**
+
+- Set pricing from observed customer value, support burden, and measured infrastructure/AI cost. Test willingness to pay with beta participants before fixing tiers.
+- Complete counsel-led review of IP, distribution, privacy terms, customer agreements, security representations, and launch claims.
+- Prepare incident/support ownership, status and escalation path, usage limits, deletion workflow, backup recovery, and customer onboarding.
+- Publish benchmark methodology and results with corpus, version, denominators, matching rules, and limitations. Keep planted-target results separate from real-app results.
+- Prepare launch documentation and announcement only after the release gate is signed off.
+
+**Exit criteria**
+
+- At least one design partner returns for a later cycle and gives concrete willingness-to-pay evidence; ideally convert at least one into a paid customer before a broad announcement.
+- Public claims have traceable evidence and match the shipped feature set.
+- No unresolved critical/high security issue remains in the public launch scope.
+- Pricing covers measured variable costs and an explicit support model; quotas and alerts are active.
+- Legal, privacy, operational, support, rollback, and incident procedures are ready.
+- Founder signs the release decision. If any gate is not met, move the date rather than waive the criterion.
+
+## 5. Metric definitions
+
+Publish these definitions with every scorecard or benchmark. Record numerator, denominator, corpus version, application/version, and adjudication method.
+
+- **Confirmed finding:** A finding manually or deterministically adjudicated as a real defect, with reproducible evidence and a defined vulnerability class.
+- **False positive (FP):** A reported finding adjudicated not to represent the claimed defect. Record the reason and whether it was caused by matching, discovery, probe behavior, or interpretation.
+- **False negative (FN):** A documented in-scope planted or independently confirmed defect that the relevant run did not report. Do not infer all real-world FNs from an unknown corpus.
+- **Recall:** Confirmed in-scope truth items detected divided by all confirmed in-scope truth items in the declared corpus.
+- **FP rate:** State the denominator explicitly. Report both FP count and the chosen rate, such as FP among adjudicated reported findings. Never mix this with a target or an unreviewed finding set.
+- **Not tested:** A check that did not execute, including missing authentication, undiscovered surface, unsupported input, or a safety stop. It is not a pass.
+- **Coverage:** Name the denominator (known endpoints, configured probes, requirements, or another defined universe). Probe count alone is not application coverage.
+- **Accepted finding:** A human workflow state, not proof that a finding is correct.
+- **Matching:** Match by vulnerability class and material attributes, not keyword overlap alone. Ambiguous truth matches require review; preserve the source item and adjudication.
+
+The less-than-15% FP number remains an internal target until a measured rate with a declared denominator supports a claim.
+
+## 6. Required per-run record
+
+For every benchmark, alpha, beta, or hosted run, record:
+
+- QAX version and commit; configuration and enabled mode.
+- Authorized target and scope, operator, time window, and target application version where known.
+- Discovered endpoints and discovery source; known or expected endpoint inventory where available.
+- Each check as executed, skipped, unsupported, blocked, or not tested, with reason.
+- Findings with evidence, vulnerability class, confidence/state, adjudication, and related truth item if applicable.
+- Request counts by method and destination; read-only/write mode; rate limits and stop conditions.
+- AI provider/model calls, data sent, token/cost estimate, and any local instrumentation used.
+- Jira/Xray or other integration mode, proposed writes, approvals, and resulting identifiers.
+- Runtime, errors, cleanup result, and whether the run was reproducible.
+
+## 7. Main risks and responses
+
+| Risk | Current evidence or uncertainty | Response |
+|---|---|---|
+| Demand is unproven | No external-user evidence is recorded here yet | Demo this week; alpha before hosted investment |
+| Spec-less apps have poor discovery | Healthchecks exposed one discovered endpoint without OpenAPI | Fix discovery and make incomplete coverage visible |
+| Scorecard truth matching is too loose | SQL/NoSQL substring collision occurred | Semantic matching rules, ambiguity review, regression corpus |
+| Real-world accuracy is uncertain | Five applications reported clean; sixth exposed a FP and discovery gap | Expand reviewed corpus and publish denominators |
+| Self-hosted runs can still affect targets | Read-only check is strong evidence, but auth and application state vary | Authorized staging only, read-only default, preview and audit |
+| Hosted execution adds SSRF and isolation risks | Hosted-grade defenses are not present | Separate mandatory hosted security gate before hosted scans |
+| AI/privacy expectations may be misunderstood | Quick scans made zero provider calls; deep mode data flow needs clear user understanding | Show mode and data flow before use; meter and disclose calls |
+| Commercial/IP rights may be unclear | Legal review is expected early 2027 | Delay company beta and distribution decisions until review |
+| Integrations may be overstated | Jira used live; Xray untested; verify-fixes not run on real tickets | Validate actual workflows before marketing them |
+
+## 8. Reference links
+
+These references support the security and operating principles; review current guidance again when implementing hosted mode.
+
+- [OWASP Server Side Request Forgery Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)
+- [AWS SaaS Tenant Isolation Strategies](https://docs.aws.amazon.com/whitepapers/latest/saas-architecture-fundamentals/tenant-isolation.html)
+- [GitHub App permission guidance](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/choosing-permissions-for-a-github-app)
+- [Anthropic data usage and retention](https://privacy.claude.com/en/articles/7996868-how-long-do-you-store-my-organization-s-data)
+- [OWASP Cross-Site Request Forgery Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+
+## 9. Status and decision log
+
+**As of 2026-10-17, based on founder-reported runs at 436d039:**
+
+| Area | Status | Evidence / decision |
+|---|---|---|
+| Test suite | Done | 768 passed, 3 skipped |
+| Merge gate | Done | make eval passed |
+| Golden target | Done | 32 documented planted bugs; recall 32/32; zero false positives |
+| SECURE twin | Done | All probes stayed silent |
+| Mutation coverage | Done with qualification | Full sweep detected a lost CONFIRMED finding for 39/40 disabled probes; forge-jwt separately verified through source lane |
+| Read-only | Done | Zero added write requests on golden target; prior check caught 74 leaked POSTs |
+| Quick-scan AI boundary | Done | Local listener saw zero provider calls after fix, including with API key set |
+| Real applications | Partial | Five reported with zero confirmed false positives after fixes; Healthchecks sixth found host-header FP, fixed, and exposed spec-less discovery gap |
+| Jira | Partial / exercised | Two bugs filed live to founder’s trial site |
+| Xray | Not started | Never tested |
+| verify-fixes | Partial | Unit-tested; not run against real tickets |
+| GitHub PR gate | Partial | Built and run on golden target; not run on real repository pull requests |
+| Scorecard FP target | Target only | Less-than-15% is internal and unmeasured; matching still needs stricter semantics |
+| SSRF boundary | Partial by deployment context | Current egress boundary stays on target origin; hosted-grade DNS, private-range, metadata, and connect-time redirect controls absent |
+| Product delivery model | Confirmed current state | Self-hosted CLI and local web UI; single-tenant; .env secrets; no hosted mode, tenants, or billing |
+| Current engineering sequence | In progress | Spec-less endpoint discovery, then cookie-session and CSRF auth |
+| Phase 0 demos | Ready | Target window 2026-10-17 to 2026-10-23; show to 2–3 QA/dev practitioners |
+| Self-hosted private alpha | Planned | 2026-11-16 to 2026-12-31, gated on Phase 1 |
+| Company design-partner beta | Blocked | Wait for founder’s IP/legal review, expected early 2027 |
+| Hosted-mode gate | Deferred | Start only after beta evidence justifies investment |
+| Minimum hosted SaaS | Not started | Build only after hosted security gate passes |
+| Public launch and announcement | Target only | Provisional May–July 2027; move if any exit criterion is unmet |
+
+### Decisions recorded
+
+1. Preserve the public SaaS goal; change the order to validate self-hosted demand before hosted platform work.
+2. Demonstrate QAX to 2–3 practitioners this week while continuing endpoint discovery.
+3. Continue with a self-hosted alpha, using authorized staging targets and read-only as the default.
+4. Require IP/legal review before company design-partner beta.
+5. Make a separate hosted-mode security gate mandatory before any scan runs from QAX infrastructure.
+6. Treat the current benchmark results as bounded evidence, not a universal accuracy claim.
+7. Keep this document as the single roadmap and update its status/decision log at each phase gate.
+
+**Next action:** Complete the Phase 0 demos during 2026-10-17 to 2026-10-23 while continuing Phase 1 endpoint-discovery work. Do not start hosted SaaS implementation until beta evidence justifies it and the hosted-mode security gate is approved.
