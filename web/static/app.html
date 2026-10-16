@@ -191,6 +191,10 @@
         <label style="opacity:0">.</label>
         <button class="btn" id="go" onclick="runScan()">Run scan</button>
       </div>
+      <div class="field" style="flex:0 0 auto;justify-content:flex-end">
+        <label style="opacity:0">.</label>
+        <button class="btn2" id="planbtn" onclick="previewPlan()">Preview plan</button>
+      </div>
     </div>
     <details class="adv">
       <summary>Advanced — source repo &amp; auth token (optional)</summary>
@@ -200,7 +204,18 @@
         <div class="field"><label for="token">Bearer token (optional)</label>
           <input id="token" placeholder="for apps behind auth" autocomplete="off" spellcheck="false"></div>
       </div>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label for="tokenb">Second user's token (optional)</label>
+          <input id="tokenb" placeholder="enables user-vs-user access checks" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="cookie">Session cookie (optional)</label>
+          <input id="cookie" placeholder="sessionid=...; csrftoken=..." autocomplete="off" spellcheck="false"></div>
+      </div>
     </details>
+    <label class="consent" for="readonly">
+      <input type="checkbox" id="readonly" checked>
+      <span><b>Read-only (recommended for a first scan).</b> QAX sends only GET/HEAD/OPTIONS requests. Checks
+        that need to create data are skipped and listed under <i>Not tested</i>.</span>
+    </label>
     <label class="consent" for="authorized">
       <input type="checkbox" id="authorized">
       <span><b>I own this app or am authorized to test it.</b> QAX sends adversarial input and may create
@@ -230,6 +245,7 @@
     <div class="live" id="live"></div>
   </div>
   <div id="err"></div>
+  <div id="plan" class="panel" style="display:none"></div>
 
   <section id="results">
     <div class="rtool" id="rtool">
@@ -244,6 +260,11 @@
     <div id="housekeeping"></div>
     <div id="tour"></div>
     <div id="findings"></div>
+  </section>
+
+  <section id="history" style="display:none">
+    <div class="sec-title">Past scans</div>
+    <div id="runs"></div>
   </section>
 
   <section id="genresults">
@@ -366,13 +387,13 @@ function runScan(){
   const url=$('url').value.trim();
   if(!url){ $('url').focus(); return; }
   if(!$('authorized').checked){ showError('Confirm you own this app or are authorized to test it.'); $('authorized').focus(); return; }
-  $('genresults').style.display='none';
+  $('genresults').style.display='none'; $('plan').style.display='none';
   $('go').disabled=true;
   $('err').style.display='none'; $('results').style.display='none';
   $('live').innerHTML=''; $('scanmsg').textContent='Scanning '+url+' …';
   $('scanning').style.display='block';
   if(_es) _es.close();
-  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim(), authorized:'true'});
+  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim(), token_b:$('tokenb').value.trim(), cookie:$('cookie').value.trim(), read_only:$('readonly').checked?'true':'false', authorized:'true'});
   _es=new EventSource('/api/scan/stream?'+qs.toString());
   _es.onmessage=(e)=>{
     let m; try{ m=JSON.parse(e.data); }catch{ return; }
@@ -383,7 +404,7 @@ function runScan(){
   };
   _es.onerror=()=>{ finish(); if($('results').style.display!=='block' && $('err').style.display!=='block') showError('Lost connection to the scanner backend.'); };
 }
-function finish(){ if(_es){ _es.close(); _es=null; } $('scanning').style.display='none'; $('go').disabled=false; }
+function finish(){ if(_es){ _es.close(); _es=null; } $('scanning').style.display='none'; $('go').disabled=false; setTimeout(loadRuns,600); }
 function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }
 
 function render(d){
@@ -422,6 +443,7 @@ function render(d){
       +((hk.cleaned||0)<(hk.created||0) ? ' The rest need manual cleanup (all use qax* test identifiers).' : ' Nothing left behind.')
       +'</div>'
     : '';
+  $('housekeeping').innerHTML += notTestedHTML(d);
   // UI tour gallery
   const scr=d.screens||[];
   $('tour').innerHTML = scr.length
@@ -551,6 +573,77 @@ async function printReport(){
   w.document.write(buildReportHTML(d)); w.document.close();
   setTimeout(()=>{ w.focus(); w.print(); },350);
 }
+
+// ── Plan preview, read-only honesty, run history (PLAN.md Phase 1 item 7) ──────────────────────────
+function notTestedHTML(d){
+  const gaps=d.coverage_gaps||[], left=d.left_on_target||[];
+  let h='';
+  if(d.read_only) h+='<div class="hk">🔒 Read-only scan — QAX sent no write request to the target.</div>';
+  if(gaps.length){
+    const groups={};
+    gaps.forEach(g=>{ const k=g.needs||'other'; (groups[k]=groups[k]||[]).push(g); });
+    const hints={'token_b':"a second, ordinary user's token", 'auth-token':'a valid token or session cookie',
+      'valid-body':'an example valid request body', 'api-surface':"the app's OpenAPI spec (QAX found few endpoints)",
+      'write-permission':'a scan without read-only, once you may write test data'};
+    h+='<div class="sec-title" style="margin-top:18px">Not tested — '+gaps.length+' check'+(gaps.length>1?'s':'')
+      +' could not run <span style="color:var(--muted);font-weight:500">(quiet here means "unknown", not "safe")</span></div>';
+    Object.entries(groups).forEach(([k,list])=>{
+      h+='<div class="hk"><b>'+esc(list.map(g=>g.probe).join(', '))+'</b><br><span style="color:var(--muted)">To enable: '
+        +esc(hints[k]||k)+'</span></div>';
+    });
+  }
+  if(left.length){
+    h+='<div class="hk">⚠ '+left.length+' test record'+(left.length>1?'s':'')+' left on the target (see the JSON of this run).</div>';
+  }
+  return h;
+}
+
+async function previewPlan(){
+  const url=$('url').value.trim();
+  if(!url){ $('url').focus(); return; }
+  const box=$('plan'); box.style.display='block'; box.innerHTML='<div class="hint">Reading the app (read-only requests only)…</div>';
+  $('planbtn').disabled=true;
+  try{
+    const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url, token:$('token').value.trim(), token_b:$('tokenb').value.trim(),
+        cookie:$('cookie').value.trim(), read_only:$('readonly').checked})});
+    const p=await r.json();
+    if(!r.ok){ box.innerHTML='<div class="hk">⚠ '+esc(p.error||'Could not build a plan')+'</div>'; return; }
+    const c=p.checks||{}, s=p.surface||{};
+    let h='<div class="sec-title" style="margin-top:0">Scan plan — nothing has been attacked yet</div>';
+    h+='<div class="stats" style="margin:10px 0"><span class="chip"><b>'+esc(s.endpoint_count)+'</b> endpoints found</span>'
+      +'<span class="chip"><b>'+esc(c.will_run)+'</b> of '+esc(c.total)+' checks will run</span>'
+      +'<span class="chip"><b>'+((c.skipped_because_read_only||[]).length)+'</b> skipped (read-only)</span></div>';
+    h+='<div class="hint">'+esc(p.note||'')+' Surface from: '+esc(s.source||'')+'.</div>';
+    if((s.sample||[]).length) h+='<div class="hint" style="margin-top:8px"><b>Endpoints (sample):</b> <code>'+s.sample.slice(0,12).map(esc).join('</code> <code>')+'</code></div>';
+    if((c.writes_data||[]).length) h+='<div class="hint" style="margin-top:8px"><b>Checks that write data:</b> '+c.writes_data.map(esc).join(', ')
+      +(p.read_only?' — <i>skipped, because read-only is on</i>':' — <i>will create small test records</i>')+'</div>';
+    (p.missing_prerequisites||[]).forEach(m=>{ h+='<div class="hk" style="margin-top:8px">⚠ '+esc(m)+'</div>'; });
+    h+='<div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn" onclick="runScan()">Looks right — run the scan</button></div>';
+    box.innerHTML=h;
+  }catch(e){ box.innerHTML='<div class="hk">⚠ '+esc(String(e))+'</div>'; }
+  finally{ $('planbtn').disabled=false; }
+}
+
+async function loadRuns(){
+  try{
+    const r=await fetch('/api/runs'); const j=await r.json(); const runs=j.runs||[];
+    $('history').style.display=runs.length?'block':'none';
+    $('runs').innerHTML=runs.slice(0,15).map(x=>
+      '<div class="hk" style="cursor:pointer" onclick="openRun(\''+esc(x.run_id)+'\')">'
+      +'<b>'+esc(x.scanned_at||'')+'</b> · '+esc(x.url||'')
+      +' · <b>'+x.claims+'</b> confirmed · '+x.leads+' leads · '+x.not_tested+' not tested'
+      +(x.read_only?' · 🔒 read-only':'')+' <span style="color:var(--muted)">(open)</span></div>').join('');
+  }catch(e){ /* history is a convenience; never block the page */ }
+}
+async function openRun(id){
+  try{
+    const r=await fetch('/api/runs/'+encodeURIComponent(id)); if(!r.ok) return;
+    const d=await r.json(); $('genresults').style.display='none';
+    $('err').style.display='none'; render(d); window._last=d; window.scrollTo({top:0,behavior:'smooth'});
+  }catch(e){}
+}
+loadRuns();
 $('url').addEventListener('keydown',e=>{ if(e.key==='Enter') runScan(); });
 // Deep links from the homepage: /app#generate opens test generation, /app#scan the scanner.
 function _modeFromHash(){ if(location.hash==='#generate') setMode('gen'); else if(location.hash==='#scan') setMode('scan'); }
