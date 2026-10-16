@@ -604,3 +604,27 @@ def test_risk_ordered_is_stable_for_ties():
     from services.results import AppModel
     eps = [{"method": "GET", "path": f"/p{i}"} for i in range(6)]
     assert [e["path"] for e in risk_ordered(AppModel(root="/x", endpoints=eps)).endpoints] == [e["path"] for e in eps]
+
+
+# ── found on Healthchecks (A3) ────────────────────────────────────────────────────────────────────
+
+def test_jwt_flaws_is_not_applicable_for_an_opaque_api_key():
+    import requests
+    from execution.probes import jwt_flaws_probe
+    from services.results import AppModel
+    s = requests.Session()
+    s._qax_skips = []
+    m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/api/v3/checks/", "auth_required": True}])
+    assert jwt_flaws_probe(m, "http://127.0.0.1:9", session=s,
+                           auth={"token": "opaque-api-key-123", "header": "X-Api-Key", "scheme": ""}) == []
+    assert s._qax_skips[0]["kind"] == "not-applicable" and "not a JWT" in s._qax_skips[0]["reason"]
+
+
+def test_a_tiny_known_surface_is_reported_as_a_gap():
+    from services.orchestrator_service import OrchestratorService
+    from services.results import AppModel
+    tiny = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/admin"}])
+    gap = OrchestratorService._surface_gap(tiny)
+    assert gap and gap[0]["needs"] == "api-surface" and "only 1 endpoint" in gap[0]["reason"]
+    big = AppModel(root="/x", endpoints=[{"method": "GET", "path": f"/p{i}"} for i in range(5)])
+    assert OrchestratorService._surface_gap(big) == []

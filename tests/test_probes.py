@@ -1420,6 +1420,19 @@ def test_host_header_injection_quiet_with_fixed_host():
     assert host_header_injection_probe(_hhi_model(), "http://x", session=_HostSession("secure")) == []
 
 
+def test_host_header_not_reported_when_the_server_rejects_the_host():
+    """Regression (Healthchecks/Django): DisallowedHost → 400 debug page echoing the request URL is a
+    rejection, not the app trusting the Host."""
+    from execution.probes import host_header_injection_probe
+
+    class _Rejecting(_HostSession):
+        def get(self, url, headers=None, timeout=None, allow_redirects=None):
+            host = (headers or {}).get("Host", "")
+            return MagicMock(status_code=400, text=f"Invalid HTTP_HOST header. Request URL: http://{host}/admin",
+                             headers={})
+    assert host_header_injection_probe(_hhi_model(), "http://x", session=_Rejecting("vuln")) == []
+
+
 # ── XXE: external-entity file read, proven by the /etc/passwd signature ─────────
 
 def _xxe_model():

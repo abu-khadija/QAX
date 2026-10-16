@@ -96,6 +96,12 @@ def jwt_flaws_probe(model, base_url: str, *, session: requests.Session | None = 
         _skip(sess, "jwt-flaws", "no auth token — none supplied and self-registration/login failed",
               needs="auth-token")
         return out
+    if not _jwt_payload_segment(token):
+        # An opaque API key / session id is not a JWT: there is no signature or algorithm to tamper with.
+        # (Found on Healthchecks: an X-Api-Key was reported as "supply a valid token".)
+        _skip(sess, "jwt-flaws", "the credential in use is not a JWT (an opaque API key or session), so JWT "
+                                 "signature/algorithm flaws do not apply", kind="not-applicable")
+        return out
     url = f"{base}{target}"
 
     def code_with(tok):
@@ -483,6 +489,11 @@ def host_header_injection_probe(model, base_url: str, *, session: requests.Sessi
         except Exception:
             continue
         reached += 1
+        if getattr(r, "status_code", 0) >= 400:
+            # The server REJECTED the forged Host (e.g. Django DisallowedHost → 400); an error page that
+            # merely echoes the request URL is not the app trusting the Host to build links.
+            # (Found on Healthchecks: a DEBUG 400 page was reported as host-header injection.)
+            continue
         loc = str(r.headers.get("Location", ""))
         body = r.text or ""
         if marker in loc or f"//{marker}" in body or f"://{marker}" in body:

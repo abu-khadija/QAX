@@ -410,7 +410,8 @@ class OrchestratorService:
             confirmed=confirmed, coverage=coverage, rounds=rounds,
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens, legs=legs, evidence=evidence,
-            not_tested=list(getattr(probe_result, "skipped", []) or []) + ro_skips + fam_side["not_tested"],
+            not_tested=list(getattr(probe_result, "skipped", []) or []) + ro_skips + fam_side["not_tested"]
+                       + self._surface_gap(model),
             left_on_target=list(getattr(probe_result, "leftover", []) or []) + fam_side["leftover"],
             created_records=getattr(probe_result, "created_records", 0) + fam_side["created"],
             cleaned_records=getattr(probe_result, "cleaned_records", 0) + fam_side["cleaned"])
@@ -431,6 +432,22 @@ class OrchestratorService:
         return result
 
     # ── Re-verify ("reproduce 2/2", every anomaly gets a clean rerun) ──
+
+    SMALL_SURFACE = 5
+
+    @classmethod
+    def _surface_gap(cls, model) -> list[dict]:
+        """
+        Honesty (found on Healthchecks): with no spec and weak discovery QAX knew ONE endpoint, so 28 probes
+        quietly had "nothing to test" and the report read as a near-clean scan. When the known surface is that
+        small, say so as a real gap — the result covers almost nothing of the app.
+        """
+        n = len([e for e in (getattr(model, "endpoints", []) or []) if isinstance(e, dict)])
+        if n >= cls.SMALL_SURFACE:
+            return []
+        return [{"probe": "surface", "kind": "missing-prerequisite", "needs": "api-surface",
+                 "reason": f"QAX knows only {n} endpoint(s) of this app, so most probes had nothing to test — "
+                           f"this result covers very little of it"}]
 
     @staticmethod
     def _read_only_cases(tests: list, ro_skips: list, prog) -> list:
