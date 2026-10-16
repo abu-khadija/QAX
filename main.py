@@ -1134,6 +1134,10 @@ def run_dashboard_command() -> None:
     """
     Handle the 'dashboard' subcommand.
 
+    DEPRECATED (PLAN.md Phase 1 item 8): the one supported UI is `web/` (python -m web.server), which now
+    carries run history. This feedback/sessions dashboard is frozen — kept working, removed later with the
+    owner's OK.
+
     Starts the Flask web dashboard on localhost, opens it in the user's
     browser automatically, and keeps it running until Ctrl+C.
 
@@ -1939,10 +1943,14 @@ def run_ui_command() -> None:
     """
     Launch the QAX Streamlit UI on localhost:8501.
 
-    Runs: streamlit run ui/app.py with dark-theme flags and --server.port 8501.
-    The process inherits the current terminal so Ctrl-C stops it cleanly.
+    DEPRECATED (PLAN.md Phase 1 item 8): `web/` (python -m web.server) is the one supported UI. This
+    Streamlit app is frozen — kept working for now, removed later with the owner's OK. It is not part of
+    the alpha and does not carry the scan honesty surfaces (NOT TESTED, read-only, plan preview).
     """
     import subprocess
+
+    print("\n  [QAX] NOTE: the Streamlit UI is deprecated and frozen. The supported UI is `web/`:")
+    print("        ./.venv-exec/bin/python -m web.server   →   http://127.0.0.1:8900\n")
 
     ui_path = Path(__file__).parent / "ui" / "app.py"
     if not ui_path.exists():

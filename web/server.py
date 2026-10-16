@@ -51,6 +51,142 @@ def _require_api_token():
     return None
 
 
+def _all_probe_names() -> list[str]:
+    """Kebab-case names of every probe a scan can run (from the probe modules)."""
+    import inspect
+
+    import execution.probes as P
+    import execution.typed_probes as T
+    names = []
+    for mod in (P, T):
+        for n, fn in vars(mod).items():
+            if n.endswith("_probe") and not n.startswith("_") and inspect.isfunction(fn) \
+                    and fn.__module__ == mod.__name__:
+                names.append(n[:-len("_probe")].replace("_", "-"))
+    return sorted(set(names))
+
+
+def _scan_plan(url: str, auth, read_only: bool) -> dict:
+    """Preview the surface + the checks that will run. Read-only: discovers endpoints, attacks nothing."""
+    import requests
+
+    from execution.probes import MUTATING_PROBES
+    from services.live_surface import (discover_endpoints, endpoints_from_spec, fetch_openapi,
+                                        normalize_path_params)
+    from services.results import AppModel
+
+    sess = requests.Session()
+    if auth and auth.get("cookie"):
+        from execution.probes import seed_cookies
+        seed_cookies(sess, auth.get("cookie"))
+    base = url.rstrip("/")
+    spec = fetch_openapi(base, session=sess)
+    if spec:
+        eps = endpoints_from_spec(spec)
+        source = "OpenAPI/Swagger spec"
+    else:
+        eps = discover_endpoints(base, AppModel(root="", endpoints=[]), session=sess)
+        source = "discovery (no spec found)"
+    paths = sorted({normalize_path_params(str(e.get("path", ""))) for e in eps if e.get("path")})
+
+    names = _all_probe_names()
+    will_write = sorted(n for n in names if n in MUTATING_PROBES)
+    skipped_write = will_write if read_only else []
+    will_run = [n for n in names if not (read_only and n in MUTATING_PROBES)]
+
+    missing = []
+    has_token = bool(auth and (auth.get("token") or auth.get("cookie")))
+    if not has_token:
+        missing.append("No credential supplied (--token or --cookie): the authenticated probes "
+                       "(JWT, forged-token, excessive-data on protected endpoints) will be skipped.")
+    if not (auth and auth.get("token_b")):
+        missing.append("No second user (--token-b): access-control checks between two users "
+                       "(BOLA, BFLA, access-revocation) will be skipped.")
+    if len(paths) < 5:
+        missing.append(f"Only {len(paths)} endpoint(s) found — coverage will be low. "
+                       "Point QAX at the app's OpenAPI spec, or pass --repo with its source.")
+
+    return {
+        "url": url, "read_only": read_only,
+        "surface": {"source": source, "endpoint_count": len(paths), "sample": paths[:25]},
+        "checks": {"total": len(names), "will_run": len(will_run),
+                   "writes_data": will_write, "skipped_because_read_only": skipped_write},
+        "missing_prerequisites": missing,
+        "note": ("Read-only: QAX will send only GET/HEAD/OPTIONS requests." if read_only
+                 else "Full scan: QAX will create small, clearly named test records and remove what it can."),
+    }
+
+
+_RUNS_DIR = os.path.join(os.getcwd(), "output", "web_runs")
+
+
+def _save_run(payload: dict) -> str | None:
+    """Persist a web scan payload so the UI can show run history and diffs. Best-effort; never raises."""
+    try:
+        from urllib.parse import urlparse
+        os.makedirs(_RUNS_DIR, exist_ok=True)
+        host = (urlparse(payload.get("url", "")).netloc or "app").replace(":", "_").replace(".", "-")
+        rid = time.strftime("%Y%m%dT%H%M%S") + "_" + host
+        payload = dict(payload, run_id=rid, scanned_at=time.strftime("%Y-%m-%d %H:%M"))
+        with open(os.path.join(_RUNS_DIR, rid + ".json"), "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        return rid
+    except Exception:
+        return None
+
+
+@app.get("/api/runs")
+def list_runs():
+    """Run history: the most recent scans, newest first (summary only)."""
+    out = []
+    try:
+        for name in sorted(os.listdir(_RUNS_DIR), reverse=True)[:100]:
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(_RUNS_DIR, name), encoding="utf-8") as fh:
+                    p = json.load(fh)
+            except Exception:
+                continue
+            out.append({"run_id": p.get("run_id", name[:-5]), "url": p.get("url"),
+                        "scanned_at": p.get("scanned_at"), "read_only": p.get("read_only"),
+                        "claims": len(p.get("claims") or []), "leads": len(p.get("leads") or []),
+                        "not_tested": len(p.get("coverage_gaps") or []),
+                        "qax_commit": p.get("qax_commit")})
+    except FileNotFoundError:
+        pass
+    return jsonify({"runs": out})
+
+
+@app.get("/api/runs/<run_id>")
+def get_run(run_id):
+    """The full saved payload of one past scan (for review or diff)."""
+    safe = os.path.basename(str(run_id))
+    path = os.path.join(_RUNS_DIR, safe + ".json")
+    if not os.path.isfile(path):
+        return jsonify({"error": "no such run"}), 404
+    with open(path, encoding="utf-8") as fh:
+        return jsonify(json.load(fh))
+
+
+@app.post("/api/plan")
+def plan():
+    """
+    Preview what a scan WILL do before running it: the endpoints QAX can see, the checks it will run,
+    which of them write data (skipped under read-only), and the prerequisites that are missing. Sends
+    only read requests to discover the surface — it never attacks. So the operator approves before any
+    active probe runs.
+    """
+    url, repo, auth, read_only = _inputs()
+    if not url:
+        return jsonify({"error": "Please enter the URL of your running app."}), 400
+    try:
+        plan = _scan_plan(url, auth, read_only)
+    except Exception as exc:
+        return jsonify({"error": f"Could not build a plan: {exc}"}), 502
+    return jsonify(plan)
+
+
 @app.get("/")
 def index():
     """Product homepage — what QAX is, how it works, and the evidence behind it.
@@ -87,15 +223,23 @@ class _QueueProgress(ProgressReporter):
 
 
 def _inputs():
-    """Normalise url/repo/token from the request (query for GET, JSON for POST)."""
+    """Normalise url/repo/token/cookie/read_only from the request (query for GET, JSON for POST)."""
     src = request.args if request.method == "GET" else (request.get_json(force=True, silent=True) or {})
     url = str(src.get("url", "")).strip()
     if url and not url.startswith(("http://", "https://")):
         url = "http://" + url
     repo = str(src.get("repo", "")).strip() or tempfile.mkdtemp(prefix="qax_web_")
     token = str(src.get("token", "")).strip()
-    auth = {"token": token, "header": "Authorization", "scheme": "Bearer"} if token else None
-    return url, repo, auth
+    token_b = str(src.get("token_b", "")).strip()
+    cookie = str(src.get("cookie", "")).strip()
+    header = str(src.get("auth_header", "")).strip() or "Authorization"
+    scheme = src.get("auth_scheme", "Bearer")
+    scheme = "" if scheme == "" else (str(scheme).strip() or "Bearer")
+    read_only = str(src.get("read_only", "")).strip().lower() in ("1", "true", "yes", "on")
+    auth = None
+    if token or token_b or cookie:
+        auth = {"token": token, "token_b": token_b, "cookie": cookie, "header": header, "scheme": scheme}
+    return url, repo, auth, read_only
 
 
 _UNAUTHORIZED_TARGET = ("Confirm you own this app or are authorized to test it — QAX sends "
@@ -145,7 +289,7 @@ def _supply_chain_leads(repo: str) -> list:
     return out
 
 
-def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
+def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, progress=None) -> dict:
     """Run a quick scan and return the UI payload, or {'error': ...}."""
     from services import scorecard, usage
     from services.context import QAXContext
@@ -162,8 +306,11 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
     usage.reset()
     t0 = time.time()
     try:
-        result = OrchestratorService(ctx).run(repo, url, deep=False, auth=auth, tour=True,
-                                              visual_baseline=visual_baseline, progress=progress)
+        # A read-only scan must not drive the UI tour either (it can submit forms), so the orchestrator
+        # turns the tour off under read_only; passing tour=True is still honoured for a full scan.
+        result = OrchestratorService(ctx).run(repo, url, deep=False, auth=auth, tour=not read_only,
+                                              read_only=read_only, visual_baseline=visual_baseline,
+                                              progress=progress)
     except Exception as exc:
         return {"error": f"Scan failed: {exc}"}
     if result.error:
@@ -195,11 +342,17 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
             "errors": [e for e in (s.get("errors") or []) if "warning" not in str(e).lower()],
             "net_errors": s.get("net_errors") or [],
         })
-    return {
+    from core.version import run_record
+    payload = {
         "url": url,
+        "read_only": read_only,
         "claims": claims,
         "leads": leads,
         "screens": screens,
+        # Honesty parity with the CLI: a quiet result is not a clean one.
+        "not_tested": list(getattr(result, "not_tested", []) or []),
+        "coverage_gaps": list(getattr(result, "coverage_gaps", []) or []),
+        "left_on_target": list(getattr(result, "left_on_target", []) or []),
         "by_layer": rec.get("by_layer", {}),
         "coverage": result.coverage or {},
         "scorecard": {
@@ -211,17 +364,22 @@ def _run_scan(url: str, repo: str, auth, progress=None) -> dict:
             "created": getattr(result, "created_records", 0),
             "cleaned": getattr(result, "cleaned_records", 0),
         },
+        **run_record(quick=True, read_only=read_only, tour=not read_only,
+                     token_supplied=bool(auth and auth.get("token")),
+                     cookie_supplied=bool(auth and auth.get("cookie"))),
     }
+    _save_run(payload)
+    return payload
 
 
 @app.post("/api/scan")
 def scan():
-    url, repo, auth = _inputs()
+    url, repo, auth, read_only = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
         return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
-    payload = _run_scan(url, repo, auth)
+    payload = _run_scan(url, repo, auth, read_only=read_only)
     return (jsonify(payload), 502) if payload.get("error") else jsonify(payload)
 
 
@@ -314,7 +472,7 @@ def export():
 
 @app.get("/api/scan/stream")
 def scan_stream():
-    url, repo, auth = _inputs()
+    url, repo, auth, read_only = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
@@ -323,7 +481,7 @@ def scan_stream():
 
     def work():
         try:
-            payload = _run_scan(url, repo, auth, progress=_QueueProgress(q))
+            payload = _run_scan(url, repo, auth, read_only=read_only, progress=_QueueProgress(q))
             q.put({"type": "error", "error": payload["error"]} if payload.get("error")
                   else {"type": "result", "payload": payload})
         except Exception as exc:
