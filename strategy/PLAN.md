@@ -292,8 +292,8 @@ These references support the security and operating principles; review current g
 | Mutation coverage | Done with qualification | Full sweep detected a lost CONFIRMED finding for 39/40 disabled probes; forge-jwt separately verified through source lane |
 | Read-only | Done | Zero added write requests on golden target; prior check caught 74 leaked POSTs |
 | Quick-scan AI boundary | Done | Local listener saw zero provider calls after fix, including with API key set |
-| Real applications | Partial | Five with zero confirmed FPs after fixes; Healthchecks sixth found host-header FP + spec-less discovery gap. 2026-10-17: docs-page discovery landed — Healthchecks went 1→36 grounded endpoints, 0 FP |
-| Spec-less discovery | Improved 2026-10-17 | `paths_from_pages` reads the app's own home/docs pages for listed endpoints; Healthchecks 1→36. Next: more spec-less apps in the corpus |
+| Real applications | **10 of 10 (2026-10-17)** | Apps 1–5 as before; 6–10 (Healthchecks, microblog-api, CTFd, linkding, PocketBase) in `strategy/evidence/PHASE1_CORPUS_2026-10-17.md`: 8 confirmed findings in the final scans, 8 true positives (each re-checked by hand), 0 FP. 4 false positives were produced on the way (one a P1) and fixed with regression tests. n = 10, local, one author: not a general rate |
+| Spec-less discovery | Done 2026-10-17 | Reads the app's docs pages; carries the operator's credentials; trailing-slash aware; learns POST schemas, item routes, DELETE and auth-required from the app's own OPTIONS/list answers; `--spec` and `--endpoints FILE` for what cannot be found; spec-less "not applicable" now carries a blind-spot gap. Healthchecks 1→36, linkding 6→18, microblog 2→27, CTFd 9→154 |
 | Jira | Partial / exercised | Two bugs filed live to founder’s trial site |
 | Xray | Not started | Never tested |
 | verify-fixes | Exercised (read-only) | 2026-10-17: run against the 2 real trial tickets (SCRUM-5/6) as a read-only dry run — 1 STILL REPRODUCES, 1 no-longer-reproduces flagged "build unverified" and NOT auto-closed. No live write (needs owner's OK) |
@@ -301,14 +301,24 @@ These references support the security and operating principles; review current g
 | Scorecard FP target | Target only | Less-than-15% is internal and unmeasured; matching still needs stricter semantics |
 | SSRF boundary | Partial by deployment context | Current egress boundary stays on target origin; hosted-grade DNS, private-range, metadata, and connect-time redirect controls absent |
 | Product delivery model | Confirmed current state | Self-hosted CLI and local web UI; single-tenant; .env secrets; no hosted mode, tenants, or billing |
-| Web UI (one surface) | Improved 2026-10-17 | `web/` is the one supported UI; the Streamlit UI and the feedback dashboard were REMOVED on 2026-10-17 with the owner's OK (commits 80831af and the dashboard commit after it). Added: /api/plan (preview surface + checks + missing prereqs before running), run history (/api/runs, /api/runs/{id}), and read-only + NOT TESTED/left-on-target parity in the web payload |
-| Current engineering sequence | In progress | Spec-less discovery done (docs-page reading); cookie-session auth: mechanism done + unit/live-tested (read-only), full CSRF-protected writes from a cookie still pending; next: 10-app corpus, 429/WAF, UI plan preview |
+| Web UI (one surface) | Done 2026-10-17 | `web/` is the only UI (Streamlit and the feedback dashboard were removed with the owner's OK). Plan preview, Past scans, read-only (on by default), spec location, second user, session cookie; Not tested / left-on-target shown in results. Verified in a real browser |
+| Rate limits / WAF | Done 2026-10-17 | `core/throttle.py`: 429 → wait `Retry-After` (capped), retry, pace; budget (120 s wait / 40 throttled answers) → the scan stops and lists the gap; WAF block pages reported, never evaded. Gate lane: a 60 req/2 s limiter — with the layer 35 of 36 P1/P2 survive, without it 13 (23 silent misses) |
+| Cleanup honesty | Done 2026-10-17 | Every write is tracked (probes, coverage tests, family sweep) and QAX's "left on the target" was checked against the app's database on microblog-api and linkding: equal. DELETE 404 = already gone; DELETE route learned from the server's OPTIONS when no spec lists it |
+| Privacy: AI calls | Done 2026-10-17 | A quick scan makes zero calls to an AI provider even with a key set (a Critic leak was found and fixed; the gate counts requests to a local listener) |
+| Release hygiene | Partly done | Version 0.1.0 + `--version`, run record in every scan output, CHANGELOG, SECURITY.md, QUICKSTART verified in a clean venv (27 s to 44 findings). LICENSE intentionally not added (D12/B9: with counsel) |
+| Current engineering sequence | Phase 1 engineering complete | Discovery, cookie+CSRF (`--cookie`, `--header`), 429/WAF throttle layer, class-aware truth matching, run records + versioning, plan preview/run history UI, Quickstart, 10-app corpus. Left in Phase 1: the exit-criteria items that need people (a new user completes the Quickstart unaided) and a refreshed mutation sweep |
 | Phase 0 demos | Ready | Target window 2026-10-17 to 2026-10-23; show to 2–3 QA/dev practitioners |
 | Self-hosted private alpha | Planned | 2026-11-16 to 2026-12-31, gated on Phase 1 |
 | Company design-partner beta | Blocked | Wait for founder’s IP/legal review, expected early 2027 |
 | Hosted-mode gate | Deferred | Start only after beta evidence justifies investment |
 | Minimum hosted SaaS | Not started | Build only after hosted security gate passes |
 | Public launch and announcement | Target only | Provisional May–July 2027; move if any exit criterion is unmet |
+
+### Phase 1 log (2026-10-17)
+- **Dogfooding is the test that finds the real bugs.** Following the Quickstart literally on five apps surfaced more than 25 defects in QAX that 800 unit tests and the golden gate had not (four false positives among them, one a P1). Unit tests passed throughout; the fixes were verified against the apps' own databases.
+- **A deliberate rule, learned the hard way:** read the gate result BEFORE committing. One commit this day was pushed with a failing gate (BOLA/persistence missed on the golden target) because the commands were chained; it was repaired in the next commit.
+- **Exit criteria still open in Phase 1:** (a) a new user finishes the Quickstart unaided (needs people: Phase 0 demos and the alpha); (b) login-form authentication is not supported (documented); (c) cookie mode has one identity only, so BFLA/BOLA are NOT TESTED there (documented); (d) the mutation sweep is being re-run on the current commit.
+- **Idea logged, not built:** `--examples FILE` of valid request bodies, to unblock apps whose creates need domain data QAX cannot guess (CTFd).
 
 ### Decisions recorded
 
