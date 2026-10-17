@@ -2045,6 +2045,20 @@ def scan_needs_key(quick: bool, repo: str | None) -> bool:
     return (not quick) or bool(repo)
 
 
+def _load_endpoints_file(path: str | None) -> list:
+    """Parse the --endpoints file; a missing/unreadable file is reported and ignored (the scan still runs)."""
+    if not path:
+        return []
+    try:
+        from services.live_surface import parse_endpoint_lines
+        eps = parse_endpoint_lines(Path(path).read_text(encoding="utf-8"))
+        print(f"  (using {len(eps)} endpoint(s) from {path})\n")
+        return eps
+    except OSError as exc:
+        print(f"  ! cannot read --endpoints file {path}: {exc} — continuing without it\n")
+        return []
+
+
 def run_scan_command() -> None:
     """
     Handle the 'scan' subcommand — a deep, autonomous security + QA scan.
@@ -2109,6 +2123,10 @@ def run_scan_command() -> None:
     parser.add_argument("--spec", default=None, metavar="URL|PATH|FILE",
                         help="Where the app's OpenAPI/Swagger document is, when it is not at a standard path "
                              "(a URL, a path on the app like /apispec.json, or a local file).")
+    parser.add_argument("--endpoints", default=None, metavar="FILE",
+                        help="A hand-written endpoint list for apps with no OpenAPI spec whose routes cannot be "
+                             "guessed. One per line: `GET /api/things`, `POST /api/things title!,body`. "
+                             "See QUICKSTART.md.")
     parser.add_argument("--cookie", default=None, metavar="\"name=value; ...\"",
                         help="Authenticate with a session cookie instead of a token (copy it from your "
                              "browser's DevTools). Carried on every request. Best with --read-only; a full "
@@ -2191,6 +2209,7 @@ def run_scan_command() -> None:
         reverify=max(0, int(args.reverify or 0)),
         read_only=args.read_only,
         spec_url=args.spec,
+        extra_endpoints=_load_endpoints_file(args.endpoints),
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

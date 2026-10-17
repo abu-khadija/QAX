@@ -67,6 +67,7 @@ class OrchestratorService:
         reverify: int = 0,
         read_only: bool = False,
         spec_url: str | None = None,
+        extra_endpoints: list | None = None,
     ) -> OrchestratorResult:
         """
         Run the autonomous pipeline over a repo against a live app.
@@ -153,6 +154,12 @@ class OrchestratorService:
                     prog.emit("orchestrate", "info",
                               f"no OpenAPI spec — discovered {len(disc)} live endpoint(s) by probing "
                               "common paths")
+            if extra_endpoints:          # the operator's own endpoint list (--endpoints): spec-less apps
+                from services.live_surface import apply_supplied_endpoints
+                model.endpoints = apply_supplied_endpoints(base_url, extra_endpoints,
+                                                           list(getattr(model, "endpoints", []) or []))
+                spec_less = False        # the operator told us the surface: "not applicable" is meaningful again
+                prog.emit("orchestrate", "info", f"added {len(extra_endpoints)} endpoint(s) from the supplied list")
             # Canonicalise path params to {name} so the probes recognise them whatever
             # framework spelled them (Flask <id>, Express/Gin/Rails :id, …).
             from services.live_surface import normalize_path_params

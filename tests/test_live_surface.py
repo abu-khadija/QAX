@@ -388,3 +388,21 @@ def test_slash_and_bare_twins_collapse_to_the_slash_form():
         def options(self, *a, **k): return MagicMock(status_code=405, headers={})
     got = [d["path"] for d in ls.discover_endpoints("http://x", AppModel(root="/x", endpoints=[]), session=S())]
     assert "/api/bookmarks/" in got and "/api/bookmarks" not in got
+
+
+def test_endpoint_list_parser_reads_methods_paths_fields_and_required_marks():
+    from services.live_surface import parse_endpoint_lines
+    eps = parse_endpoint_lines("""
+        # notes
+        GET    /api/collections/notes/records
+        post   /api/collections/notes/records   title!,body     # create
+        DELETE /api/collections/notes/records/:id
+        FETCH  /nope
+        GET    relative/path
+    """)
+    by = {(e["method"], e["path"]): e for e in eps}
+    assert set(by) == {("GET", "/api/collections/notes/records"), ("POST", "/api/collections/notes/records"),
+                       ("DELETE", "/api/collections/notes/records/{id}")}           # :id normalised, junk skipped
+    post = by[("POST", "/api/collections/notes/records")]
+    assert post["request_fields"] == ["title", "body"] and post["required_fields"] == ["title"]
+    assert all(e["source"] == "supplied" for e in eps)

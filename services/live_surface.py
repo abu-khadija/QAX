@@ -63,6 +63,58 @@ _SPEC_PATHS = [
 ]
 
 
+def parse_endpoint_lines(text: str) -> list[dict]:
+    """
+    Parse a hand-written endpoint list (the --endpoints file) for apps that serve no spec and whose routes
+    cannot be guessed (PocketBase: /api/collections/<name>/records). One endpoint per line:
+
+        GET    /api/collections/notes/records
+        POST   /api/collections/notes/records   title,body
+        DELETE /api/collections/notes/records/{id}
+
+    The optional last column lists request fields (comma-separated; append ! to mark one required: title!).
+    Blank lines and `#` comments are ignored; bad lines are skipped. Never raises.
+    """
+    out: list[dict] = []
+    for raw in str(text or "").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        parts = line.split()
+        if len(parts) < 2 or parts[0].upper() not in ("GET", "POST", "PUT", "PATCH", "DELETE") or not parts[1].startswith("/"):
+            continue
+        fields = [f for f in (parts[2].split(",") if len(parts) > 2 else []) if f.strip()]
+        req = [f.rstrip("!") for f in fields if f.endswith("!")]
+        names = [f.rstrip("!") for f in fields]
+        out.append({"method": parts[0].upper(), "path": normalize_path_params(parts[1]), "auth_required": True,
+                    "request_fields": names, "required_fields": req, "request_field_types": {},
+                    "response_fields": [], "source": "supplied"})
+    return out
+
+
+def apply_supplied_endpoints(base_url: str, supplied: list[dict], existing: list[dict], sess=None) -> list[dict]:
+    """
+    Merge the operator's endpoint list into the model: skip ones already known, and mark each GET whether it needs
+    a credential (the same GET without one answers 401/403) — the rest default to requiring one.
+    """
+    sess = sess or requests.Session()
+    base = base_url.rstrip("/")
+    have = {(str(e.get("method", "")).upper(), normalize_path_params(str(e.get("path", "")))) for e in existing}
+    anon = requests.Session()
+    out = list(existing)
+    for e in supplied:
+        key = (e["method"], e["path"])
+        if key in have:
+            continue
+        if e["method"] == "GET" and "{" not in e["path"]:
+            try:
+                r = anon.get(base + e["path"], timeout=10, allow_redirects=False)
+                e["auth_required"] = r.status_code in (401, 403)
+            except Exception:
+                pass
+        out.append(e)
+        have.add(key)
+    return out
+
+
 def authed_session(auth: dict | None = None) -> requests.Session:
     """
     A requests.Session that carries the operator's credentials (token header and/or cookie), for the READ-ONLY
