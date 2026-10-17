@@ -57,6 +57,9 @@ _SPEC_PATHS = [
     "/swagger.v1.json",
     # apifairy / APIFlask / Flask-Smorest serve theirs here (found scanning microblog-api, 2026-10-17).
     "/apispec.json", "/api/apispec.json", "/api/swagger.json", "/api/openapi.json",
+    # flask-restx (CTFd) serves it under the API prefix (found scanning CTFd, 2026-10-17).
+    "/api/v1/swagger.json", "/api/v1/openapi.json", "/api/v2/swagger.json", "/api/v2/openapi.json",
+    "/api/v3/openapi.json", "/api/v1/docs/openapi.json",
 ]
 
 

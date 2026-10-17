@@ -1504,6 +1504,20 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
     return _auth_token(sess, base, recipe, model, identity)
 
 
+def _declared_value(endpoint: dict | None, field: str, unique: str):
+    """The value the SPEC says this field takes (boolean -> True, integer -> 1, array -> [], enum -> first
+    value, date-time -> ISO...), or None when the spec says nothing. Names are a guess; the spec is not.
+    (CTFd: draft/hidden/auth_required are booleans; sending the string "test" got HTTP 400, so BOLA and
+    persistence silently could not run.)"""
+    info = ((endpoint or {}).get("request_field_types") or {}).get(field)
+    if not isinstance(info, dict) or not (info.get("type") or info.get("enum")):
+        return None
+    if info.get("type") == "string" and not info.get("enum") and info.get("format") not in ("date", "date-time", "email", "uri", "url"):
+        return None            # a plain string: let the caller's marker / name heuristics decide
+    from execution.typed_probes import _typed_value
+    return _typed_value(field, info, unique)
+
+
 def _plausible_value(field: str, unique: str):
     """A value an API will ACCEPT for a field, judged by its name (email, url, phone, date) — or None when
     the name says nothing. A flat "test" for every field made strict apps reject the probe's own create
@@ -1576,6 +1590,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
 
     _CONTENT_KW = ("secret", "content", "body", "data", "value", "text", "note", "description", "payload")
     attempted = created_ok = readable = compared = 0
+    create_codes: list[int] = []
     for post, ge, prefix, param, key_field, pf in pairs[:limit]:
         key = f"qaxbola{uuid.uuid4().hex[:10]}"
         marker = f"qaxmarker{uuid.uuid4().hex[:12]}"
@@ -1588,6 +1603,8 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
                 body[f] = marker
             elif any(k in lf for k in _SECRET_KW):
                 body[f] = "Secret123!"
+            elif _declared_value(post, f, key) is not None:
+                body[f] = _declared_value(post, f, key)   # what the spec says this field is
             elif any(k in lf for k in ("age", "count", "number", "qty")):
                 body[f] = 1
             elif _plausible_value(f, key) is not None:
@@ -1607,6 +1624,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         try:
             cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=auth_a, timeout=15)
             if cr.status_code >= 400:
+                create_codes.append(cr.status_code)
                 continue
             created_ok += 1
             _record_created(sess, prefix, body, auth_a)
@@ -1657,9 +1675,17 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
             _skip(sess, "bola", "every candidate resource has only a key field — there is no private content "
                                 "for a second user to leak", kind="not-applicable")
         elif not created_ok:
-            _skip(sess, "bola", f"could not exercise it: user A's create request was rejected or failed on "
-                                f"all {attempted} candidate endpoint(s), so there was no object to attack",
-                  needs="valid-body")
+            forbidden = create_codes and all(c in (401, 403) for c in create_codes)
+            if forbidden:
+                _skip(sess, "bola", f"user A may not create objects on any of the {attempted} candidate "
+                                    f"endpoint(s) (HTTP {sorted(set(create_codes))}) — creation needs a more "
+                                    f"privileged account. Supply an admin/owner token as --token (user A) to "
+                                    f"test whether an ordinary --token-b user can reach what A creates",
+                      needs="privileged-token")
+            else:
+                _skip(sess, "bola", f"could not exercise it: user A's create request was rejected "
+                                    f"(HTTP {sorted(set(create_codes)) or 'error'}) on all {attempted} candidate "
+                                    f"endpoint(s), so there was no object to attack", needs="valid-body")
         elif not readable:
             _skip(sess, "bola", "user A created objects but could not read its own back (the control), so "
                                 "user B's access could not be compared")
@@ -2786,6 +2812,8 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
                 body[f] = "2020-01-01T00:00:00"
             elif any(k in lf for k in _SERVER_OWNED):
                 body[f] = f"qax{uuid.uuid4().hex[:8]}"   # satisfy it, but don't track
+            elif _declared_value(post, f, key) is not None:
+                body[f] = _declared_value(post, f, key)  # spec-declared type (boolean/int/array/enum/date)
             elif _plausible_value(f, key) is not None:
                 body[f] = _plausible_value(f, key)       # valid email/url the API will accept; not tracked
             else:
@@ -3311,6 +3339,16 @@ def _cmd_candidates(model):
     return out
 
 
+def _strip_echoed_payload(text: str, token: str) -> str:
+    """
+    Remove every place the response merely ECHOES our payload (`echo <token>`, in any escaping) so only
+    genuine command OUTPUT is left. A shell that ran `echo X` prints X on its own; an app that reflects its
+    input (an error page, a debug traceback, a validation message) prints `echo X`. Without this the probe
+    reported RCE on CTFd, whose Werkzeug debug page echoed the submitted value (a P1 false positive).
+    """
+    return re.sub(r"echo(?:%20|\+|&nbsp;|&#32;|\\u0020|\s)*" + re.escape(token), "", text, flags=re.I)
+
+
 def command_injection_probe(model, base_url: str, *, session: requests.Session | None = None,
                             auth: dict | None = None) -> list[ProbeFinding]:
     """
@@ -3372,7 +3410,7 @@ def command_injection_probe(model, base_url: str, *, session: requests.Session |
         for payload in (f"{benign};echo {token}", f"{benign}&&echo {token}", f"{benign}|echo {token}",
                         f"{benign}`echo {token}`", f"{benign}$(echo {token})"):
             r = send(e, method, param, where, payload)
-            if r is not None and token in (r.text or "") and token not in base_body:
+            if r is not None and token in _strip_echoed_payload(r.text or "", token) and token not in base_body:
                 hit = ("output", payload, r.status_code)
                 break
         # 2) time-based fallback: a sleep that slows the response proves blind execution.

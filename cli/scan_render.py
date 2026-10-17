@@ -84,6 +84,8 @@ _NEEDS_HINT = {
     "auth-token": "supply a valid token with --token (QAX could not self-register or log in)",
     "valid-body": "QAX could not build a request this app accepts — an example valid request body "
                   "for the create endpoints would unblock it",
+    "privileged-token": "this user cannot create the objects to test (HTTP 403) — supply an admin/owner token as "
+                        "--token (user A) and an ordinary user's as --token-b",
     "api-surface": "the app serves no OpenAPI/Swagger document QAX could find — point QAX at it, or give it "
                    "the source with --repo, so it can see the real endpoints",
     "write-permission": "this was a --read-only scan; re-run without --read-only once you may write "

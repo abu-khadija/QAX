@@ -702,3 +702,44 @@ def test_bola_uses_the_server_generated_id_and_a_valid_email():
     out = bola_probe(m, "http://t", session=s, auth={"token": "A", "token_b": "B"})
     assert out == []                                          # B is blocked (404): safe, and it WAS exercised
     assert not [x for x in s._qax_skips if x["probe"] == "bola" and x["kind"] == "missing-prerequisite"]
+
+
+def test_command_injection_ignores_a_reflected_payload_but_catches_real_output():
+    """Regression (CTFd, P1 false positive): an error page that echoes the submitted `;echo TOKEN` is
+    reflection, not execution. Real execution prints the token WITHOUT the 'echo'."""
+    import requests
+    from unittest.mock import MagicMock
+    from execution.probes import command_injection_probe, _strip_echoed_payload
+    from services.results import AppModel
+
+    tok = "qaxcmdABC"
+    assert tok not in _strip_echoed_payload(f"INSERT ... VALUES ('127.0.0.1;echo {tok}')", tok)
+    assert tok not in _strip_echoed_payload(f"value=127.0.0.1;echo%20{tok}", tok)
+    assert tok in _strip_echoed_payload(f"PING 127.0.0.1\n{tok}\n", tok)
+
+    class Reflecting(requests.Session):                    # debug page that echoes the input back
+        def request(self, method, url, json=None, **k):
+            return MagicMock(status_code=500, text=f"IntegrityError for ip={(json or {}).get('ip')}")
+    class Executing(requests.Session):                     # a vulnerable endpoint: runs the echo
+        def request(self, method, url, json=None, **k):
+            v = (json or {}).get("ip", "")
+            import re
+            out = [m for m in re.findall(r"echo\s+(\S+)", v)]
+            return MagicMock(status_code=200, text="PING ok\n" + "\n".join(out))
+    m = AppModel(root="/x", endpoints=[{"method": "POST", "path": "/api/x", "request_fields": ["ip"]}])
+    for cls, expected in ((Reflecting, 0), (Executing, 1)):
+        sess = cls(); sess._qax_skips = []
+        assert len(command_injection_probe(m, "http://127.0.0.1:9", session=sess)) == expected, cls.__name__
+
+
+def test_declared_field_types_beat_name_guessing():
+    from execution.probes import _declared_value
+    ep = {"request_field_types": {"draft": {"type": "boolean"}, "count": {"type": "integer"},
+                                  "tags": {"type": "array"}, "kind": {"type": "string", "enum": ["a", "b"]},
+                                  "title": {"type": "string"}, "when": {"type": "string", "format": "date-time"}}}
+    assert _declared_value(ep, "draft", "u") is True
+    assert _declared_value(ep, "count", "u") == 1 and _declared_value(ep, "tags", "u") == []
+    assert _declared_value(ep, "kind", "u") == "a"
+    assert _declared_value(ep, "when", "u").startswith("2020-")
+    assert _declared_value(ep, "title", "u") is None            # plain string: left to the caller's marker
+    assert _declared_value({}, "draft", "u") is None and _declared_value(None, "x", "u") is None

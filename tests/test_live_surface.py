@@ -269,3 +269,9 @@ def test_read_only_fields_are_not_offered_as_request_fields():
     e = endpoints_from_spec(spec)[0]
     assert e["request_fields"] == ["username", "password"]
     assert e["request_field_types"]["id"]["readOnly"] is True      # kept for the probes that need to know
+
+
+def test_spec_paths_cover_versioned_api_prefixes():
+    from services.live_surface import _SPEC_PATHS
+    for p in ("/apispec.json", "/api/v1/swagger.json", "/api/v1/openapi.json", "/swagger.v1.json"):
+        assert p in _SPEC_PATHS
