@@ -32,3 +32,32 @@ def test_run_record_has_version_commit_and_no_secrets():
     assert rec["qax_version"] == __version__ and "options" in rec
     assert rec["options"] == {"read_only": True, "token_supplied": True}
     assert rec["qax_commit"] is None or len(rec["qax_commit"]) >= 7
+
+
+def test_cli_scan_without_credentials_still_writes_the_out_file(tmp_path):
+    """Regression: `parse_headers` was imported inside `if <credentials>:` and used after it, so a scan with no token
+    could not write --out (and `qax demo` reported 'scan failed'). Runs the REAL command line."""
+    import json
+    import socket
+    import subprocess
+    import sys
+    import threading
+    import wsgiref.simple_server as ws
+    from pathlib import Path
+
+    def app(environ, start_response):
+        start_response("200 OK", [("Content-Type", "text/html")]); return [b"<html>hi</html>"]
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    srv = ws.make_server("127.0.0.1", port, app)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    out = tmp_path / "scan.json"
+    try:
+        r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "main.py"), "scan",
+                            "--url", f"http://127.0.0.1:{port}", "--quick", "--authorized", "--read-only",
+                            "--out", str(out)], capture_output=True, text=True, timeout=120)
+    finally:
+        srv.shutdown()
+    assert out.exists(), r.stdout[-600:] + r.stderr[-600:]
+    d = json.loads(out.read_text())
+    assert d["qax_version"] and d["options"]["token_supplied"] is False and d["options"]["read_only"] is True

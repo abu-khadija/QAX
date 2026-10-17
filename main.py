@@ -2213,8 +2213,8 @@ def run_scan_command() -> None:
     _usage.track()
     _usage.reset()
     _auth = None
+    from core.session_auth import parse_headers      # used below (--out run record) even with no credentials
     if args.token or args.token_b or args.cookie or args.header:
-        from core.session_auth import parse_headers
         _auth = {"token": args.token, "token_b": args.token_b,
                  "header": args.auth_header, "scheme": args.auth_scheme, "cookie": args.cookie,
                  "headers": parse_headers(args.header)}

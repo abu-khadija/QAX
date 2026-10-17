@@ -140,6 +140,36 @@ def _source_lane(base_url: str):
     return ProbeService(QAXContext.from_env()).run(model, base_url)
 
 
+def _cli_end_to_end() -> list[tuple[str, bool, str]]:
+    """
+    The gate drives the engine in-process; users drive the COMMAND LINE. A bug between the two (an import that was only
+    bound when credentials were passed) broke `qax demo` and every credential-less `scan --out` while all 800 tests and
+    the gate stayed green. So run the real commands: `main.py demo` and a credential-less `main.py scan --out`.
+    """
+    import json as _json
+    import subprocess
+    import tempfile
+    main_py = str(Path(__file__).resolve().parent.parent / "main.py")
+    demo = subprocess.run([sys.executable, main_py, "demo"], capture_output=True, text=True, timeout=300)
+    ok_demo = demo.returncode == 0 and "first confirmed findings" in demo.stdout
+    port = _free_port()
+    proc = _boot(port, secure=False)
+    out = os.path.join(tempfile.mkdtemp(prefix="qax_cli_"), "scan.json")
+    try:
+        r = subprocess.run([sys.executable, main_py, "scan", "--url", f"http://127.0.0.1:{port}", "--quick",
+                            "--authorized", "--out", out], capture_output=True, text=True, timeout=300)
+    finally:
+        proc.terminate()
+    wrote = os.path.exists(out)
+    rec = _json.load(open(out)) if wrote else {}
+    return [
+        ("CLI: `main.py demo` runs end to end", ok_demo, f"rc={demo.returncode}, tail={demo.stdout.strip()[-60:]!r}"),
+        ("CLI: a credential-less `scan --out` writes a complete record",
+         r.returncode == 0 and wrote and bool(rec.get("qax_version")) and bool(rec.get("confirmed")),
+         f"rc={r.returncode}, file={'yes' if wrote else 'NO'}, confirmed={len(rec.get('confirmed') or [])}"),
+    ]
+
+
 def _rate_limited_lane() -> list[tuple[str, bool, str]]:
     """
     PLAN.md Phase 1 item 5: against a target that answers HTTP 429 (60 requests / 2 s, Retry-After: 1) a scan must
@@ -288,6 +318,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
         src_res = _source_lane(f"http://127.0.0.1:{port}")
         ro_checks = _read_only_check(f"http://127.0.0.1:{port}")
         rl_checks = _rate_limited_lane()
+        cli_checks = _cli_end_to_end()
         ai_check = _no_ai_call_check(f"http://127.0.0.1:{port}")
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
@@ -324,6 +355,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     typed_missing = sorted(_TYPED_PROBES - probes)
     checks.extend(ro_checks)
     checks.extend(rl_checks)
+    checks.extend(cli_checks)
     checks.append(ai_check)
     forge_hit = [f for f in getattr(src_res, "exploited", []) if f.probe == "forge-jwt"]
     checks.append(("source lane: forge-jwt proves the forgery with the leaked secret", bool(forge_hit),
