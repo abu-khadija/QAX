@@ -7,6 +7,8 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- `--examples FILE`: valid request bodies for create endpoints QAX cannot build itself (`{{unique}}` per request).
+- `--header "Name: value"` (repeatable): static headers on every request, e.g. a CSRF nonce for a cookie session.
 - `--spec` (OpenAPI document in an unusual place), `--endpoints FILE` (a hand-written endpoint list for apps with no
   spec), `--cookie` (session-cookie authentication, read-only scans).
 - Spec-less discovery: reads the app's own docs pages, carries your credentials, understands trailing slashes, and
@@ -18,6 +20,10 @@ Every scan written with `--out` records the exact version and commit that produc
   holds; a 404 on delete means already gone.
 
 ### Fixed
+- A delete is now VERIFIED (the record is read back): a server that answers 200 without deleting (CTFd, when the
+  request lacks a JSON content-type) was reported as cleaned. Creations whose id is under `data` are tracked too.
+- Two more false positives found on CTFd: a duplicate-key error read as SQL injection, and an anonymous test
+  authenticated by the operator's cookie read as a missing auth check.
 - Four false positives found by scanning real apps: Host-header on a rejected request, a `has_password: true` flag
   reported as a credential, a public post reported as an IDOR, and **a P1 "command injection" that was a debug page
   echoing the input**.

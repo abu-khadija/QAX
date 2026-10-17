@@ -146,7 +146,16 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
   token-based checks (BFLA, BOLA, JWT, forged-token) also carry your cookie, so those are listed as NOT TESTED.
   Use `--token` / `--token-b` where the app supports API tokens.
 - Endpoints whose create calls need **valid domain data** QAX cannot guess (a foreign key, "already exists") are
-  listed as NOT TESTED; a way to supply example bodies is planned.
+  listed as NOT TESTED. Give QAX one valid body per create endpoint and it will use it:
+
+  ```bash
+  cat > examples.json <<'EOF'
+  {"POST /api/v1/pages": {"title": "QAX page {{unique}}", "route": "qax-{{unique}}", "content": "hello",
+                          "format": "markdown", "link_target": "_blank"}}
+  EOF
+  python main.py scan ... --examples examples.json
+  ```
+  `{{unique}}` is replaced by a fresh value for every request (use it for fields the app requires to be unique).
 - Measured on ten open-source apps run locally; this is not a general accuracy figure.
 - The scan sends many requests in a short time (hundreds on a small app). Tell whoever runs the staging
   environment before you scan, and expect rate limits on some apps.

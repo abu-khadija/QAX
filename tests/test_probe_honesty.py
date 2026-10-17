@@ -752,3 +752,33 @@ def test_key_candidates_order_the_server_id_and_the_body_key_by_the_route_param(
     assert _key_candidates("slug", "my-slug", "7") == ["my-slug", "7"]
     assert _key_candidates("id", None, None) == []
     assert _route_key_field("slug", ["title", "slug"]) == "slug" and _route_key_field("id", ["text"]) is None
+
+
+def test_a_duplicate_key_error_is_not_sql_injection():
+    """Regression (CTFd): re-sending a body with the same unique value raised IntegrityError (a 5xx page with
+    'sqlalchemy' in it) and was reported as SQL injection. The benign request must still succeed after the payload."""
+    from execution.probes import _detect_injection
+
+    def duplicate_key_app():
+        seen = set()
+        def send(value):
+            if value in seen or any(value == "qaxprobe1" and "qaxprobe1" in seen for _ in [0]):
+                return 500, "sqlalchemy.exc.IntegrityError: UNIQUE constraint failed: pages.route"
+            seen.add(value)
+            return 200, "{}"
+        return send
+
+    class Real:
+        def __call__(self, v):
+            q = "'" in v or '"' in v
+            return (500, "sqlite3.OperationalError: unrecognized token") if q else (200, "{}")
+    assert _detect_injection(duplicate_key_app(), method="POST", path="/p", where="body 'title'") is None
+    found = _detect_injection(Real(), method="POST", path="/p", where="body 'title'")
+    assert found is not None and found.probe == "sqli"                    # a real injection is still caught
+
+
+def test_fresh_unique_values_per_request_in_the_fuzz_body():
+    from execution.probes import _example_body
+    ep = {"example_body": {"route": "r-{{unique}}", "title": "T"}}
+    a, b = _example_body(ep), _example_body(ep)
+    assert a["route"] != b["route"] and a["title"] == "T" and "{{" not in a["route"]

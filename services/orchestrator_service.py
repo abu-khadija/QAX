@@ -68,6 +68,7 @@ class OrchestratorService:
         read_only: bool = False,
         spec_url: str | None = None,
         extra_endpoints: list | None = None,
+        examples: dict | None = None,
     ) -> OrchestratorResult:
         """
         Run the autonomous pipeline over a repo against a live app.
@@ -160,6 +161,10 @@ class OrchestratorService:
                                                            list(getattr(model, "endpoints", []) or []))
                 spec_less = False        # the operator told us the surface: "not applicable" is meaningful again
                 prog.emit("orchestrate", "info", f"added {len(extra_endpoints)} endpoint(s) from the supplied list")
+            if examples:                 # --examples: valid bodies the operator supplied (domain data QAX cannot guess)
+                from services.live_surface import apply_examples
+                model.endpoints = apply_examples(list(getattr(model, "endpoints", []) or []), examples)
+                prog.emit("orchestrate", "info", f"using {len(examples)} supplied example body(ies)")
             # Canonicalise path params to {name} so the probes recognise them whatever
             # framework spelled them (Flask <id>, Express/Gin/Rails :id, …).
             from services.live_surface import normalize_path_params

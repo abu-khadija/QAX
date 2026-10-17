@@ -1367,11 +1367,9 @@ def track_writes(sess):
                 # A 2xx that merely echoes an id is a creation only for POST: a PUT/PATCH updates an
                 # EXISTING resource (found on microblog-api: PUT /api/me was reported as 'left on the target').
                 if not created and m == "POST":
-                    try:
-                        j = r.json()
-                        created = isinstance(j, dict) and any(k in j for k in ("id", "uuid", "_id"))
-                    except Exception:
-                        created = False
+                    # An id in the body, top-level OR under "data" (CTFd answers 200 {"success": true, "data": {"id": 7}};
+                    # 24 pages + an award it created in one scan went unreported before this).
+                    created = _response_id(r) is not None
                 if created:
                     body = kw.get("json") if isinstance(kw.get("json"), dict) else \
                         (kw.get("data") if isinstance(kw.get("data"), dict) else {})
@@ -1427,6 +1425,30 @@ def leftover_artifacts(session, default_why: str = "not cleaned") -> list[dict]:
         return []
 
 
+def _delete_verified(session, url: str, headers: dict | None) -> str:
+    """
+    DELETE `url` and VERIFY it. Returns "gone" | "refused:<http status>" | "still-there".
+    A 2xx is not proof: CTFd answers 200 to a DELETE without `Content-Type: application/json` and deletes nothing
+    (QAX reported such a record cleaned for a whole scan). So after a 2xx the record is read back: still readable =
+    not deleted. A 404/410 means gone. When it cannot be read back (401/403/405) the 2xx is trusted.
+    """
+    h = {"Content-Type": "application/json", "Accept": "application/json", **(headers or {})}
+    r = session.delete(url, headers=h, timeout=15)
+    code = getattr(r, "status_code", 500)
+    if code in (404, 410):
+        return "gone"
+    if code >= 300:
+        return f"refused:{code}"
+    try:
+        g = session.get(url, headers=h, timeout=15)
+    except Exception:
+        return "gone"
+    gc = getattr(g, "status_code", 0)
+    if gc in (404, 410):
+        return "gone"
+    return "still-there" if 200 <= gc < 300 else "gone"
+
+
 def _delete_by_advertised_route(session, base: str, art: dict) -> bool:
     """
     Delete a record QAX created via `<collection>/<server id>[/]` — but only when the SERVER says DELETE is allowed
@@ -1442,8 +1464,7 @@ def _delete_by_advertised_route(session, base: str, art: dict) -> bool:
             o = session.options(url, headers=art.get("headers", {}), timeout=15)
             allow = {m.strip().upper() for m in str(getattr(o, "headers", {}).get("Allow", "")).split(",")}
             if getattr(o, "status_code", 500) < 400 and "DELETE" in allow:
-                r = session.delete(url, headers=art.get("headers", {}), timeout=15)
-                return getattr(r, "status_code", 500) < 300 or getattr(r, "status_code", 0) in (404, 410)
+                return _delete_verified(session, url, art.get("headers", {})) == "gone"
         except Exception:
             continue
     return False
@@ -1510,12 +1531,13 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
             continue
         url = f"{base}{path.replace('{' + param + '}', str(key))}"
         try:
-            r = session.delete(url, headers=art.get("headers", {}), timeout=15)
-            code = getattr(r, "status_code", 500)
-            if code < 300 or code in (404, 410):
-                cleaned += 1      # 404/410: it is gone (deleted by an earlier entry for the same record, or by the app)
+            verdict = _delete_verified(session, url, art.get("headers", {}))
+            if verdict == "gone":
+                cleaned += 1      # incl. 404/410: already deleted by an earlier entry for the same record, or by the app
+            elif verdict == "still-there":
+                left.append(_left(art, "the delete was accepted (2xx) but the record is still readable"))
             else:
-                left.append(_left(art, f"delete was refused (HTTP {code})"))
+                left.append(_left(art, f"delete was refused (HTTP {verdict.split(':', 1)[-1]})"))
         except Exception:
             left.append(_left(art, "the delete request failed"))
     return cleaned
@@ -1539,6 +1561,27 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
     # token across probes. BOLA's two-user control needs genuinely distinct users, and
     # sharing one "primary" user across probes defeats it (B would read its own object).
     return _auth_token(sess, base, recipe, model, identity)
+
+
+def _example_body(endpoint: dict | None, unique: str | None = None) -> dict | None:
+    """
+    The operator-supplied valid body for this endpoint (--examples) with `{{unique}}`/`{{random}}` replaced by a fresh
+    value, or None. Nested dicts/lists are rendered too. Never raises.
+    """
+    ex = (endpoint or {}).get("example_body")
+    if not isinstance(ex, dict) or not ex:
+        return None
+    u = unique or uuid.uuid4().hex[:10]
+
+    def render(v):
+        if isinstance(v, str):
+            return v.replace("{{unique}}", u).replace("{{random}}", u)
+        if isinstance(v, dict):
+            return {k: render(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [render(x) for x in v]
+        return v
+    return render(ex)
 
 
 def _route_key_field(param: str, fields: list[str]) -> str | None:
@@ -1655,7 +1698,17 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         key = f"qaxbola{uuid.uuid4().hex[:10]}"
         marker = f"qaxmarker{uuid.uuid4().hex[:12]}"
         body: dict = {}
-        for f in pf:
+        ex_body = _example_body(post, key)
+        if ex_body:                     # the operator's VALID body (--examples): server-assigned id, marker in a text field
+            body = dict(ex_body)
+            key_field = None
+            put = next((f for f, v in body.items() if isinstance(v, str) and "{{marker}}" in str(post.get("example_body", {}).get(f, ""))), None) \
+                or next((f for f, v in body.items() if isinstance(v, str) and _plausible_value(f, key) is None
+                         and not any(k in f.lower() for k in ("route", "slug", "url", "email", "id"))), None) \
+                or next((f for f, v in body.items() if isinstance(v, str)), None)
+            if put:
+                body[put] = str(body[put]).replace("{{marker}}", marker) if "{{marker}}" in str(body[put]) else marker
+        for f in ([] if ex_body else pf):
             lf = f.lower()
             if f == key_field:
                 body[f] = key
@@ -1857,6 +1910,13 @@ def _detect_injection(send, *, method: str, path: str, where: str) -> ProbeFindi
         # 5xx = robustness lead only (P3 — not proof, don't cry wolf).
         st, bt = ask("qaxprobe1" + q)
         if st is not None and st >= 500:
+            # Control: the benign value must STILL be accepted right after the payload. If it now fails too, the
+            # 5xx is the app's state (a duplicate unique key -> IntegrityError, an exhausted resource), not the
+            # quote breaking a query. (Found on CTFd: a re-sent page route raised sqlalchemy.exc.IntegrityError
+            # and was reported as SQL injection.)
+            st_after, _ = ask("qaxprobe1")
+            if st_after is None or st_after >= 500:
+                return None
             if any(s in (bt or "").lower() for s in _SQL_ERRORS):
                 return ProbeFinding(
                     probe="sqli", title=f"SQL injection in {method} {path} ({where})",
@@ -1956,7 +2016,11 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
         path = re.sub(r"\{[^}]+\}", "1", str(e.get("path", "")))
         headers = headers_for(e)
         fields = field_names(e.get("request_fields"))
-        benign = _benign_body(fields)
+        def fresh(_e=e, _f=fields):
+            """A new valid body each time: a `{{unique}}` example must not repeat (a duplicate unique key is a 5xx
+            that has nothing to do with the field being fuzzed — found on CTFd)."""
+            return _example_body(_e) or _benign_body(_f)
+        benign = fresh()
         try:
             rb = sess.request(method, f"{base}{path}", json=benign, headers=headers, timeout=15)
         except Exception:
@@ -1966,12 +2030,20 @@ def malformed_input_probe(model, base_url: str, *, session: requests.Session | N
             continue  # baseline must be accepted, else we can't attribute a later 5xx
         exercised += 1
         for fld in fields[:6]:
-            bad = dict(benign, **{fld: "qax-not-a-valid-value-!@#"})
+            bad = dict(fresh(), **{fld: "qax-not-a-valid-value-!@#"})
             try:
                 r = sess.request(method, f"{base}{path}", json=bad, headers=headers, timeout=15)
             except Exception:
                 continue
             if r.status_code < 500:
+                continue
+            # Control: a FRESH valid body must still be accepted right after. If it is 5xx too, the failure is the
+            # app's state (a duplicate key, a full disk), not the malformed value.
+            try:
+                again = sess.request(method, f"{base}{path}", json=fresh(), headers=headers, timeout=15)
+            except Exception:
+                continue
+            if again.status_code >= 500:
                 continue
             body = (r.text or "").lower()
             if any(s in body for s in _DEBUG_INTERACTIVE):
@@ -2106,10 +2178,10 @@ def injection_probe(model, base_url: str, *, session: requests.Session | None = 
         path = re.sub(r"\{[^}]+\}", "qaxprobe1", str(e.get("path", "")))
         headers = token_for(e)
         fields = field_names(e.get("request_fields"))
-        benign = _benign_body(fields)
+        benign = _example_body(e) or _benign_body(fields)
         for fld in [f for f in fields if _stringy(f, benign.get(f))][:3]:
-            def send(value, _fld=fld, _h=headers, _p=path, _m=method):
-                body = dict(benign, **{_fld: value})
+            def send(value, _fld=fld, _h=headers, _p=path, _m=method, _e=e, _fl=fields):
+                body = dict(_example_body(_e) or _benign_body(_fl), **{_fld: value})   # fresh unique values per request
                 try:
                     r = sess.request(_m, f"{base}{_p}", json=body, headers=_h, timeout=15)
                     reached[0] += 1
@@ -2187,10 +2259,10 @@ def nosql_probe(model, base_url: str, *, session: requests.Session | None = None
         if not keys:
             continue
         candidates += 1
-        others = _benign_body(fields)
+        others = _example_body(e) or _benign_body(fields)
         for key in keys[:3]:
-            def send(value, _k=key, _h=headers, _p=path, _m=method):
-                body = dict(others, **{_k: value})
+            def send(value, _k=key, _h=headers, _p=path, _m=method, _e=e, _fl=fields):
+                body = dict(_example_body(_e) or _benign_body(_fl), **{_k: value})   # fresh unique values per request
                 try:
                     r = sess.request(_m, f"{base}{_p}", json=body, headers=_h, timeout=15)
                     return r.status_code, r.text
@@ -2853,7 +2925,16 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
         key = f"qaxkey{uuid.uuid4().hex[:10]}"
         markers: dict[str, str] = {}          # field -> its unique marker token
         body: dict = {}
-        for f in pf:
+        ex_body = _example_body(post, key)
+        if ex_body:                           # the operator's VALID body (--examples): track every free-text field
+            key_field = None
+            body = dict(ex_body)
+            for f, v in list(body.items()):
+                if isinstance(v, str) and _plausible_value(f, key) is None and f in _persistable_fields(list(body)):
+                    tok = f"qaxkeep{uuid.uuid4().hex[:10]}"
+                    markers[f] = tok
+                    body[f] = tok
+        for f in ([] if ex_body else pf):
             lf = f.lower()
             if f == key_field:
                 body[f] = key

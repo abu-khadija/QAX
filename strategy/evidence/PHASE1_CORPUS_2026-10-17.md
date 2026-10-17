@@ -25,9 +25,9 @@ are for these apps and this method only; they say nothing about general accuracy
 **Totals for apps 6–10: 8 confirmed findings, 8 true positives, 0 false positives in the final scans.**
 Apps 1–5 stay at 0 confirmed FP as reported earlier. Corpus size is now **10**.
 
-**Bugs in QAX that these scans exposed:** more than 25, all fixed with a regression test, golden gate 32/32 throughout
+**Bugs in QAX that these scans exposed:** more than 30, all fixed with a regression test, golden gate 32/32 throughout
 (one commit briefly broke the gate; see the commit log, restored in the next commit). Of these,
-**4 were false positives that would have shipped a wrong verdict** and are the most important result of this exercise:
+**6 were false positives that would have shipped a wrong verdict** and are the most important result of this exercise:
 
 | App | False positive QAX produced | Why | Fix |
 |---|---|---|---|
@@ -35,6 +35,8 @@ Apps 1–5 stay at 0 confirmed FP as reported earlier. Corpus size is now **10**
 | microblog-api | P2 "credentials exposed" x4 | `has_password: true` is a boolean flag, not a secret | Value must be a string/number and the name must not be a flag |
 | microblog-api | P1 "IDOR" on a public post | Posts are shared by design; another user may read them | Control: if B can LIST the object it is shared; writes are never excused |
 | CTFd | **P1 "OS command injection"** | A Werkzeug debug page echoed the submitted `;echo TOKEN` | Strip every echo of the payload before looking for command output |
+| CTFd (with `--examples`) | P1 "SQL injection" in a page title | A re-sent unique `route` raised `IntegrityError` (a 5xx page containing "sqlalchemy"); the quote was innocent (verified: `T'` and `T\"` answer 200) | Fresh unique values per request, and the benign request must still succeed right after a payload |
+| CTFd (cookie mode) | P1 "POST requires authentication" x2 | The operator's cookie was on the session that sends the "anonymous" requests, so the app's 2xx looked like a missing auth check | Steps without `use_auth` go out on a cookie-less session |
 
 ## Per-app run records
 
@@ -65,6 +67,13 @@ Each run: QAX 0.1.0, quick scan, supplied tokens, authorized local target. Micro
   already exists", foreign keys): BOLA/persistence/search-robustness. Logged as an idea: `--examples FILE` of valid
   bodies. Note: CTFd's `serve.py` is a development server with the Werkzeug debugger on; that is an artefact of how it
   was run, not a finding.
+- With `--examples` (one valid `POST /api/v1/pages` body) BOLA and persistence run. BOLA correctly answers "shared by
+  design" (another user may list every page); an `--examples` run exposed two more FPs of QAX's own (see below) and the
+  cleanup audit: the registry missed 24 pages + an award per scan because CTFd answers 200 with the id under `data`,
+  and a DELETE that answered 200 without a JSON content-type removed nothing and was believed. After the fixes one scan
+  moves the database by exactly what QAX reports: 11 submissions left (CTFd answers HTTP 500 to deleting them), 0 pages,
+  0 awards. The remaining P1 "debugger exposed on POST /pages" is true of this instance (`serve.py` is a dev server),
+  and is triggered by a route value that collides after CTFd's normalisation (an unhandled 500 where a 4xx belongs).
 - Fixed here: **P1 command-injection FP**; BOLA/persistence sent `"test"` to boolean fields (now the spec type);
   BOLA now says "HTTP 403: creating needs a privileged token" instead of "rejected".
 

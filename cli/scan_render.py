@@ -82,8 +82,8 @@ def render_scan_result(result) -> str:
 _NEEDS_HINT = {
     "token_b": "supply a second, ORDINARY user's token with --token-b (and the owner's with --token)",
     "auth-token": "supply a valid token with --token (QAX could not self-register or log in)",
-    "valid-body": "QAX could not build a request this app accepts — an example valid request body "
-                  "for the create endpoints would unblock it",
+    "valid-body": "QAX could not build a request this app accepts — give it one valid body per create endpoint "
+                  "with --examples FILE (JSON: {\"POST /api/x\": {\"title\": \"T {{unique}}\"}})",
     "slower-scan": "the target rate-limited QAX until it stopped: re-run when the limit has reset, or allow-list "
                    "the scanner's address on the target / WAF",
     "waf-allowlist": "a WAF or bot protection is blocking QAX: allow-list the scanner's address (QAX never "

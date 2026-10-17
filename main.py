@@ -2045,6 +2045,21 @@ def scan_needs_key(quick: bool, repo: str | None) -> bool:
     return (not quick) or bool(repo)
 
 
+def _load_examples_file(path: str | None) -> dict:
+    """Parse the --examples file; a missing/unreadable/invalid file is reported and ignored."""
+    if not path:
+        return {}
+    try:
+        from services.live_surface import parse_examples
+        ex = parse_examples(Path(path).read_text(encoding="utf-8"))
+        print(f"  (using {len(ex)} example body(ies) from {path})\n" if ex else
+              f"  ! no usable example in {path} (expected JSON like {{\"POST /api/x\": {{...}}}}) — ignoring it\n")
+        return ex
+    except OSError as exc:
+        print(f"  ! cannot read --examples file {path}: {exc} — continuing without it\n")
+        return {}
+
+
 def _load_endpoints_file(path: str | None) -> list:
     """Parse the --endpoints file; a missing/unreadable file is reported and ignored (the scan still runs)."""
     if not path:
@@ -2127,6 +2142,10 @@ def run_scan_command() -> None:
                         help="A hand-written endpoint list for apps with no OpenAPI spec whose routes cannot be "
                              "guessed. One per line: `GET /api/things`, `POST /api/things title!,body`. "
                              "See QUICKSTART.md.")
+    parser.add_argument("--examples", default=None, metavar="FILE",
+                        help="A JSON file of VALID request bodies for endpoints whose creates need data QAX "
+                             "cannot guess: {\"POST /api/pages\": {\"title\": \"T {{unique}}\", ...}}. "
+                             "`{{unique}}` is replaced per request.")
     parser.add_argument("--header", action="append", default=[], metavar="\"Name: value\"",
                         help="An extra header sent with EVERY request (repeatable): a CSRF nonce for a cookie "
                              "session (`--header \"CSRF-Token: <nonce>\"`), a tenant id, an API version.")
@@ -2215,6 +2234,7 @@ def run_scan_command() -> None:
         read_only=args.read_only,
         spec_url=args.spec,
         extra_endpoints=_load_endpoints_file(args.endpoints),
+        examples=_load_examples_file(args.examples),
         progress=PrintProgressReporter())
     _elapsed = time.time() - _t0
 

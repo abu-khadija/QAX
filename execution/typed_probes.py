@@ -105,6 +105,10 @@ def _typed_body(endpoint: dict, overrides: dict | None = None) -> dict:
     types = endpoint.get("request_field_types") or {}
     overrides = overrides or {}
     uniq = uuid.uuid4().hex[:8]
+    from execution.probes import _example_body
+    ex = _example_body(endpoint, uniq)
+    if ex:                                  # the operator's VALID body (--examples), then the probe's overrides
+        return {**ex, **overrides}
     if "required_fields" in endpoint:
         wanted = [f for f in (endpoint.get("required_fields") or []) if f in types]
     else:

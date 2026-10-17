@@ -90,6 +90,48 @@ def parse_endpoint_lines(text: str) -> list[dict]:
     return out
 
 
+def parse_examples(text: str) -> dict:
+    """
+    Parse the --examples file: JSON mapping "METHOD /path" to a request body QAX may send as a VALID create/update,
+    e.g. {"POST /api/v1/pages": {"title": "T {{unique}}", "route": "r-{{unique}}", "link_target": "_blank"}}.
+    `{{unique}}` (also `{{random}}`) is replaced by a fresh value per request. Returns {(METHOD, path): body}.
+    Bad entries are ignored; never raises.
+    """
+    import json as _json
+    out: dict = {}
+    try:
+        data = _json.loads(text)
+    except Exception:
+        return out
+    if not isinstance(data, dict):
+        return out
+    for k, body in data.items():
+        parts = str(k).split(None, 1)
+        if len(parts) == 2 and parts[0].upper() in ("POST", "PUT", "PATCH") and isinstance(body, dict):
+            out[(parts[0].upper(), normalize_path_params(parts[1].strip()))] = body
+    return out
+
+
+def apply_examples(endpoints: list[dict], examples: dict) -> list[dict]:
+    """
+    Attach each example body to its endpoint (`example_body`). An example for an endpoint QAX does not know is ADDED
+    (the operator is telling us it exists), with its keys as request fields.
+    """
+    if not examples:
+        return endpoints
+    by = {(str(e.get("method", "")).upper(), normalize_path_params(str(e.get("path", "")))): e
+          for e in endpoints if isinstance(e, dict)}
+    out = list(endpoints)
+    for key, body in examples.items():
+        e = by.get(key)
+        if e is None:
+            e = {"method": key[0], "path": key[1], "auth_required": True, "request_fields": list(body),
+                 "required_fields": [], "request_field_types": {}, "response_fields": [], "source": "supplied"}
+            out.append(e)
+        e["example_body"] = body
+    return out
+
+
 def apply_supplied_endpoints(base_url: str, supplied: list[dict], existing: list[dict], sess=None) -> list[dict]:
     """
     Merge the operator's endpoint list into the model: skip ones already known, and mark each GET whether it needs

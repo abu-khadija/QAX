@@ -238,9 +238,12 @@ def test_cleanup_asks_the_server_whether_delete_is_allowed_when_no_route_is_know
             return MagicMock(status_code=200, headers={"Allow": self.allow})
         def delete(self, url, headers=None, timeout=None):
             self.deleted.append((url, headers)); return MagicMock(status_code=204)
+        def get(self, url, headers=None, timeout=None): return MagicMock(status_code=404)     # read back: gone
     m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/api/bookmarks/"}])      # no DELETE route known
     ok = S("GET, DELETE, OPTIONS")
-    assert cleanup_artifacts(m, "http://t", ok) == 1 and ok.deleted == [("http://t/api/bookmarks/7/", {"Authorization": "Token a"})]
+    assert cleanup_artifacts(m, "http://t", ok) == 1
+    assert ok.deleted[0][0] == "http://t/api/bookmarks/7/" and ok.deleted[0][1]["Authorization"] == "Token a"
+    assert ok.deleted[0][1]["Content-Type"] == "application/json"                           # JSON headers are always sent
     no = S("GET, OPTIONS")                                                                 # the server says: not allowed
     assert cleanup_artifacts(m, "http://t", no) == 0 and no.deleted == []
     assert leftover_artifacts(no)[0]["why"] == "the API has no DELETE endpoint for it"
@@ -281,3 +284,43 @@ def test_cookie_and_csrf_header_reach_the_probes_the_coverage_runner_and_discove
         assert requests.post(f"http://127.0.0.1:{port}/api/x", json={}).status_code == 403        # without them: refused
     finally:
         srv.shutdown()
+
+
+def test_a_200_create_with_the_id_under_data_is_tracked_and_cleaned():
+    """Regression (CTFd): POST 200 {"success": true, "data": {"id": 7}} created records QAX neither tracked nor
+    cleaned (one scan added 24 pages and an award while the report said 'created 2, left 0')."""
+    from unittest.mock import MagicMock
+    from execution.probes import cleanup_artifacts, track_writes
+    from services.results import AppModel
+
+    class S:
+        def __init__(self): self._qax_created = []; self.deleted = []
+        def request(self, method, url, **kw):
+            r = MagicMock(status_code=200); r.json.return_value = {"success": True, "data": {"id": 7}}; return r
+        def delete(self, url, headers=None, timeout=None):
+            self.deleted.append(url); return MagicMock(status_code=200)
+    s = track_writes(S())
+    s.request("POST", "http://t/api/v1/pages", json={"title": "x"}, headers={"Authorization": "Token a"})
+    assert len(s._qax_created) == 1 and s._qax_created[0]["resp_id"] == "7"
+    m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/v1/pages/{page_id}"}])
+    assert cleanup_artifacts(m, "http://t", s) == 1 and s.deleted == ["http://t/api/v1/pages/7"]
+
+
+def test_a_2xx_delete_that_leaves_the_record_readable_is_not_cleaned():
+    """Regression (CTFd): DELETE without a JSON content-type answered 200 and removed nothing; QAX believed it and
+    reported the record cleaned. The record is read back after the delete."""
+    from unittest.mock import MagicMock
+    from execution.probes import cleanup_artifacts, leftover_artifacts
+    from services.results import AppModel
+
+    class S:
+        def __init__(self, still_there):
+            self._qax_created = [{"collection": "/api/v1/awards", "body": {"t": 1}, "headers": {}, "resp_id": "12"}]
+            self.still = still_there
+        def delete(self, url, headers=None, timeout=None): return MagicMock(status_code=200)
+        def get(self, url, headers=None, timeout=None): return MagicMock(status_code=200 if self.still else 404)
+    m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/v1/awards/{award_id}"}])
+    bad, good = S(True), S(False)
+    assert cleanup_artifacts(m, "http://t", bad) == 0
+    assert "still readable" in leftover_artifacts(bad)[0]["why"]
+    assert cleanup_artifacts(m, "http://t", good) == 1 and leftover_artifacts(good) == []
