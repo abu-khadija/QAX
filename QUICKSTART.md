@@ -28,7 +28,7 @@ and stops it. No account and no API key needed.
 python main.py demo
 ```
 
-You should see a list of **CONFIRMED** findings after about 30 seconds.
+You should see a list of **CONFIRMED** findings (44 on the bundled app) after about 30 seconds.
 
 ## 2. Your first scan: read-only
 
@@ -51,7 +51,11 @@ python main.py scan --url https://staging.your-app.example --quick --authorized 
 |---|---|
 | `Authorization: Token <key>` | `--auth-scheme Token` |
 | `X-Api-Key: <key>` (or another header) | `--auth-header X-Api-Key --auth-scheme ""` |
+| The bare token in `Authorization: <token>` (PocketBase, some Go/Node apps) | `--auth-scheme ""` |
 | A session cookie | `--cookie "sessionid=<value>; ..."` (best with `--read-only`; full CSRF-protected writes from a cookie are not supported yet) |
+
+> **Tokens that expire.** Some apps issue short-lived tokens (15 minutes is common). A scan with an expired
+> token does not fail: the checks that need a login are listed under NOT TESTED. Get a fresh token and re-run.
 
 ## 3. Reading the result
 
@@ -63,9 +67,32 @@ python main.py scan --url https://staging.your-app.example --quick --authorized 
 | **UNSTABLE** | Fired once but did not repeat when re-checked | Treat it as flaky until it repeats |
 | **LEFT ON THE TARGET** | Test records QAX created and could not delete (never shown for `--read-only`) | Remove them by hand |
 
-If NOT TESTED says QAX **knows only a few endpoints**, it could not find your API's endpoints. QAX
-finds them best from an OpenAPI/Swagger document (for example `/openapi.json`, `/swagger.json` or
-`/api/schema/`). If your app has one somewhere else, tell us where.
+### When QAX cannot see your endpoints
+
+QAX reads your API's OpenAPI/Swagger document when it finds one (it tries the usual places, including
+`/openapi.json`, `/swagger.json`, `/apispec.json`, `/api/v1/swagger.json`). Without one it **guesses** by reading
+your app's own docs pages and probing common names, and it tells you so under NOT TESTED
+("QAX guessed the endpoints by name"). Three ways to give it the real surface:
+
+```bash
+# 1. Your spec is somewhere unusual (a URL, a path on the app, or a local file):
+python main.py scan ... --spec /api/internal/docs.json
+python main.py scan ... --spec ./openapi.yaml
+
+# 2. No spec at all: list the endpoints yourself, one per line (a trailing ! marks a required field):
+cat > endpoints.txt <<'EOF'
+GET    /api/collections/notes/records
+POST   /api/collections/notes/records        title!,body
+GET    /api/collections/notes/records/{id}
+DELETE /api/collections/notes/records/{id}
+EOF
+python main.py scan ... --endpoints endpoints.txt
+
+# 3. You have the source: add --repo ./path/to/source
+```
+
+Listing a `DELETE` route lets QAX clean up what its tests create. Without one, QAX reports the records it
+could not delete under **LEFT ON THE TARGET** (its report is checked against the database in our tests).
 
 ## 4. A full scan (only if you may write test data)
 
@@ -78,7 +105,23 @@ python main.py scan --url https://staging.your-app.example --quick --authorized 
     --token "<user A token>" --token-b "<user B token, a different ordinary user>" --out full-scan.json
 ```
 
-`--token-b` enables the checks where user B tries to reach user A's data.
+`--token-b` enables the checks where user B tries to reach user A's data. If NOT TESTED says user A "may
+not create objects (HTTP 403)", creating needs a privileged account: pass an **admin or owner** token as
+`--token` (user A) and an **ordinary** user's token as `--token-b`.
+
+If the app **rate-limits** the scan (HTTP 429), QAX waits as the server asks, retries and slows down. Past a limit
+of patience it stops and lists what it could not run under NOT TESTED. It never tries to get around a rate limit
+or a firewall; ask whoever runs the target to allow-list your address.
+
+## 4b. The web interface (optional)
+
+```bash
+python -m web.server        # then open http://127.0.0.1:8900/app
+```
+
+Enter the URL and (optionally) a token, a second user's token, a session cookie or your spec location. **Read-only is
+on by default.** Click **Preview plan** to see what QAX will do (the endpoints it found, which checks write data,
+what is missing) before anything is attacked, then run the scan. Finished scans are kept under **Past scans**.
 
 ## 5. Next steps
 
@@ -96,10 +139,13 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
 - **The quick scan sends no data to any AI service.** A deep scan (without `--quick`) uses the
   Anthropic API, needs `ANTHROPIC_API_KEY` in `.env`, costs about $0.5–1 per run, and sends the API
   surface (and the source code if you pass `--repo`) to Anthropic.
-- Apps **without an OpenAPI/Swagger document** are scanned much less thoroughly. QAX says so under
-  NOT TESTED.
-- Login by **username/password form** or **cookie session with CSRF** is not supported yet. Use a
-  token, an API key, or the cookie workaround above for read-only scans.
+- Apps **without an OpenAPI/Swagger document** are scanned less thoroughly unless you give QAX the surface
+  (`--spec`, `--endpoints`, `--repo`). It says so under NOT TESTED.
+- A **username/password login form**, or a **cookie session that needs a CSRF token to write**, is not supported
+  yet. Use an API token, or `--cookie` for a read-only scan.
+- Endpoints whose create calls need **valid domain data** QAX cannot guess (a foreign key, "already exists") are
+  listed as NOT TESTED; a way to supply example bodies is planned.
+- Measured on ten open-source apps run locally; this is not a general accuracy figure.
 - The scan sends many requests in a short time (hundreds on a small app). Tell whoever runs the staging
   environment before you scan, and expect rate limits on some apps.
 
@@ -110,7 +156,10 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
 | `Refusing to scan` | Add `--authorized` (and only if you are allowed to test the app) |
 | `could not self-register or log in` | Pass `--token` |
 | `needs two supplied identities` / `--token-b` | Pass a second, ordinary user's token with `--token-b` |
-| `knows only N endpoint(s)` | QAX could not find your API's endpoints; see section 3 |
+| `knows only N endpoint(s)` / `guessed the endpoints by name` | QAX could not find your API's endpoints; see "When QAX cannot see your endpoints" |
+| `valid token was not accepted` / many checks NOT TESTED after a while | The token expired; get a fresh one |
+| `user A may not create objects (HTTP 403)` | Use an admin/owner token as `--token`, an ordinary user's as `--token-b` |
+| `QAX stopped sending requests ... rate-limiting` | The target kept answering HTTP 429; re-run later or allow-list the scanner |
 
 ## 8. Feedback
 

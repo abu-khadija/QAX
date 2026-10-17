@@ -6,6 +6,24 @@ Every scan written with `--out` records the exact version and commit that produc
 
 ## [Unreleased]
 
+### Added
+- `--spec` (OpenAPI document in an unusual place), `--endpoints FILE` (a hand-written endpoint list for apps with no
+  spec), `--cookie` (session-cookie authentication, read-only scans).
+- Spec-less discovery: reads the app's own docs pages, carries your credentials, understands trailing slashes, and
+  learns POST schemas / item routes / DELETE from the app's own `OPTIONS` answers.
+- Rate limits: HTTP 429 is waited out (`Retry-After`), retried and paced; past a budget the scan stops and says so.
+  A WAF block page is reported, never evaded.
+- Web UI: plan preview before a scan, run history, a read-only switch (on by default), Not-tested shown in results.
+- Cleanup is tracked for every write (probes, coverage tests, family sweep) and reported against what the app really
+  holds; a 404 on delete means already gone.
+
+### Fixed
+- Four false positives found by scanning real apps: Host-header on a rejected request, a `has_password: true` flag
+  reported as a credential, a public post reported as an IDOR, and **a P1 "command injection" that was a debug page
+  echoing the input**.
+- Probes sent read-only / wrongly typed fields in create bodies, so self-registration and BOLA/persistence silently
+  could not run on strict APIs.
+
 ### Removed
 - The Streamlit UI (`python main.py ui`) and the feedback dashboard (`python main.py dashboard`). `web/` is the one supported UI.
 - Dead code: `core/prompt_engine.py` and two unused functions.

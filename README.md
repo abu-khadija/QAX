@@ -17,8 +17,8 @@ python main.py demo
 
 `demo` boots QAX's bundled, deliberately-vulnerable app on a free local port, runs a quick scan
 (deterministic probes — zero LLM calls), prints the confirmed findings, and stops the app. On the
-author's machine that is **about 30 seconds from an empty virtualenv** to 18 confirmed findings
-(about 20 s of it is `pip install`; times vary with your network and pip cache).
+author's machine that is **about 30 seconds from an empty virtualenv** to 44 confirmed findings
+(measured 2026-10-17: 2 s venv + 7 s `pip install` with a warm cache + 18 s scan; a cold pip cache adds 15–20 s).
 
 ## Scan your own app
 
