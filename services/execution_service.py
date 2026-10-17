@@ -131,14 +131,23 @@ class ExecutionService:
                 seed["token_b"] = auth["token_b"]
         runner.setup(base_url=base_url, auth_scheme=scheme, auth_header=header,
                      seed_variables=seed)
+        created: list = []
         try:
+            # The coverage templates WRITE (create the object they then attack). Track those creations so the
+            # scan can clean them up and report what it could not — they used to be invisible (found on
+            # linkding: the DB kept tags 'owned by A' that QAX reported as 0 left on the target).
+            if getattr(runner, "session", None) is not None:
+                from execution.probes import track_writes
+                runner.session._qax_created = []
+                track_writes(runner.session)
             batch = runner.execute_batch(test_cases, stop_on_fail=stop_on_fail)
+            created = list(getattr(getattr(runner, "session", None), "_qax_created", []) or [])
         finally:
             runner.teardown()
 
         prog.emit("execute", "ok",
                   f"api: {batch.get('passed', 0)} passed / {batch.get('failed', 0)} failed")
-        return ExecutionResult(mode="api", raw=batch)
+        return ExecutionResult(mode="api", raw=batch, created=created)
 
     def _run_ui(
         self, test_cases: list[dict], headless: bool,

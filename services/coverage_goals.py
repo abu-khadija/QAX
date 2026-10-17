@@ -30,8 +30,10 @@ def _concrete(path: str, value: str = "999999") -> str:
 
 
 def _collection_of(path: str) -> str:
-    """The collection path for a single-resource path: /todos/{id}/x → /todos."""
-    return re.sub(r"/\{[^}]+\}.*$", "", str(path)) or str(path)
+    """The collection path for a single-resource path: /todos/{id}/x → /todos. A trailing-slash API
+    (Django: /todos/{id}/) keeps its slash on the collection — a POST to the bare form can 500."""
+    base = re.sub(r"/\{[^}]+\}.*$", "", str(path)) or str(path)
+    return base + "/" if str(path).endswith("/") and base != str(path) and not base.endswith("/") else base
 
 
 def _create_field(model, create_path: str) -> str:

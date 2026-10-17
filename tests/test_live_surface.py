@@ -275,3 +275,116 @@ def test_spec_paths_cover_versioned_api_prefixes():
     from services.live_surface import _SPEC_PATHS
     for p in ("/apispec.json", "/api/v1/swagger.json", "/api/v1/openapi.json", "/swagger.v1.json"):
         assert p in _SPEC_PATHS
+
+
+# ── authenticated, slash-aware, 429-patient discovery (found on linkding, A4) ──────────────────
+
+class _DjangoLike:
+    """/api/bookmarks/ needs a token (401 anonymous) and a trailing slash (the bare path 301s to it)."""
+    def __init__(self, token=None): self.headers = {}; self.cookies = {}; self.calls = 0
+
+    def get(self, url, timeout=None, allow_redirects=None, **k):
+        from urllib.parse import urlparse
+        self.calls += 1
+        path = urlparse(url).path
+        authed = self.headers.get("Authorization") == "Token abc"
+        if path == "/api/bookmarks":
+            return MagicMock(status_code=301, headers={"Location": "http://x/api/bookmarks/"}, text="")
+        if path == "/api/bookmarks/":
+            return MagicMock(status_code=200 if authed else 401, headers={}, text="[]")
+        return MagicMock(status_code=404, headers={}, text="")
+
+
+def test_discovery_finds_token_protected_slash_endpoints_only_with_credentials():
+    from services.live_surface import authed_session, discover_endpoints
+    anon = _DjangoLike()
+    assert "/api/bookmarks/" not in {d["path"] for d in discover_endpoints("http://x", AppModel(root="/x", endpoints=[]), session=anon)}
+    s = authed_session({"token": "abc", "header": "Authorization", "scheme": "Token"})
+    assert s.headers["Authorization"] == "Token abc"
+    authed = _DjangoLike(); authed.headers = s.headers
+    got = {d["path"] for d in discover_endpoints("http://x", AppModel(root="/x", endpoints=[]), session=authed)}
+    assert "/api/bookmarks/" in got and "/api/bookmarks" not in got      # the slash form that really works
+
+
+def test_a_429_is_waited_out_once_not_read_as_no_such_route(monkeypatch):
+    import services.live_surface as ls
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    class S:
+        def __init__(self): self.n = 0
+        def get(self, url, timeout=None, allow_redirects=None, **k):
+            self.n += 1
+            return MagicMock(status_code=429 if self.n == 1 else 200, headers={"Retry-After": "1"}, text="")
+    s = S()
+    assert ls._route_exists("http://x", "/api/things", s) is True and s.n == 2
+
+
+def test_authed_session_carries_a_cookie():
+    from services.live_surface import authed_session
+    assert authed_session({"cookie": "sessionid=abc; csrftoken=xyz"}).cookies.get("sessionid") == "abc"
+
+
+class _DrfLike:
+    """A DRF collection: needs a token, OPTIONS describes the POST body, the list has items with ids."""
+    def __init__(self): self.headers = {"Authorization": "Token abc"}; self.cookies = {}
+    def get(self, url, timeout=None, allow_redirects=None, **k):
+        from urllib.parse import urlparse
+        p = urlparse(url).path
+        if p == "/api/bookmarks/":
+            ok = self.headers.get("Authorization") == "Token abc"
+            return MagicMock(status_code=200 if ok else 401, headers={}, text="[]",
+                             json=lambda: [{"id": 1, "url": "https://a"}])
+        return MagicMock(status_code=404, headers={}, text="", json=lambda: None)
+    def options(self, url, timeout=None, **k):
+        meta = {"actions": {"POST": {"id": {"type": "integer", "read_only": True},
+                                     "url": {"type": "url", "required": True},
+                                     "notes": {"type": "string", "required": False},
+                                     "unread": {"type": "boolean", "required": False}}}}
+        return MagicMock(status_code=200, headers={"Allow": "GET, POST, HEAD, OPTIONS"}, json=lambda: meta)
+
+
+def test_enrichment_learns_post_schema_item_route_and_auth_from_the_app_itself(monkeypatch):
+    import services.live_surface as ls
+    class Anon:                                          # the credential-free control session
+        def get(self, url, **k): return MagicMock(status_code=401)
+    monkeypatch.setattr(ls.requests, "Session", lambda: Anon())
+    found = ls.enrich_discovered("http://x", [{"method": "GET", "path": "/api/bookmarks/",
+                                               "auth_required": False, "source": "discovered"}], _DrfLike())
+    by = {(e["method"], e["path"]): e for e in found}
+    assert by[("GET", "/api/bookmarks/")]["auth_required"] is True            # 401 without the token
+    post = by[("POST", "/api/bookmarks/")]
+    assert post["request_fields"] == ["url", "notes", "unread"] and "id" not in post["request_fields"]   # read-only dropped
+    assert post["required_fields"] == ["url"] and post["request_field_types"]["unread"]["type"] == "boolean"
+    assert ("GET", "/api/bookmarks/{id}/") in by                                # item route from the list
+
+
+def test_item_route_methods_come_from_options_so_cleanup_can_delete(monkeypatch):
+    import services.live_surface as ls
+    class S(_DrfLike):
+        def options(self, url, timeout=None, **k):
+            if url.endswith("/api/bookmarks/1/"):
+                return MagicMock(status_code=200, headers={"Allow": "GET, PUT, PATCH, DELETE, OPTIONS"}, json=lambda: {})
+            return super().options(url, timeout=timeout)
+    class Anon:
+        def get(self, url, **k): return MagicMock(status_code=401)
+    monkeypatch.setattr(ls.requests, "Session", lambda: Anon())
+    found = ls.enrich_discovered("http://x", [{"method": "GET", "path": "/api/bookmarks/",
+                                               "auth_required": False, "source": "discovered"}], S())
+    assert ("DELETE", "/api/bookmarks/{id}/") in {(e["method"], e["path"]) for e in found}
+
+
+def test_slash_and_bare_twins_collapse_to_the_slash_form():
+    """A POST to /api/bookmarks (no slash) 500s on Django; only the slash form may survive discovery."""
+    import services.live_surface as ls
+    class S:
+        headers = {}; cookies = {}
+        def get(self, url, timeout=None, allow_redirects=None, **k):
+            from urllib.parse import urlparse
+            p = urlparse(url).path
+            if p == "/api/bookmarks":
+                return MagicMock(status_code=301, headers={"Location": "http://x/api/bookmarks/"}, text="")
+            if p == "/api/bookmarks/":
+                return MagicMock(status_code=200, headers={}, text="[]", json=lambda: [])
+            return MagicMock(status_code=404, headers={}, text="")
+        def options(self, *a, **k): return MagicMock(status_code=405, headers={})
+    got = [d["path"] for d in ls.discover_endpoints("http://x", AppModel(root="/x", endpoints=[]), session=S())]
+    assert "/api/bookmarks/" in got and "/api/bookmarks" not in got

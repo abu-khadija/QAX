@@ -75,10 +75,8 @@ def _scan_plan(url: str, auth, read_only: bool, spec_url: str | None = None) -> 
                                         normalize_path_params)
     from services.results import AppModel
 
-    sess = requests.Session()
-    if auth and auth.get("cookie"):
-        from execution.probes import seed_cookies
-        seed_cookies(sess, auth.get("cookie"))
+    from services.live_surface import authed_session
+    sess = authed_session(auth)
     base = url.rstrip("/")
     spec = fetch_openapi(base, session=sess, spec_url=spec_url)
     if spec:

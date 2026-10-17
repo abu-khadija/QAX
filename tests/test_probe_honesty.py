@@ -743,3 +743,13 @@ def test_declared_field_types_beat_name_guessing():
     assert _declared_value(ep, "when", "u").startswith("2020-")
     assert _declared_value(ep, "title", "u") is None            # plain string: left to the caller's marker
     assert _declared_value({}, "draft", "u") is None and _declared_value(None, "x", "u") is None
+
+
+def test_route_key_field_uses_the_server_id_for_id_routes_and_a_field_for_slug_routes():
+    from execution.probes import _route_key_field
+    assert _route_key_field("id", ["title", "url"]) is None            # server-assigned: never a title guess
+    assert _route_key_field("bookmark_id", ["title", "url"]) is None
+    assert _route_key_field("pk", ["name"]) is None
+    assert _route_key_field("slug", ["title", "slug"]) == "slug"        # exact name match
+    assert _route_key_field("username", ["username", "email"]) == "username"
+    assert _route_key_field("name", ["display_name", "x"]) == "display_name"

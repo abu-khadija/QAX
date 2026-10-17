@@ -63,6 +63,28 @@ _SPEC_PATHS = [
 ]
 
 
+def authed_session(auth: dict | None = None) -> requests.Session:
+    """
+    A requests.Session that carries the operator's credentials (token header and/or cookie), for the READ-ONLY
+    discovery requests. Without it, discovery was blind to every endpoint that answers 401 anonymously — i.e. most
+    of a real API (found on linkding: /api/bookmarks/ was invisible, 6 of ~15 endpoints known).
+    """
+    sess = requests.Session()
+    auth = auth or {}
+    token = auth.get("token")
+    if token:
+        header = auth.get("header") or "Authorization"
+        scheme = auth.get("scheme", "Bearer") if "scheme" in auth else "Bearer"
+        sess.headers[header] = f"{scheme} {token}".strip() if scheme else str(token)
+    if auth.get("cookie"):
+        for part in str(auth["cookie"]).split(";"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                if k.strip():
+                    sess.cookies.set(k.strip(), v.strip())
+    return sess
+
+
 def _spec_from_override(spec_url: str, base: str, sess) -> dict | None:
     """A user-supplied --spec: an absolute URL, a path on the app ("/apispec.json"), or a local file."""
     import json as _json
@@ -364,7 +386,13 @@ def ground_endpoints(base_url: str, *, session: requests.Session | None = None,
 _COMMON_RESOURCES = ("users", "user", "articles", "posts", "comments", "profiles",
                      "tags", "products", "orders", "items", "todos", "accounts",
                      "login", "auth/login", "search", "admin", "me", "health",
-                     "status", "graphql")
+                     "status", "graphql",
+                     # more nouns real APIs use (found scanning linkding/CTFd/Healthchecks, 2026-10-17)
+                     "bookmarks", "links", "notes", "tasks", "projects", "teams", "organizations", "files",
+                     "images", "messages", "notifications", "events", "tickets", "customers", "invoices",
+                     "payments", "categories", "groups", "roles", "settings", "keys", "tokens", "webhooks",
+                     "reports", "assets", "checks", "channels", "challenges", "pages", "feed", "followers",
+                     "sessions", "devices", "uploads", "documents", "jobs", "logs", "metrics", "version")
 _COMMON_API_PATHS = tuple(dict.fromkeys(
     ["/" + r for r in _COMMON_RESOURCES]
     + ["/api/" + r for r in _COMMON_RESOURCES]
@@ -431,7 +459,11 @@ def paths_from_pages(base_url: str, model, *, session: requests.Session | None =
         np = normalize_path_params(p)
         if np in existing or np in found or not _looks_like_api_path(p):
             continue
-        if _route_exists(base, p, sess):
+        live_p = _live_path(base, p, sess)
+        if live_p:
+            np = normalize_path_params(live_p)
+            if np in found or np in existing:
+                continue
             found.add(np)
             out.append({"method": method_hint.get(p, "GET"), "path": np,
                         "auth_required": False, "source": "discovered-docs"})
@@ -453,12 +485,164 @@ def discover_endpoints(base_url: str, model, *, session: requests.Session | None
     out: list[dict] = paths_from_pages(base_url, model, session=sess)
     seen = {d["path"] for d in out} | existing
     for p in _COMMON_API_PATHS:
-        if p in seen:
+        if p in seen or p + "/" in seen:
             continue
-        if _route_exists(base, p, sess):
-            seen.add(p)
-            out.append({"method": "GET", "path": p, "auth_required": False, "source": "discovered"})
+        found = _live_path(base, p, sess)
+        if found:
+            seen.add(found)
+            out.append({"method": "GET", "path": found, "auth_required": False, "source": "discovered"})
+    # "/x" and "/x/" are one resource: keep the slash form (what the app really serves; a POST to the bare
+    # form can 500 on Django — APPEND_SLASH cannot redirect a POST).
+    have = {d["path"] for d in out}
+    out = [d for d in out if not (not d["path"].endswith("/") and d["path"] + "/" in have)]
+    # Learn what each discovered resource accepts (OPTIONS is a safe method) and which need a credential.
+    try:
+        out = enrich_discovered(base, out, sess)
+    except Exception as exc:                    # enrichment is a bonus; discovery itself must not fail
+        logger.warning("live_surface: enrich_discovered failed: %s", exc)
     return out
+
+
+_DRF_TYPE = {"integer": "integer", "float": "number", "decimal": "number", "boolean": "boolean",
+             "string": "string", "url": "string", "email": "string", "slug": "string", "datetime": "string",
+             "date": "string", "list": "array", "nested object": "object", "field": None, "choice": "string"}
+
+
+def _drf_field_info(meta: dict) -> dict:
+    """OPTIONS metadata of one field (Django REST Framework shape) -> the request_field_types shape."""
+    t = str(meta.get("type", "")).lower()
+    info: dict = {"type": _DRF_TYPE.get(t)}
+    if t == "email":
+        info["format"] = "email"
+    elif t == "url":
+        info["format"] = "uri"
+    elif t == "datetime":
+        info["format"] = "date-time"
+    elif t == "date":
+        info["format"] = "date"
+    if t == "choice" and isinstance(meta.get("choices"), list):
+        vals = [c.get("value") for c in meta["choices"] if isinstance(c, dict) and "value" in c]
+        if vals:
+            info["enum"] = vals
+    if meta.get("read_only"):
+        info["readOnly"] = True
+    if meta.get("max_length"):
+        info["max_length"] = meta["max_length"]
+    return info
+
+
+def enrich_discovered(base: str, endpoints: list[dict], sess) -> list[dict]:
+    """
+    For each endpoint found by guessing (no spec), ask the app itself, using only SAFE methods:
+      • is a credential required? (the same GET without it answers 401/403) -> auth_required;
+      • OPTIONS: which methods are allowed, and (Django REST Framework) the POST body schema — the fields,
+        which are required / read-only, their types and choices -> a POST endpoint with request_fields;
+      • a non-empty list response with ids -> the item route `<collection>/{id}` (GET).
+    Found on linkding: the guesser saw GET collections only, so the create/read-by-id probes (BOLA, persistence,
+    mass-assignment...) had nothing to work on and reported 'not applicable'.
+    """
+    # The control for "needs auth" is the same GET WITHOUT credentials; meaningless when we have none to drop.
+    hdrs = getattr(sess, "headers", None)
+    has_creds = isinstance(hdrs, dict) or hasattr(hdrs, "get")
+    has_creds = has_creds and any(str(k).lower() in ("authorization", "x-api-key", "cookie", "x-auth-token", "api-key")
+                                  for k in (hdrs or {})) or bool(getattr(sess, "cookies", None))
+    anon = requests.Session() if has_creds else None
+    out: list[dict] = []
+    for e in endpoints:
+        path = str(e.get("path", ""))
+        if "{" in path or e.get("source") not in ("discovered", "discovered-docs"):
+            out.append(e)
+            continue
+        if anon is not None:
+            try:
+                ar = anon.get(base + path, timeout=10, allow_redirects=False)
+                e["auth_required"] = getattr(ar, "status_code", 0) in (401, 403)
+            except Exception:
+                pass
+        out.append(e)
+        try:
+            orr = sess.options(base + path, timeout=10)
+        except Exception:
+            orr = None
+        if orr is not None and getattr(orr, "status_code", 0) < 400:
+            allow = {m.strip().upper() for m in str(orr.headers.get("Allow", "")).split(",") if m.strip()}
+            post_meta = None
+            try:
+                post_meta = ((orr.json() or {}).get("actions") or {}).get("POST")
+            except Exception:
+                post_meta = None
+            if "POST" in allow or post_meta:
+                fields = post_meta if isinstance(post_meta, dict) else {}
+                types = {k: _drf_field_info(v) for k, v in fields.items() if isinstance(v, dict)}
+                out.append({"method": "POST", "path": path, "auth_required": e.get("auth_required", False),
+                            "request_fields": [k for k, v in types.items() if not v.get("readOnly")],
+                            "required_fields": [k for k, v in fields.items()
+                                                if isinstance(v, dict) and v.get("required") and not v.get("read_only")],
+                            "request_field_types": types, "response_fields": [], "source": "discovered-options"})
+        # An item route, inferred from a real list response.
+        try:
+            lr = sess.get(base + path, timeout=10, allow_redirects=False)
+            data = lr.json() if getattr(lr, "status_code", 0) == 200 else None
+            rows = data if isinstance(data, list) else (data.get("results") if isinstance(data, dict) else None)
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict) and "id" in rows[0]:
+                item = path.rstrip("/") + "/{id}" + ("/" if path.endswith("/") else "")
+                out.append({"method": "GET", "path": item, "auth_required": e.get("auth_required", False),
+                            "source": "discovered-list"})
+                # Which other methods does the ITEM route allow? (OPTIONS is safe.) Without DELETE here QAX could
+                # never clean up the records its own probes created.
+                try:
+                    real = item.replace("{id}", str(rows[0]["id"]))
+                    ir = sess.options(base + real, timeout=10)
+                    allowed = {m.strip().upper() for m in str(ir.headers.get("Allow", "")).split(",") if m.strip()}
+                except Exception:
+                    allowed = set()
+                for m in ("PUT", "PATCH", "DELETE"):
+                    if m in allowed:
+                        out.append({"method": m, "path": item, "auth_required": e.get("auth_required", False),
+                                    "source": "discovered-list"})
+        except Exception:
+            pass
+    return out
+
+
+def _live_path(base: str, path: str, sess) -> str | None:
+    """
+    The live spelling of `path` ("/api/bookmarks" or "/api/bookmarks/"), or None. Frameworks differ on the
+    trailing slash (Django wants it, most others do not); a 3xx that points at path + "/" means the slash form
+    is the real one — and a POST to the slash-less form would be redirected and lose its body.
+    """
+    probe = re.sub(r"\{[^}]+\}|:([A-Za-z_]+)", "1", path)
+    try:
+        r = _get_patiently(sess, base + probe)
+    except Exception:
+        return None
+    code = getattr(r, "status_code", 404)
+    if 300 <= code < 400:
+        loc = str(getattr(r, "headers", {}).get("Location", "")).split("?")[0].rstrip()
+        if loc.endswith(probe + "/"):
+            return path + "/" if _route_exists(base, path + "/", sess) else path
+    if code not in (401, 403, 404):
+        return path
+    if code == 404 and not path.endswith("/") and _route_exists(base, path + "/", sess):
+        return path + "/"
+    return None
+
+
+def _get_patiently(sess, url: str, *, tries: int = 2):
+    """GET with ONE bounded wait on HTTP 429 (honouring Retry-After up to 10 s) — discovery must never hammer a
+    rate-limited app or read its 'slow down' as 'no such route'."""
+    import time as _t
+    r = sess.get(url, timeout=10, allow_redirects=False)
+    for _ in range(tries - 1):
+        if getattr(r, "status_code", 0) != 429:
+            break
+        try:
+            wait = min(10.0, float(r.headers.get("Retry-After", "1")))
+        except Exception:
+            wait = 1.0
+        _t.sleep(max(0.5, wait))
+        r = sess.get(url, timeout=10, allow_redirects=False)
+    return r
 
 
 def _route_exists(base: str, path: str, sess: requests.Session) -> bool:
@@ -471,7 +655,7 @@ def _route_exists(base: str, path: str, sess: requests.Session) -> bool:
     """
     probe = re.sub(r"\{[^}]+\}|:([A-Za-z_]+)", "1", path)   # fill path params/{id}/:slug
     try:
-        r = sess.get(base + probe, timeout=10, allow_redirects=False)
+        r = _get_patiently(sess, base + probe)
     except Exception:
         return False
     return getattr(r, "status_code", 404) not in (401, 403, 404)

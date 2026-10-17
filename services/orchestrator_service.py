@@ -127,9 +127,12 @@ class OrchestratorService:
         # 1b) Ground the endpoints in the RUNNING app (rule #1: the running app is
         #     the source of truth; the code only says WHAT is risky). The code model
         #     keeps config/secrets/risks; the live OpenAPI spec supplies exact paths.
+        spec_less = False                       # True when the app serves no OpenAPI and the surface is GUESSED
         try:
-            from services.live_surface import ground_endpoints, recover_base_path
-            live = ground_endpoints(base_url, spec_url=spec_url)
+            from services.live_surface import authed_session, ground_endpoints, recover_base_path
+            disc_sess = authed_session(auth)       # discovery is read-only, but carries the operator's credentials
+            live = ground_endpoints(base_url, session=disc_sess, spec_url=spec_url)
+            spec_less = not live
             if live:
                 model.endpoints = live
                 prog.emit("orchestrate", "info",
@@ -137,14 +140,14 @@ class OrchestratorService:
             else:
                 # No OpenAPI: the code-derived paths may miss the base path the API is
                 # mounted under (e.g. /users vs /api/users). Recover it from the live app.
-                pref = recover_base_path(model, base_url)
+                pref = recover_base_path(model, base_url, session=disc_sess)
                 if pref:
                     prog.emit("orchestrate", "info", f"recovered base path '{pref}' from the live app")
                 # B5 — spec-less discovery: probe common REST/GraphQL paths and add the
                 # live ones, so a no-spec target still gets a real surface (not only
                 # unverified code inference).
                 from services.live_surface import discover_endpoints
-                disc = discover_endpoints(base_url, model)
+                disc = discover_endpoints(base_url, model, session=disc_sess)
                 if disc:
                     model.endpoints = list(getattr(model, "endpoints", []) or []) + disc
                     prog.emit("orchestrate", "info",
@@ -170,6 +173,8 @@ class OrchestratorService:
             probe_result = self._reverify(probe_result, model, base_url, auth, reverify, prog,
                                           read_only=read_only)
         ro_skips: list[dict] = []      # read-only: what was NOT run outside the probes
+        fam_side = {"created": 0, "cleaned": 0, "leftover": [], "not_tested": []}   # writes outside the probe battery
+        self._family_side = fam_side
 
         # 3b) Tour the live UI (browser-driven) and turn what the browser sees —
         #     uncaught JS errors, failed API calls — into findings. Needs Playwright
@@ -292,6 +297,7 @@ class OrchestratorService:
         prog.emit("orchestrate", "step", f"executing {len(executable)} test(s)")
         execution = ExecutionService(self.context).execute(
             executable, mode="api", base_url=base_url, auth=auth)
+        self._cleanup_execution(model, base_url, execution, fam_side)
         investigation = None
         # The deterministic coverage templates carry their own verdict
         # (_confirmed_from_templates, with calibrated severities). Don't let the LLM
@@ -324,8 +330,6 @@ class OrchestratorService:
         #     endpoint for it with the per-class cap lifted. Deterministic and bounded,
         #     and it starts ONLY from confirmed bugs — never suspects — so a false
         #     positive can't compound across the family.
-        fam_side = {"created": 0, "cleaned": 0, "leftover": [], "not_tested": []}
-        self._family_side = fam_side
         try:
             family = self._expand_families(confirmed, model, base_url, auth=auth, read_only=read_only)
             if family:
@@ -371,6 +375,7 @@ class OrchestratorService:
                         r2 = self._read_only_cases(r2, ro_skips, prog)
                     exe2 = ExecutionService(self.context).execute(
                         r2, mode="api", base_url=base_url, auth=auth)
+                    self._cleanup_execution(model, base_url, exe2, fam_side)
                     gen2 = [t for t in round2_tests if t.get("attack") != "coverage-template"]
                     crit2 = CriticService(self.context).review(self._only_results_of(exe2, gen2), gen2)
                     inv2 = InvestigatorService(self.context).investigate(crit2, gen2, base_url=base_url)
@@ -417,7 +422,9 @@ class OrchestratorService:
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens, legs=legs, evidence=evidence,
             not_tested=list(getattr(probe_result, "skipped", []) or []) + ro_skips + fam_side["not_tested"]
-                       + self._surface_gap(model),
+                       + self._surface_gap(model)
+                       + self._blind_spot_gap(model, list(getattr(probe_result, "skipped", []) or []),
+                                              spec_less),
             left_on_target=list(getattr(probe_result, "leftover", []) or []) + fam_side["leftover"],
             created_records=getattr(probe_result, "created_records", 0) + fam_side["created"],
             cleaned_records=getattr(probe_result, "cleaned_records", 0) + fam_side["cleaned"])
@@ -439,6 +446,23 @@ class OrchestratorService:
 
     # ── Re-verify ("reproduce 2/2", every anomaly gets a clean rerun) ──
 
+    def _cleanup_execution(self, model, base_url: str, execution, side: dict) -> None:
+        """Remove the records the executed tests created, and book created/cleaned/left into `side`."""
+        created = list(getattr(execution, "created", []) or [])
+        if not created:
+            return
+        try:
+            import requests
+
+            from execution.probes import cleanup_artifacts, leftover_artifacts
+            sess = requests.Session()
+            sess._qax_created = created
+            side["created"] += len(created)
+            side["cleaned"] += cleanup_artifacts(model, base_url, sess)
+            side["leftover"] += leftover_artifacts(sess, "coverage test: not cleaned")
+        except Exception as exc:
+            logger.warning("coverage-test cleanup failed: %s", exc)
+
     @staticmethod
     def _only_results_of(execution, tests: list) -> dict:
         """The execution's batch dict restricted to the results of `tests` (the generated ones), so the
@@ -451,6 +475,25 @@ class OrchestratorService:
         return raw
 
     SMALL_SURFACE = 5
+
+    @classmethod
+    def _blind_spot_gap(cls, model, not_tested: list, spec_less: bool) -> list[dict]:
+        """
+        Without a spec, "not applicable — no such endpoint" only means QAX did not SEE one. Say so, listing
+        which checks that verdict covers, instead of letting it read as 'nothing to test' (found on linkding:
+        bookmark create/read-by-id existed, QAX never discovered them, and BOLA/persistence said n/a).
+        """
+        if not spec_less:
+            return []
+        shaky = sorted({str(n.get("probe")) for n in not_tested if n.get("kind") == "not-applicable"
+                        and str(n.get("reason", "")).lower().startswith(("no ", "none "))})
+        if not shaky:
+            return []
+        return [{"probe": "surface", "kind": "missing-prerequisite", "needs": "api-surface",
+                 "reason": "no OpenAPI spec was found, so QAX guessed the endpoints by name; these checks answered "
+                           "'not applicable / nothing found', which only means QAX could not SEE a matching "
+                           "endpoint, not that the app has none: " + ", ".join(shaky[:12])
+                           + (" …" if len(shaky) > 12 else "")}]
 
     @classmethod
     def _surface_gap(cls, model) -> list[dict]:

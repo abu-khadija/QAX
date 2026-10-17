@@ -172,3 +172,65 @@ def test_cleanup_uses_the_server_assigned_id_from_the_create_response():
     s.request("POST", "http://t/api/posts", json={"text": "x"}, headers={"Authorization": "Bearer A"})
     m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/posts/{id}"}])
     assert cleanup_artifacts(m, "http://t", s) == 1 and s.deleted == ["http://t/api/posts/7"]
+
+
+def test_cleanup_prefers_the_server_assigned_id_over_a_title_guess():
+    from unittest.mock import MagicMock
+    from execution.probes import cleanup_artifacts
+    from services.results import AppModel
+
+    class S:
+        def __init__(self):
+            self._qax_created = [{"collection": "/api/bookmarks/", "body": {"title": "qaxmarker", "url": "https://a"},
+                                  "headers": {}, "resp_id": "42"}]
+            self.deleted = []
+        def delete(self, url, headers=None, timeout=None):
+            self.deleted.append(url); return MagicMock(status_code=204)
+    s = S()
+    m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/bookmarks/{id}/"}])
+    assert cleanup_artifacts(m, "http://t", s) == 1 and s.deleted == ["http://t/api/bookmarks/42/"]
+
+
+def test_a_404_on_delete_means_already_gone_and_one_record_is_one_entry():
+    """Regression (linkding): the same record was registered under '/x' and '/x/', the second DELETE 404'd, and
+    QAX reported records 'left on the target' that no longer existed."""
+    from unittest.mock import MagicMock
+    from execution.probes import _record_created, cleanup_artifacts, leftover_artifacts
+    from services.results import AppModel
+
+    class S:
+        def __init__(self): self._qax_created = []; self.calls = []
+        def delete(self, url, headers=None, timeout=None):
+            self.calls.append(url); return MagicMock(status_code=204 if len(self.calls) == 1 else 404)
+    s = S()
+    _record_created(s, "/api/bookmarks/", {"title": "t"}, {})
+    s._qax_created[0]["resp_id"] = "9"
+    _record_created(s, "/api/bookmarks", {"title": "t"}, {})        # same record, other slash spelling
+    assert len(s._qax_created) == 1
+    m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/bookmarks/{id}/"}])
+    assert cleanup_artifacts(m, "http://t", s) == 1 and leftover_artifacts(s) == []
+    s2 = S(); s2.calls = ["x"]                                        # a lone 404: already gone, not left behind
+    _record_created(s2, "/api/bookmarks/", {"title": "u"}, {}); s2._qax_created[0]["resp_id"] = "3"
+    assert cleanup_artifacts(m, "http://t", s2) == 1 and leftover_artifacts(s2) == []
+
+
+def test_cleanup_asks_the_server_whether_delete_is_allowed_when_no_route_is_known():
+    """Regression (linkding, empty at discovery): no DELETE route was inferred, so created bookmarks were left.
+    The server's own OPTIONS Allow header on <collection>/<id>/ now authorises the delete."""
+    from unittest.mock import MagicMock
+    from execution.probes import cleanup_artifacts, leftover_artifacts
+    from services.results import AppModel
+
+    class S:
+        def __init__(self, allow): self._qax_created = [{"collection": "/api/bookmarks/", "body": {"t": 1},
+                                  "headers": {"Authorization": "Token a"}, "resp_id": "7"}]; self.allow = allow; self.deleted = []
+        def options(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=200, headers={"Allow": self.allow})
+        def delete(self, url, headers=None, timeout=None):
+            self.deleted.append((url, headers)); return MagicMock(status_code=204)
+    m = AppModel(root="/x", endpoints=[{"method": "GET", "path": "/api/bookmarks/"}])      # no DELETE route known
+    ok = S("GET, DELETE, OPTIONS")
+    assert cleanup_artifacts(m, "http://t", ok) == 1 and ok.deleted == [("http://t/api/bookmarks/7/", {"Authorization": "Token a"})]
+    no = S("GET, OPTIONS")                                                                 # the server says: not allowed
+    assert cleanup_artifacts(m, "http://t", no) == 0 and no.deleted == []
+    assert leftover_artifacts(no)[0]["why"] == "the API has no DELETE endpoint for it"

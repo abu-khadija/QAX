@@ -1308,7 +1308,8 @@ def _record_created(sess, collection: str, body: dict, headers: dict) -> None:
         if reg is None:
             return
         entry = {"collection": collection, "body": dict(body or {}), "headers": dict(headers or {})}
-        same = next((a for a in reg if a.get("collection") == collection and a.get("body") == entry["body"]), None)
+        same = next((a for a in reg if str(a.get("collection", "")).rstrip("/") == str(collection).rstrip("/")
+                     and a.get("body") == entry["body"]), None)
         if same is not None:          # already captured at the session boundary (track_writes)
             same.update(entry)
             same.pop("auto", None)
@@ -1372,7 +1373,8 @@ def track_writes(sess):
                     coll = _collection_of(urlparse(str(url)).path)
                     reg = sess._qax_created
                     rid = _response_id(r)
-                    prior = next((x for x in reg if x.get("collection") == coll and x.get("body") == body), None)
+                    prior = next((x for x in reg if str(x.get("collection", "")).rstrip("/") == coll.rstrip("/")
+                                  and x.get("body") == body), None)
                     if prior is None:
                         reg.append({"collection": coll, "body": dict(body), "headers": dict(kw.get("headers") or {}),
                                     "auto": True, "resp_id": rid})
@@ -1425,6 +1427,28 @@ def leftover_artifacts(session, default_why: str = "not cleaned") -> list[dict]:
         return []
 
 
+def _delete_by_advertised_route(session, base: str, art: dict) -> bool:
+    """
+    Delete a record QAX created via `<collection>/<server id>[/]` — but only when the SERVER says DELETE is allowed
+    there (an OPTIONS `Allow` header). Needs the server-assigned id captured at creation. Never raises.
+    """
+    rid = art.get("resp_id")
+    coll = str(art.get("collection", ""))
+    if not rid or not coll or not hasattr(session, "options"):
+        return False
+    stem = coll.rstrip("/") + "/" + str(rid)
+    for url in ([f"{base}{stem}/", f"{base}{stem}"] if coll.endswith("/") else [f"{base}{stem}", f"{base}{stem}/"]):
+        try:
+            o = session.options(url, headers=art.get("headers", {}), timeout=15)
+            allow = {m.strip().upper() for m in str(getattr(o, "headers", {}).get("Allow", "")).split(",")}
+            if getattr(o, "status_code", 500) < 400 and "DELETE" in allow:
+                r = session.delete(url, headers=art.get("headers", {}), timeout=15)
+                return getattr(r, "status_code", 500) < 300 or getattr(r, "status_code", 0) in (404, 410)
+        except Exception:
+            continue
+    return False
+
+
 def cleanup_artifacts(model, base_url: str, session) -> int:
     """
     Best-effort DELETE of the disposable records QAX created this scan. Deletes ONLY
@@ -1449,14 +1473,25 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
             m = re.search(r"\{([^}]+)\}", p)
             if m:
                 dels.append((p, m.group(1), p[:m.start()].rstrip("/")))
-    if not dels:
-        left.extend(_left(a, "the API has no DELETE endpoint for it") for a in reg)
-        return 0
     cleaned = 0
+    if not dels:
+        # No DELETE route is known (a spec-less app whose lists were empty when discovered). Records QAX
+        # created have a server-assigned id, so ask the server itself: OPTIONS (a safe method) on the
+        # conventional item route says whether DELETE is allowed. Only records QAX created are touched.
+        for art in reg:
+            if _delete_by_advertised_route(session, base, art):
+                cleaned += 1
+            else:
+                left.append(_left(art, "the API has no DELETE endpoint for it"))
+        return cleaned
     for art in reg:
-        match = next((d for d in dels if d[2] == art.get("collection", "")), None)
+        # "/api/bookmarks" and "/api/bookmarks/" are the same collection (Django wants the slash).
+        match = next((d for d in dels if d[2].rstrip("/") == str(art.get("collection", "")).rstrip("/")), None)
         if not match:
-            left.append(_left(art, "no DELETE endpoint for this collection"))
+            if _delete_by_advertised_route(session, base, art):
+                cleaned += 1
+            else:
+                left.append(_left(art, "no DELETE endpoint for this collection"))
             continue
         path, param, _ = match
         body = art.get("body", {})
@@ -1464,10 +1499,12 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
         if key is None:
             key = next((v for k, v in body.items() if k.lower() == param.lower()), None)
         if key is None:
+            # The id the SERVER assigned is the route's identifier; a title/name from our body is a guess
+            # (found on linkding: DELETE /bookmarks/<title> -> 404, 20 records left behind).
+            key = art.get("resp_id")
+        if key is None:
             key = next((body[f] for f in body if any(k in f.lower()
                         for k in ("username", "email", "title", "name", "id", "key", "slug"))), None)
-        if key is None:
-            key = art.get("resp_id")       # server-generated id captured from the create response
         if key is None:
             left.append(_left(art, "could not work out its key to delete it"))
             continue
@@ -1475,8 +1512,8 @@ def cleanup_artifacts(model, base_url: str, session) -> int:
         try:
             r = session.delete(url, headers=art.get("headers", {}), timeout=15)
             code = getattr(r, "status_code", 500)
-            if code < 300:
-                cleaned += 1
+            if code < 300 or code in (404, 410):
+                cleaned += 1      # 404/410: it is gone (deleted by an earlier entry for the same record, or by the app)
             else:
                 left.append(_left(art, f"delete was refused (HTTP {code})"))
         except Exception:
@@ -1502,6 +1539,22 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
     # token across probes. BOLA's two-user control needs genuinely distinct users, and
     # sharing one "primary" user across probes defeats it (B would read its own object).
     return _auth_token(sess, base, recipe, model, identity)
+
+
+def _route_key_field(param: str, fields: list[str]) -> str | None:
+    """
+    Which create-body field is the identifier the read route {param} takes? An exact name match; for a
+    slug/name/title-like param the matching text field. For an ``id``/``pk``/``uuid`` param NONE — the server
+    assigns it, and using a title as the key made BOLA read /bookmarks/<title>/ and 404 on its own object
+    (found on linkding).
+    """
+    low = param.lower()
+    exact = next((f for f in fields if f.lower() == low), None)
+    if exact:
+        return exact
+    if low in ("id", "pk", "uuid", "guid", "_id") or low.endswith("_id") or low.endswith("id") and len(low) <= 4:
+        return None
+    return next((f for f in fields if any(k in f.lower() for k in ("slug", "name", "title", "key", "code"))), None)
 
 
 def _declared_value(endpoint: dict | None, field: str, unique: str):
@@ -1570,8 +1623,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         if not post:
             continue
         pf = field_names(post.get("request_fields"))
-        key_field = next((f for f in pf if f.lower() == param.lower()), None) \
-            or next((f for f in pf if any(k in f.lower() for k in ("title", "name", "id", "slug", "key"))), None)
+        key_field = _route_key_field(param, pf)
         # No key field in the create body = the SERVER generates the id (the common case: POST /posts
         # {"text": ...} -> {"id": 7}); the probe then reads the id back from the create response.
         pairs.append((post, ge, prefix, param, key_field, pf))
@@ -1622,7 +1674,7 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
         auth_a = _auth_headers(ta, auth)
         auth_b = _auth_headers(tb, auth)
         try:
-            cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=auth_a, timeout=15)
+            cr = sess.post(f"{base}{post.get('path') or prefix}", json=nest_body(body), headers=auth_a, timeout=15)
             if cr.status_code >= 400:
                 create_codes.append(cr.status_code)
                 continue
@@ -2779,9 +2831,8 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
         if not post:
             continue
         pf = field_names(post.get("request_fields"))
-        key_field = next((f for f in pf if f.lower() == param.lower()), None) \
-            or next((f for f in pf if any(k in f.lower() for k in ("title", "name", "slug", "key", "id"))), None)
-        if key_field and _persistable_fields([f for f in pf if f != key_field]):
+        key_field = _route_key_field(param, pf)      # None = the server assigns the id (read it from the response)
+        if _persistable_fields([f for f in pf if f != key_field]):
             pairs.append((post, ge, prefix, param, key_field, pf))
     if not pairs:
         _no_candidates(sess, "persistence", "create endpoint paired with a read-by-key GET")
@@ -2825,14 +2876,19 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
         tried += 1
         headers = _auth_headers(token, auth) if (post.get("auth_required") or ge.get("auth_required")) else {}
         try:
-            cr = sess.post(f"{base}{prefix}", json=nest_body(body), headers=headers, timeout=15)
+            cr = sess.post(f"{base}{post.get('path') or prefix}", json=nest_body(body), headers=headers, timeout=15)
         except Exception:
             continue
         if not (200 <= cr.status_code < 300):      # control: the create must be accepted
             continue
         created_ok += 1
         _record_created(sess, prefix, body, headers)
-        read_url = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
+        if key_field is None:                       # server-assigned id: take it from the create response
+            rid = _response_id(cr)
+            if rid is None:
+                continue
+            key = rid
+        read_url = f"{base}{str(ge['path']).replace('{' + param + '}', str(key))}"
         try:
             rr = sess.get(read_url, headers=headers, timeout=15)
         except Exception:

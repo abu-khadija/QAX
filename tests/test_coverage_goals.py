@@ -316,3 +316,9 @@ def test_shared_by_design_idor_is_not_confirmed_but_a_private_one_is():
                         {"step_number": 4, "method": "GET", "path": "/p/{{rid}}", "expected_status": [403, 404]}]}
     assert O._confirmed_from_templates(Ex(True), [tc], []) == []                       # listed -> shared by design
     assert len(O._confirmed_from_templates(Ex(False), [tc], [])) == 1                   # not listed -> private -> bug
+
+
+def test_collection_keeps_the_trailing_slash_of_a_slash_api():
+    assert cg._collection_of("/api/bookmarks/{id}/") == "/api/bookmarks/"       # Django: bare POST can 500
+    assert cg._collection_of("/api/posts/{id}") == "/api/posts"
+    assert cg._collection_of("/todos/{id}/archive") == "/todos"

@@ -1018,6 +1018,7 @@ class ExecutionResult:
     mode: str = "none"
     raw: dict = field(default_factory=dict)
     error: str | None = None
+    created: list = field(default_factory=list)    # records the executed tests created (for cleanup)
 
     @property
     def total(self) -> int:
