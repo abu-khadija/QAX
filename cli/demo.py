@@ -73,6 +73,53 @@ def next_steps(out_json: str) -> str:
     ])
 
 
+def web_url(app_port: int, ui_port: int) -> str:
+    """The web UI address with the demo app's URL pre-filled (the page reads ?url=)."""
+    return f"http://127.0.0.1:{ui_port}/app?url=http://127.0.0.1:{app_port}"
+
+
+def run_web(app_port: int, ui_port: int = 8900) -> int:
+    """
+    `qax demo --web`: the bundled vulnerable app AND the web interface, so a person can click Preview plan and Run scan
+    instead of reading a terminal. Both listen on 127.0.0.1 only; Ctrl-C stops both. Returns an exit code.
+    """
+    url = f"http://127.0.0.1:{app_port}"
+    print(f"\n  QAX demo (web) — bundled vulnerable app on {url}, web UI on port {ui_port} (both local only) …", flush=True)
+    app = subprocess.Popen([sys.executable, str(DEMO_APP)], env=dict(os.environ, PORT=str(app_port)),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ui = subprocess.Popen([sys.executable, "-m", "web.server"], cwd=str(ROOT),
+                          env=dict(os.environ, QAX_WEB_PORT=str(ui_port)),
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        if not wait_until_up(url):
+            print("\n  The demo app did not start in time.\n")
+            return 1
+        ok = False
+        for _ in range(60):
+            try:
+                ok = urllib.request.urlopen(f"http://127.0.0.1:{ui_port}/app", timeout=1).status == 200
+                break
+            except Exception:
+                time.sleep(0.25)
+        if not ok:
+            print("\n  The web interface did not start (is port %d free? is Flask installed?).\n" % ui_port)
+            return 1
+        print(f"\n  Open this in your browser:\n\n      {web_url(app_port, ui_port)}\n", flush=True)
+        print("  Tick the authorization box, click 'Preview plan' (nothing is attacked), then 'Run scan'.", flush=True)
+        print("  Press Ctrl-C to stop.\n", flush=True)
+        try:
+            ui.wait()
+        except KeyboardInterrupt:
+            print("\n  Stopped.\n")
+        return 0
+    finally:
+        for pr in (ui, app):
+            try:
+                pr.terminate()
+            except Exception:
+                pass
+
+
 def run(argv: list[str]) -> int:
     """Entry point for `qax demo`. Returns a process exit code."""
     if not DEMO_APP.exists():
@@ -83,6 +130,9 @@ def run(argv: list[str]) -> int:
     except ImportError:
         print("\n  The demo app needs Flask:  pip install flask\n")
         return 1
+
+    if "--web" in argv:
+        return run_web(free_port())
 
     t0 = time.time()
     port = free_port()

@@ -30,6 +30,16 @@ python main.py demo
 
 You should see a list of **CONFIRMED** findings (44 on the bundled app) after about 30 seconds.
 
+Prefer a browser to a terminal (for example to show QAX to a colleague)? This starts the same demo app and the web
+interface together, with the target already filled in:
+
+```bash
+python main.py demo --web
+```
+
+Open the address it prints, tick the authorization box, click **Preview plan** (nothing is attacked), then **Run scan**.
+It is read-only by default, so it shows the 15 findings that need no writes; untick read-only for the full 44.
+
 ## 2. Your first scan: read-only
 
 ```bash

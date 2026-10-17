@@ -57,3 +57,10 @@ def test_lean_requirements_cover_the_scanner_and_exclude_the_heavy_ui():
              if l.strip() and not l.startswith("#")}
     assert {"requests", "flask", "python-dotenv", "jsonschema", "pydantic", "anthropic"} <= names
     assert not ({"streamlit", "pandas", "plotly"} & names)            # the slow installs stay out of the fast path
+
+
+def test_web_demo_url_prefills_the_target_and_the_page_reads_it():
+    from cli.demo import web_url
+    assert web_url(5555, 8900) == "http://127.0.0.1:8900/app?url=http://127.0.0.1:5555"
+    html = (__import__("pathlib").Path(__file__).resolve().parent.parent / "web" / "static" / "app.html").read_text(encoding="utf-8")
+    assert "URLSearchParams(location.search).get('url')" in html and "https?:" in html      # http(s) only, never javascript:

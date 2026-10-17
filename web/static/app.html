@@ -649,6 +649,8 @@ async function openRun(id){
 }
 loadRuns();
 $('url').addEventListener('keydown',e=>{ if(e.key==='Enter') runScan(); });
+// ?url=... pre-fills the target (used by `qax demo --web`); only http(s) values are accepted.
+(function(){ try{ const u=new URLSearchParams(location.search).get('url'); if(u && /^https?:\/\//i.test(u)) $('url').value=u; }catch(e){} })();
 // Deep links from the homepage: /app#generate opens test generation, /app#scan the scanner.
 function _modeFromHash(){ if(location.hash==='#generate') setMode('gen'); else if(location.hash==='#scan') setMode('scan'); }
 window.addEventListener('hashchange', _modeFromHash); _modeFromHash();

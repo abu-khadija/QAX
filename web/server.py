@@ -509,4 +509,4 @@ def scan_stream():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8900, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=int(os.getenv("QAX_WEB_PORT", "8900") or 8900), debug=False, threaded=True)
