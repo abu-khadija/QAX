@@ -1198,6 +1198,8 @@ class OrchestratorService:
         else:
             from execution.probes import track_writes
             track_writes(sess)
+        from core.throttle import guard as _throttle_guard
+        _throttle_guard(sess)
         for cid, fn in todo:
             try:
                 for f in fn(model, base_url, session=sess, auth=auth, limit=self._FAMILY_SWEEP_LIMIT):

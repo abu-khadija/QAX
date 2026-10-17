@@ -137,6 +137,8 @@ class ProbeService:
         else:
             from execution.probes import track_writes
             track_writes(shared)      # every accepted creation is registered → cleanup + LEFT ON THE TARGET
+        from core.throttle import guard as _throttle_guard
+        _throttle_guard(shared)       # 429 -> wait Retry-After, retry, pace; past the budget: stop and say so
 
         # Resolve ONE shared "utility" user for the read-only probes that only need a
         # valid login (sqli, injection, path-traversal, ...), so they don't each
@@ -453,6 +455,10 @@ class ProbeService:
             prog.emit("probe", "info", f"test-data cleanup: removed {cleaned}/{created} record(s)")
 
         skipped = list(getattr(shared, "_qax_skips", []) or [])
+        from core.throttle import ledger_entries as _throttle_ledger, summary as _throttle_summary
+        _ts = _throttle_summary(shared)
+        if _ts:
+            skipped = skipped + _throttle_ledger([_ts])
         if read_only:
             from core.read_only import blocked, ledger_entries
             skipped = ledger_entries(blocked(shared), skipped)

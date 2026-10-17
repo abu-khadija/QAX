@@ -82,6 +82,28 @@ _METHODS: dict = {}     # eval instrumentation: requests received per HTTP metho
 _WRITES: dict = {}      # eval instrumentation: write requests per "METHOD /path"
 
 
+_RATE: dict = {"start": 0.0, "n": 0}
+_RATELIMIT = int(os.environ.get("QAX_RATELIMIT", "0") or 0)       # >0: at most N requests per 2-second window
+
+
+@app.before_request
+def _rate_limit():
+    """Eval mode: a polite rate limiter (HTTP 429 + Retry-After) so the gate can prove QAX waits, retries and finishes."""
+    if not _RATELIMIT or request.path.startswith("/__qax_eval"):
+        return None
+    import time as _t
+    now = _t.time()
+    if now - _RATE["start"] > 2.0:
+        _RATE["start"], _RATE["n"] = now, 0
+    _RATE["n"] += 1
+    if _RATE["n"] > _RATELIMIT:
+        r = jsonify({"error": "rate limit exceeded"})
+        r.status_code = 429
+        r.headers["Retry-After"] = "1"
+        return r
+    return None
+
+
 @app.before_request
 def _count_method():
     """Eval-only: count every request by method, so the gate can prove a --read-only scan sent no write."""

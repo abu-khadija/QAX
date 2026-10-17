@@ -137,9 +137,11 @@ class ExecutionService:
             # scan can clean them up and report what it could not — they used to be invisible (found on
             # linkding: the DB kept tags 'owned by A' that QAX reported as 0 left on the target).
             if getattr(runner, "session", None) is not None:
+                from core.throttle import guard as _throttle_guard
                 from execution.probes import track_writes
                 runner.session._qax_created = []
                 track_writes(runner.session)
+                _throttle_guard(runner.session)
             batch = runner.execute_batch(test_cases, stop_on_fail=stop_on_fail)
             created = list(getattr(getattr(runner, "session", None), "_qax_created", []) or [])
         finally:

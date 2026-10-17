@@ -84,6 +84,10 @@ _NEEDS_HINT = {
     "auth-token": "supply a valid token with --token (QAX could not self-register or log in)",
     "valid-body": "QAX could not build a request this app accepts — an example valid request body "
                   "for the create endpoints would unblock it",
+    "slower-scan": "the target rate-limited QAX until it stopped: re-run when the limit has reset, or allow-list "
+                   "the scanner's address on the target / WAF",
+    "waf-allowlist": "a WAF or bot protection is blocking QAX: allow-list the scanner's address (QAX never "
+                     "tries to evade it), then scan again",
     "privileged-token": "this user cannot create the objects to test (HTTP 403) — supply an admin/owner token as "
                         "--token (user A) and an ordinary user's as --token-b",
     "api-surface": "the app serves no OpenAPI/Swagger document QAX could find — point QAX at it, or give it "

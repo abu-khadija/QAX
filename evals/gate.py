@@ -140,6 +140,38 @@ def _source_lane(base_url: str):
     return ProbeService(QAXContext.from_env()).run(model, base_url)
 
 
+def _rate_limited_lane() -> list[tuple[str, bool, str]]:
+    """
+    PLAN.md Phase 1 item 5: against a target that answers HTTP 429 (60 requests / 2 s, Retry-After: 1) a scan must
+    (a) finish, (b) report that it was throttled, (c) keep the CONFIRMED P1/P2 findings it makes on an unthrottled
+    target — a 429 must never be read as 'rejected' and turned into a silent miss.
+    """
+    port = _free_port()
+    env_old = os.environ.get("QAX_RATELIMIT")
+    os.environ["QAX_RATELIMIT"] = "60"
+    try:
+        proc = _boot(port, secure=False)
+    finally:
+        if env_old is None:
+            os.environ.pop("QAX_RATELIMIT", None)
+        else:
+            os.environ["QAX_RATELIMIT"] = env_old
+    base = f"http://127.0.0.1:{port}"
+    try:
+        res, _ = _scan(base)
+    finally:
+        proc.terminate()
+    notes = [n for n in res.not_tested if n.get("probe") == "scan"]
+    claims = {(b.get("probe"), b.get("target")) for b in res.confirmed if str(b.get("severity")) in ("P1", "P2")}
+    return [
+        ("rate-limited target: the scan finishes and says it was throttled",
+         bool(notes) and not res.error, f"scan notes={[n.get('reason', '')[:70] for n in notes] or 'none'}"),
+        # Measured 2026-10-17: unthrottled 36; throttled WITH the guard 36; throttled WITHOUT it 13 (23 silent misses).
+        ("rate-limited target: P1/P2 findings survive the 429s", len(claims) >= 34,
+         f"{len(claims)} P1/P2 claims (unthrottled = 36; without the throttle layer it was 13)"),
+    ]
+
+
 def _read_only_check(base_url: str) -> list[tuple[str, bool, str]]:
     """
     PLAN_TO_V1 D9 / ROADMAP A1: a --read-only scan must send NO write request. Proven on the server side:
@@ -255,6 +287,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
         res_auth, _ = _scan(f"http://127.0.0.1:{port}", auth=_two_user_auth(f"http://127.0.0.1:{port}"))
         src_res = _source_lane(f"http://127.0.0.1:{port}")
         ro_checks = _read_only_check(f"http://127.0.0.1:{port}")
+        rl_checks = _rate_limited_lane()
         ai_check = _no_ai_call_check(f"http://127.0.0.1:{port}")
         pipe_check = _pipeline_execute_check(f"http://127.0.0.1:{port}")
     finally:
@@ -290,6 +323,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     # against fakes: each planted bug in /tasks fires, none is silently skipped.
     typed_missing = sorted(_TYPED_PROBES - probes)
     checks.extend(ro_checks)
+    checks.extend(rl_checks)
     checks.append(ai_check)
     forge_hit = [f for f in getattr(src_res, "exploited", []) if f.probe == "forge-jwt"]
     checks.append(("source lane: forge-jwt proves the forgery with the leaked secret", bool(forge_hit),
