@@ -4,6 +4,8 @@
 |---|---|
 | **[PLAN.md](PLAN.md)** | **The plan — the single reference:** goal, evidence baseline, rules, phases 0–6 with dates and exit criteria, metric definitions, per-run record, risks, status and decision log |
 
+| **[PHASE0_DEMO_KIT.md](PHASE0_DEMO_KIT.md)** | The 15-minute demo flow, the questions to ask, what not to promise, and the notes template for Phase 0 |
+
 | Folder | What is in it |
 |---|---|
 | [evidence/](evidence/) | Measured results: real-app case studies (DRF, Go/Gin, Gitea), reality-check results, the orchestrator fix evidence, the generic-agent comparison, the dependency audit |
