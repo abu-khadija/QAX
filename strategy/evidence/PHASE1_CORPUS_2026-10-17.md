@@ -16,13 +16,13 @@ are for these apps and this method only; they say nothing about general accuracy
 
 | # | App | Stack / license | Auth used | Spec | Endpoints known (before → after fixes) | Final confirmed | TP | FP (final) | Left on target (QAX said → DB truth) |
 |---|---|---|---|---|---|---|---|---|---|
-| 6 | Healthchecks | Django, BSD-3 | `X-Api-Key` | none | 1 → 36 | 1 (P3 headers) | 1 | 0 | n/a (read-only) |
+| 6 | Healthchecks | Django, BSD-3 | `X-Api-Key` | none | 1 → 36 (41 with `--endpoints`) | 1 (P3 headers); with the endpoint list also a P2 dev-mode debug page (TP) | 2 | 0 | 22 created / 22 cleaned / 0 left; DB delta 0 |
 | 7 | microblog-api | Flask + apifairy, MIT | Bearer | `/apispec.json` | 2 → 27 | 3 | 3 | 0 | 13 → 13 (users; the API has no DELETE for them). DB delta +13 users, +0 posts |
 | 8 | CTFd | Flask, Apache-2.0 | `Authorization: Token` (user + admin) | `/api/v1/swagger.json` | 9 → 154 | 1 (P3 headers) | 1 | 0 | 0 |
 | 9 | linkding | Django REST, MIT | `Authorization: Token` | none | 6 → 18 | 1 (P3 CSP) | 1 | 0 | 10 → 10 (1 bookmark + 9 tags the API cannot delete) |
 | 10 | PocketBase | Go, MIT | raw token | none | 1 → 10 (with `--endpoints`) | 2 | 2 | 0 | 0 |
 
-**Totals for apps 6–10: 8 confirmed findings, 8 true positives, 0 false positives in the final scans.**
+**Totals for apps 6–10: 9 confirmed findings in the final scans, 9 true positives, 0 false positives** (one wrong P3 came from our own endpoint file, described under app 6).
 Apps 1–5 stay at 0 confirmed FP as reported earlier. Corpus size is now **10**.
 
 **Bugs in QAX that these scans exposed:** more than 30, all fixed with a regression test, golden gate 32/32 throughout
@@ -45,7 +45,14 @@ Each run: QAX 0.1.0, quick scan, supplied tokens, authorized local target. Micro
 
 ### 6. Healthchecks (BSD-3-Clause), Django
 - Without a spec QAX knew 1 endpoint (`/admin`). Reading the app's own docs pages raised it to 36.
-- Final: 1 confirmed (P3 missing security headers), TP. 0 FP. Scan read-only, ~175 requests, 0 records created.
+- Final, scanned with the API key only (no endpoint list): 36 endpoints, 1 confirmed (P3 missing CSP), TP, 0 FP. Nothing
+  could be created: the create endpoints and their bodies are not discoverable, which the report states.
+- Then with a 5-line `--endpoints` file and a one-line `--examples` body (UUID-keyed API): 41 endpoints, 22 records
+  created, 22 cleaned, 0 left, database delta 0 (an exact match). Findings: P3 headers (TP); P2 "stack trace / internals
+  disclosed" on a malformed id (TP for this instance: Django `DEBUG=True` serves its technical 404 page, a dev-mode
+  setting); and a P3 "POST rejects empty name" that is **not a finding**: Healthchecks accepts an empty name (its docs
+  say `name` is optional) and QAX only asserted it because *our own endpoint file* marked `name!` as required. Lesson:
+  `!` in `--endpoints` is a claim about the app; QUICKSTART now says so.
 - Fixed here: host-header FP; `jwt-flaws` told the operator to "supply a token" when an opaque API key was supplied;
   a 1-endpoint surface read as a near-clean scan (now a NOT TESTED gap).
 

@@ -101,6 +101,8 @@ python main.py scan ... --endpoints endpoints.txt
 # 3. You have the source: add --repo ./path/to/source
 ```
 
+A trailing `!` on a field (`name!`) **claims it is required**: QAX will then report a finding if the app accepts the request
+without it, so only mark what the app really requires.
 Listing a `DELETE` route lets QAX clean up what its tests create. Without one, QAX reports the records it
 could not delete under **LEFT ON THE TARGET** (its report is checked against the database in our tests).
 
