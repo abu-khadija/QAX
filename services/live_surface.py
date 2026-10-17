@@ -706,6 +706,8 @@ def _live_path(base: str, path: str, sess) -> str | None:
     except Exception:
         return None
     code = getattr(r, "status_code", 404)
+    if _is_catchall(r, base, sess):
+        return None                 # the same page as for a path that cannot exist: not an endpoint
     if 300 <= code < 400:
         loc = str(getattr(r, "headers", {}).get("Location", "")).split("?")[0].rstrip()
         if loc.endswith(probe + "/"):
@@ -734,6 +736,44 @@ def _get_patiently(sess, url: str, *, tries: int = 2):
     return r
 
 
+def _body_fingerprint(resp) -> tuple:
+    """(status, content-type, sha1 of the first 4 KB) — what a catch-all page looks like."""
+    import hashlib
+    body = (getattr(resp, "text", "") or "")[:4000]
+    ctype = str(getattr(resp, "headers", {}).get("Content-Type", "")).split(";")[0].strip().lower()
+    return (getattr(resp, "status_code", 0), ctype, hashlib.sha1(body.encode("utf-8", "replace")).hexdigest())
+
+
+def catchall_baseline(base: str, sess) -> tuple | None:
+    """
+    What this origin answers for a path that CANNOT exist, when that is a 2xx page: a single-page app / proxy that
+    serves index.html for every route. Computed once per session. Without it, every guessed path "exists" (126 bogus
+    endpoints on a plain SPA). None when the origin answers 404 for unknown paths (the normal case).
+    """
+    cached = getattr(sess, "_qax_catchall", "unset")
+    if cached != "unset":
+        return cached
+    import uuid
+    result = None
+    try:
+        r = sess.get(f"{base}/qax-nonexistent-{uuid.uuid4().hex[:10]}/x", timeout=10, allow_redirects=False)
+        if 200 <= getattr(r, "status_code", 0) < 300:
+            result = _body_fingerprint(r)
+    except Exception:
+        result = None
+    try:
+        sess._qax_catchall = result
+    except Exception:
+        pass
+    return result
+
+
+def _is_catchall(resp, base: str, sess) -> bool:
+    """True when `resp` is just the origin's catch-all page, i.e. proof of nothing."""
+    base_fp = catchall_baseline(base, sess)
+    return bool(base_fp) and 200 <= getattr(resp, "status_code", 0) < 300 and _body_fingerprint(resp) == base_fp
+
+
 def _route_exists(base: str, path: str, sess: requests.Session) -> bool:
     """
     True only when a GET to `path` gets a DEFINITIVE "a handler ran" response.
@@ -746,6 +786,8 @@ def _route_exists(base: str, path: str, sess: requests.Session) -> bool:
     try:
         r = _get_patiently(sess, base + probe)
     except Exception:
+        return False
+    if _is_catchall(r, base, sess):
         return False
     return getattr(r, "status_code", 404) not in (401, 403, 404)
 

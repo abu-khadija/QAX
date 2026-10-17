@@ -130,6 +130,7 @@ class OrchestratorService:
         #     the source of truth; the code only says WHAT is risky). The code model
         #     keeps config/secrets/risks; the live OpenAPI spec supplies exact paths.
         spec_less = False                       # True when the app serves no OpenAPI and the surface is GUESSED
+        surface_notes: list[dict] = []          # honest notes about the discovered surface (catch-all origin, ...)
         try:
             from services.live_surface import authed_session, ground_endpoints, recover_base_path
             disc_sess = authed_session(auth)       # discovery is read-only, but carries the operator's credentials
@@ -161,6 +162,12 @@ class OrchestratorService:
                                                            list(getattr(model, "endpoints", []) or []))
                 spec_less = False        # the operator told us the surface: "not applicable" is meaningful again
                 prog.emit("orchestrate", "info", f"added {len(extra_endpoints)} endpoint(s) from the supplied list")
+            if getattr(disc_sess, "_qax_catchall", None):
+                surface_notes.append({
+                    "probe": "surface", "kind": "missing-prerequisite", "needs": "api-surface",
+                    "reason": "this address answers EVERY path with the same page (a single-page app or a proxy "
+                              "catch-all), so QAX found no API on it. Point QAX at the API's own address (often a "
+                              "different host or an /api prefix), or give it --spec / --endpoints"})
             if examples:                 # --examples: valid bodies the operator supplied (domain data QAX cannot guess)
                 from services.live_surface import apply_examples
                 model.endpoints = apply_examples(list(getattr(model, "endpoints", []) or []), examples)
@@ -434,7 +441,7 @@ class OrchestratorService:
             tests_run=len(executable), suspects=len(detection.findings),
             ui_screens=ui_screens, legs=legs, evidence=evidence,
             not_tested=list(getattr(probe_result, "skipped", []) or []) + ro_skips + fam_side["not_tested"]
-                       + self._surface_gap(model)
+                       + self._surface_gap(model) + surface_notes
                        + self._blind_spot_gap(model, list(getattr(probe_result, "skipped", []) or []),
                                               spec_less),
             left_on_target=list(getattr(probe_result, "leftover", []) or []) + fam_side["leftover"],

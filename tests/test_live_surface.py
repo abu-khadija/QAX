@@ -312,8 +312,10 @@ def test_a_429_is_waited_out_once_not_read_as_no_such_route(monkeypatch):
     class S:
         def __init__(self): self.n = 0
         def get(self, url, timeout=None, allow_redirects=None, **k):
+            if "qax-nonexistent" in url:                         # the catch-all control: an unknown path is a 404
+                return MagicMock(status_code=404, headers={}, text="")
             self.n += 1
-            return MagicMock(status_code=429 if self.n == 1 else 200, headers={"Retry-After": "1"}, text="")
+            return MagicMock(status_code=429 if self.n == 1 else 200, headers={"Retry-After": "1"}, text="[]")
     s = S()
     assert ls._route_exists("http://x", "/api/things", s) is True and s.n == 2
 
@@ -406,3 +408,34 @@ def test_endpoint_list_parser_reads_methods_paths_fields_and_required_marks():
     post = by[("POST", "/api/collections/notes/records")]
     assert post["request_fields"] == ["title", "body"] and post["required_fields"] == ["title"]
     assert all(e["source"] == "supplied" for e in eps)
+
+
+# ── catch-all origins (a single-page app answers every path with the same page) ──────────────────
+
+class _SpaLike:
+    """Every path is the same index.html (200) — except /api/things, a real JSON route."""
+    INDEX = "<!doctype html><html><div id=root></div></html>"
+    def __init__(self): self.headers = {}; self.cookies = {}
+    def get(self, url, timeout=None, allow_redirects=None, **k):
+        from urllib.parse import urlparse
+        p = urlparse(url).path
+        if p == "/api/users":
+            return MagicMock(status_code=200, headers={"Content-Type": "application/json"}, text='[{"id": 1}]',
+                             json=lambda: [{"id": 1}])
+        return MagicMock(status_code=200, headers={"Content-Type": "text/html; charset=utf-8"}, text=self.INDEX)
+    def options(self, *a, **k): return MagicMock(status_code=405, headers={})
+
+
+def test_a_catch_all_page_is_not_an_endpoint_but_a_real_json_route_still_is():
+    import services.live_surface as ls
+    sess = _SpaLike()
+    got = {d["path"] for d in ls.discover_endpoints("http://x", AppModel(root="/x", endpoints=[]), session=sess)}
+    assert got == {"/api/users", "/api/users/{id}"}     # the real route + its item route; not 126 look-alikes
+    assert sess._qax_catchall is not None               # the orchestrator reports "every path is the same page"
+
+
+def test_a_normal_404_origin_has_no_catch_all():
+    import services.live_surface as ls
+    class S:
+        def get(self, url, timeout=None, allow_redirects=None, **k): return MagicMock(status_code=404, headers={}, text="")
+    assert ls.catchall_baseline("http://x", S()) is None
