@@ -131,7 +131,9 @@ or a firewall; ask whoever runs the target to allow-list your address.
 python -m web.server        # then open http://127.0.0.1:8900/app
 ```
 
-Enter the URL and (optionally) a token, a second user's token, a session cookie or your spec location. **Read-only is
+Enter the URL and (optionally) a token, a second user's token, a session cookie, extra headers (a CSRF nonce), your spec
+location, an endpoint list or example bodies (the same things as the command-line options). Secrets are sent in the
+request body, never in a URL. **Read-only is
 on by default.** Click **Preview plan** to see what QAX will do (the endpoints it found, which checks write data,
 what is missing) before anything is attacked, then run the scan. Finished scans are kept under **Past scans**.
 

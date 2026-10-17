@@ -211,6 +211,16 @@
           <input id="cookie" placeholder="sessionid=...; csrftoken=..." autocomplete="off" spellcheck="false"></div>
       </div>
       <div class="row" style="margin-top:10px">
+        <div class="field"><label for="hdrs">Extra headers (optional, one per line)</label>
+          <textarea id="hdrs" rows="2" placeholder="CSRF-Token: abc123" spellcheck="false"></textarea></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="field"><label for="eplist">Endpoint list — only if the app has no spec (optional)</label>
+          <textarea id="eplist" rows="3" placeholder="GET /api/things&#10;POST /api/things name!,tags&#10;DELETE /api/things/{id}" spellcheck="false"></textarea></div>
+        <div class="field"><label for="exbodies">Valid example bodies (optional JSON)</label>
+          <textarea id="exbodies" rows="3" placeholder='{"POST /api/things": {"name": "QAX {{unique}}"}}' spellcheck="false"></textarea></div>
+      </div>
+      <div class="row" style="margin-top:10px">
         <div class="field"><label for="specurl">OpenAPI spec location (optional)</label>
           <input id="specurl" placeholder="/apispec.json — only if your spec is not at a standard path" autocomplete="off" spellcheck="false"></div>
       </div>
@@ -396,19 +406,44 @@ function runScan(){
   $('err').style.display='none'; $('results').style.display='none';
   $('live').innerHTML=''; $('scanmsg').textContent='Scanning '+url+' …';
   $('scanning').style.display='block';
-  if(_es) _es.close();
-  const qs=new URLSearchParams({url, repo:$('repo').value.trim(), token:$('token').value.trim(), token_b:$('tokenb').value.trim(), cookie:$('cookie').value.trim(), spec:$('specurl').value.trim(), read_only:$('readonly').checked?'true':'false', authorized:'true'});
-  _es=new EventSource('/api/scan/stream?'+qs.toString());
-  _es.onmessage=(e)=>{
-    let m; try{ m=JSON.parse(e.data); }catch{ return; }
-    if(m.type==='progress'){ logLine(m.step,m.status,m.detail); }
-    else if(m.type==='result'){ finish(); render(m.payload); }
-    else if(m.type==='error'){ finish(); showError(m.error||'Scan error'); }
-    else if(m.type==='done'){ finish(); }
-  };
-  _es.onerror=()=>{ finish(); if($('results').style.display!=='block' && $('err').style.display!=='block') showError('Lost connection to the scanner backend.'); };
+  if(_es) _es.abort();
+  _es=new AbortController();
+  streamScan(_es);
 }
-function finish(){ if(_es){ _es.close(); _es=null; } $('scanning').style.display='none'; $('go').disabled=false; setTimeout(loadRuns,600); }
+// The scan is streamed over a POST (fetch) so credentials never appear in a URL.
+async function streamScan(ctl){
+  try{
+    const resp=await fetch('/api/scan/stream',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({..._scanFields(), repo:$('repo').value.trim(), authorized:'true'}), signal:ctl.signal});
+    if(!resp.ok){ let j={}; try{ j=await resp.json(); }catch{} finish(); showError(j.error||('Scan request failed (HTTP '+resp.status+')')); return; }
+    const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='';
+    for(;;){
+      const {value,done}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('\n\n'))>=0){
+        const chunk=buf.slice(0,i); buf=buf.slice(i+2);
+        const line=chunk.split('\n').find(l=>l.startsWith('data:')); if(!line) continue;
+        let m; try{ m=JSON.parse(line.slice(5).trim()); }catch{ continue; }
+        if(m.type==='progress'){ logLine(m.step,m.status,m.detail); }
+        else if(m.type==='result'){ finish(); render(m.payload); }
+        else if(m.type==='error'){ finish(); showError(m.error||'Scan error'); }
+        else if(m.type==='done'){ finish(); }
+      }
+    }
+    finish();
+  }catch(e){
+    if(e && e.name==='AbortError') return;
+    finish(); if($('results').style.display!=='block' && $('err').style.display!=='block') showError('Lost connection to the scanner backend.');
+  }
+}
+// Everything the scan/plan endpoints accept, in one place (sent as a JSON body).
+function _scanFields(){
+  return {url:$('url').value.trim(), token:$('token').value.trim(), token_b:$('tokenb').value.trim(),
+    cookie:$('cookie').value.trim(), spec:$('specurl').value.trim(), headers:$('hdrs').value,
+    endpoints:$('eplist').value, examples:$('exbodies').value, read_only:$('readonly').checked};
+}
+function finish(){ if(_es){ try{ _es.abort(); }catch{} _es=null; } $('scanning').style.display='none'; $('go').disabled=false; setTimeout(loadRuns,600); }
 function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }
 
 function render(d){
@@ -609,8 +644,7 @@ async function previewPlan(){
   $('planbtn').disabled=true;
   try{
     const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({url, token:$('token').value.trim(), token_b:$('tokenb').value.trim(),
-        cookie:$('cookie').value.trim(), spec:$('specurl').value.trim(), read_only:$('readonly').checked})});
+      body:JSON.stringify(_scanFields())});
     const p=await r.json();
     if(!r.ok){ box.innerHTML='<div class="hk">⚠ '+esc(p.error||'Could not build a plan')+'</div>'; return; }
     const c=p.checks||{}, s=p.surface||{};

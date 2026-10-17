@@ -7,6 +7,9 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- Web UI: extra headers, endpoint list and example bodies; the scan is streamed over a POST so tokens, cookies and CSRF
+  nonces never appear in a URL (they used to be in the query string).
+- `qax demo --web`: the bundled demo app and the web UI together, with the target pre-filled.
 - `--examples FILE`: valid request bodies for create endpoints QAX cannot build itself (`{{unique}}` per request).
 - `--header "Name: value"` (repeatable): static headers on every request, e.g. a CSRF nonce for a cookie session.
 - `--spec` (OpenAPI document in an unusual place), `--endpoints FILE` (a hand-written endpoint list for apps with no

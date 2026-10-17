@@ -66,7 +66,7 @@ def _all_probe_names() -> list[str]:
     return sorted(set(names))
 
 
-def _scan_plan(url: str, auth, read_only: bool, spec_url: str | None = None) -> dict:
+def _scan_plan(url: str, auth, read_only: bool, spec_url: str | None = None, extras: dict | None = None) -> dict:
     """Preview the surface + the checks that will run. Read-only: discovers endpoints, attacks nothing."""
     import requests
 
@@ -85,6 +85,13 @@ def _scan_plan(url: str, auth, read_only: bool, spec_url: str | None = None) -> 
     else:
         eps = discover_endpoints(base, AppModel(root="", endpoints=[]), session=sess)
         source = "discovery (no spec found)"
+    if (extras or {}).get("endpoints"):
+        from services.live_surface import apply_supplied_endpoints
+        eps = apply_supplied_endpoints(base, extras["endpoints"], eps, sess)
+        source += " + your endpoint list"
+    if (extras or {}).get("examples"):
+        from services.live_surface import apply_examples
+        eps = apply_examples(eps, extras["examples"])
     paths = sorted({normalize_path_params(str(e.get("path", ""))) for e in eps if e.get("path")})
 
     names = _all_probe_names()
@@ -175,11 +182,11 @@ def plan():
     only read requests to discover the surface — it never attacks. So the operator approves before any
     active probe runs.
     """
-    url, repo, auth, read_only, spec_url = _inputs()
+    url, repo, auth, read_only, spec_url, extras = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     try:
-        plan = _scan_plan(url, auth, read_only, spec_url)
+        plan = _scan_plan(url, auth, read_only, spec_url, extras)
     except Exception as exc:
         return jsonify({"error": f"Could not build a plan: {exc}"}), 502
     return jsonify(plan)
@@ -235,10 +242,17 @@ def _inputs():
     scheme = "" if scheme == "" else (str(scheme).strip() or "Bearer")
     read_only = str(src.get("read_only", "")).strip().lower() in ("1", "true", "yes", "on")
     spec_url = str(src.get("spec", "")).strip() or None
+    from core.session_auth import parse_headers
+    from services.live_surface import parse_endpoint_lines, parse_examples
+    raw_headers = src.get("headers") or ""
+    headers = parse_headers(raw_headers if isinstance(raw_headers, list) else str(raw_headers).splitlines())
+    extras = {"endpoints": parse_endpoint_lines(str(src.get("endpoints", "") or "")),
+              "examples": parse_examples(str(src.get("examples", "") or ""))}
     auth = None
-    if token or token_b or cookie:
-        auth = {"token": token, "token_b": token_b, "cookie": cookie, "header": header, "scheme": scheme}
-    return url, repo, auth, read_only, spec_url
+    if token or token_b or cookie or headers:
+        auth = {"token": token, "token_b": token_b, "cookie": cookie, "header": header, "scheme": scheme,
+                "headers": headers}
+    return url, repo, auth, read_only, spec_url, extras
 
 
 _UNAUTHORIZED_TARGET = ("Confirm you own this app or are authorized to test it — QAX sends "
@@ -289,7 +303,7 @@ def _supply_chain_leads(repo: str) -> list:
 
 
 def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, spec_url: str | None = None,
-              progress=None) -> dict:
+              extras: dict | None = None, progress=None) -> dict:
     """Run a quick scan and return the UI payload, or {'error': ...}."""
     from services import scorecard, usage
     from services.context import QAXContext
@@ -310,6 +324,8 @@ def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, spec_url: s
         # turns the tour off under read_only; passing tour=True is still honoured for a full scan.
         result = OrchestratorService(ctx).run(repo, url, deep=False, auth=auth, tour=not read_only,
                                               read_only=read_only, spec_url=spec_url,
+                                              extra_endpoints=(extras or {}).get("endpoints") or None,
+                                              examples=(extras or {}).get("examples") or None,
                                               visual_baseline=visual_baseline,
                                               progress=progress)
     except Exception as exc:
@@ -375,12 +391,12 @@ def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, spec_url: s
 
 @app.post("/api/scan")
 def scan():
-    url, repo, auth, read_only, spec_url = _inputs()
+    url, repo, auth, read_only, spec_url, extras = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
         return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
-    payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url)
+    payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, extras=extras)
     return (jsonify(payload), 502) if payload.get("error") else jsonify(payload)
 
 
@@ -471,9 +487,13 @@ def export():
     return jsonify(result)
 
 
-@app.get("/api/scan/stream")
+@app.route("/api/scan/stream", methods=["GET", "POST"])
 def scan_stream():
-    url, repo, auth, read_only, spec_url = _inputs()
+    """
+    Live scan as Server-Sent Events. The UI POSTs a JSON body (a session cookie, tokens and a CSRF nonce must never
+    travel in a URL: they would land in logs and history). GET still works for curl and old callers.
+    """
+    url, repo, auth, read_only, spec_url, extras = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
@@ -482,7 +502,7 @@ def scan_stream():
 
     def work():
         try:
-            payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, progress=_QueueProgress(q))
+            payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, extras=extras, progress=_QueueProgress(q))
             q.put({"type": "error", "error": payload["error"]} if payload.get("error")
                   else {"type": "result", "payload": payload})
         except Exception as exc:
