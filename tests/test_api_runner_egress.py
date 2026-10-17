@@ -38,3 +38,31 @@ def test_legacy_assert_step_is_not_evaluated_not_pass():
                           "assertion_type": "text", "assertion_value": "ok"})
     assert res["status"] == "SKIP"            # never PASS — nothing was checked
     assert "not evaluated" in res["actual_result"].lower()
+
+
+def test_anonymous_steps_do_not_carry_the_operators_cookie():
+    """Regression (CTFd): in cookie mode a step with no use_auth must be anonymous, or 'POST requires
+    authentication' tests are answered 2xx by the cookie and reported as a P1 missing-auth bug."""
+    import socket
+    import threading
+    import wsgiref.simple_server as ws
+    from execution.api_runner import APIRunner
+
+    seen = []
+
+    def app(environ, start_response):
+        seen.append(("sid=S1" in environ.get("HTTP_COOKIE", ""), environ.get("HTTP_CSRF_TOKEN")))
+        start_response("200 OK", [("Content-Type", "application/json")]); return [b"{}"]
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    srv = ws.make_server("127.0.0.1", port, app)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        r = APIRunner(); r.setup(base_url=f"http://127.0.0.1:{port}")
+        r.session.cookies.set("sid", "S1"); r.session.headers["CSRF-Token"] = "N1"; r.session_creds = True
+        r.execute_api_step({"step_number": 1, "method": "GET", "path": "/x", "expected_status": 200}, {})                 # anonymous
+        r.execute_api_step({"step_number": 2, "method": "GET", "path": "/x", "expected_status": 200, "use_auth": "token_a"}, {})   # as A
+        r.teardown()
+    finally:
+        srv.shutdown()
+    assert seen == [(False, None), (True, "N1")]

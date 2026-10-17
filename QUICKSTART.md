@@ -52,7 +52,7 @@ python main.py scan --url https://staging.your-app.example --quick --authorized 
 | `Authorization: Token <key>` | `--auth-scheme Token` |
 | `X-Api-Key: <key>` (or another header) | `--auth-header X-Api-Key --auth-scheme ""` |
 | The bare token in `Authorization: <token>` (PocketBase, some Go/Node apps) | `--auth-scheme ""` |
-| A session cookie | `--cookie "sessionid=<value>; ..."` (best with `--read-only`; full CSRF-protected writes from a cookie are not supported yet) |
+| A session cookie | `--cookie "sessionid=<value>; ..."`. If the app also wants a CSRF token on writes, add `--header "CSRF-Token: <nonce>"` (the name is the app's; copy both from DevTools while logged in). `--header` can be repeated and is sent with every request |
 
 > **Tokens that expire.** Some apps issue short-lived tokens (15 minutes is common). A scan with an expired
 > token does not fail: the checks that need a login are listed under NOT TESTED. Get a fresh token and re-run.
@@ -141,8 +141,10 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
   surface (and the source code if you pass `--repo`) to Anthropic.
 - Apps **without an OpenAPI/Swagger document** are scanned less thoroughly unless you give QAX the surface
   (`--spec`, `--endpoints`, `--repo`). It says so under NOT TESTED.
-- A **username/password login form**, or a **cookie session that needs a CSRF token to write**, is not supported
-  yet. Use an API token, or `--cookie` for a read-only scan.
+- A **username/password login form** is not supported: log in yourself and pass the cookie or token.
+- In cookie mode there is only **one identity** (your cookie), and the "no credentials" control requests of the
+  token-based checks (BFLA, BOLA, JWT, forged-token) also carry your cookie, so those are listed as NOT TESTED.
+  Use `--token` / `--token-b` where the app supports API tokens.
 - Endpoints whose create calls need **valid domain data** QAX cannot guess (a foreign key, "already exists") are
   listed as NOT TESTED; a way to supply example bodies is planned.
 - Measured on ten open-source apps run locally; this is not a general accuracy figure.

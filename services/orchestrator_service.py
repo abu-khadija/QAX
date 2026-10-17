@@ -1192,6 +1192,8 @@ class OrchestratorService:
         # they are cleaned up and anything left is reported — and honour --read-only.
         sess._qax_created = []
         sess._qax_skips = []
+        from core.session_auth import apply_extras
+        apply_extras(sess, auth)
         if read_only:
             from core.read_only import guard
             guard(sess)

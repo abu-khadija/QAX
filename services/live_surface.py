@@ -128,13 +128,8 @@ def authed_session(auth: dict | None = None) -> requests.Session:
         header = auth.get("header") or "Authorization"
         scheme = auth.get("scheme", "Bearer") if "scheme" in auth else "Bearer"
         sess.headers[header] = f"{scheme} {token}".strip() if scheme else str(token)
-    if auth.get("cookie"):
-        for part in str(auth["cookie"]).split(";"):
-            if "=" in part:
-                k, v = part.split("=", 1)
-                if k.strip():
-                    sess.cookies.set(k.strip(), v.strip())
-    return sess
+    from core.session_auth import apply_extras
+    return apply_extras(sess, auth)
 
 
 def _spec_from_override(spec_url: str, base: str, sess) -> dict | None:

@@ -139,6 +139,9 @@ class ExecutionService:
             if getattr(runner, "session", None) is not None:
                 from core.throttle import guard as _throttle_guard
                 from execution.probes import track_writes
+                from core.session_auth import apply_extras
+                apply_extras(runner.session, auth)      # the coverage tests need the cookie / CSRF header too
+                runner.session_creds = bool(auth and (auth.get("cookie") or auth.get("headers")))
                 runner.session._qax_created = []
                 track_writes(runner.session)
                 _throttle_guard(runner.session)

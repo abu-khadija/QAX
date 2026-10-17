@@ -244,3 +244,40 @@ def test_cleanup_asks_the_server_whether_delete_is_allowed_when_no_route_is_know
     no = S("GET, OPTIONS")                                                                 # the server says: not allowed
     assert cleanup_artifacts(m, "http://t", no) == 0 and no.deleted == []
     assert leftover_artifacts(no)[0]["why"] == "the API has no DELETE endpoint for it"
+
+
+def test_cookie_and_csrf_header_reach_the_probes_the_coverage_runner_and_discovery():
+    """A cookie-session app with a CSRF header on writes (CTFd, Django): every component must send both."""
+    import socket
+    import threading
+    import wsgiref.simple_server as ws
+    import json as _json
+
+    import requests
+
+    from core.session_auth import apply_extras, parse_headers
+    from services.live_surface import authed_session
+
+    seen = []
+
+    def app(environ, start_response):
+        cookie_ok = "sid=S1" in environ.get("HTTP_COOKIE", "")
+        csrf_ok = environ.get("HTTP_CSRF_TOKEN") == "N1"
+        m = environ["REQUEST_METHOD"]
+        seen.append((m, environ["PATH_INFO"], cookie_ok, csrf_ok))
+        code = "200 OK" if cookie_ok and (m == "GET" or csrf_ok) else "403 Forbidden"
+        start_response(code, [("Content-Type", "application/json")])
+        return [_json.dumps({"id": 1}).encode()]
+
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    srv = ws.make_server("127.0.0.1", port, app)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    auth = {"cookie": "sid=S1", "headers": parse_headers(["CSRF-Token: N1", "bogus-no-colon"])}
+    assert auth["headers"] == {"CSRF-Token": "N1"}
+    try:
+        for sess in (apply_extras(requests.Session(), auth), authed_session(auth)):
+            assert sess.get(f"http://127.0.0.1:{port}/api/x").status_code == 200
+            assert sess.post(f"http://127.0.0.1:{port}/api/x", json={}).status_code == 200      # CSRF header present
+        assert requests.post(f"http://127.0.0.1:{port}/api/x", json={}).status_code == 403        # without them: refused
+    finally:
+        srv.shutdown()

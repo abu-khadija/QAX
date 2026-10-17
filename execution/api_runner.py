@@ -62,6 +62,7 @@ class APIRunner:
         """
         self.base_url:   str        = os.getenv("APP_BASE_URL", "").rstrip("/")
         self.session                = None
+        self.session_creds          = False     # True: the session carries a cookie / static headers (see _anonymous_session)
         self.auth_token: str | None = None
         self.timeout:    int        = 30
         # Scheme/header for the `use_auth` token on each step. Default Bearer in the
@@ -493,9 +494,17 @@ class APIRunner:
             if tok:
                 headers[self.auth_header] = f"{self.auth_scheme} {tok}".strip()
 
+        # Cookie-session / static-header mode: the session carries the operator's cookie and CSRF header, so a step
+        # that must be ANONYMOUS (no use_auth: an "unauthenticated request is rejected" test) has to go out on a
+        # clean session, or it would be authenticated by the cookie and the app's 2xx would be reported as a missing
+        # auth check (a false positive found on CTFd).
+        sender = self.session
+        if getattr(self, "session_creds", False) and not auth:
+            sender = self._anonymous_session()
+
         t0 = time.time()
         try:
-            resp = self.session.request(
+            resp = sender.request(
                 method, full_url,
                 json=body if isinstance(body, (dict, list)) else None,
                 headers=headers, timeout=self.timeout,
@@ -537,6 +546,20 @@ class APIRunner:
 
         result["duration_ms"] = int((time.time() - t0) * 1000)
         return result
+
+    def _anonymous_session(self):
+        """A session with the same defaults as `self.session` but NO cookies and none of the operator's headers."""
+        anon = getattr(self, "_anon_sess", None)
+        if anon is None:
+            import requests
+            anon = requests.Session()
+            anon.headers.update({k: v for k, v in self.session.headers.items()
+                                 if k.lower() in ("content-type", "accept", "user-agent")})
+            self._anon_sess = anon
+            if getattr(self.session, "_qax_throttle", None) is not None:      # keep the 429 behaviour too
+                from core.throttle import guard
+                guard(anon)
+        return anon
 
     @classmethod
     def _id_in_body(cls, data, want: str) -> bool:

@@ -2127,6 +2127,9 @@ def run_scan_command() -> None:
                         help="A hand-written endpoint list for apps with no OpenAPI spec whose routes cannot be "
                              "guessed. One per line: `GET /api/things`, `POST /api/things title!,body`. "
                              "See QUICKSTART.md.")
+    parser.add_argument("--header", action="append", default=[], metavar="\"Name: value\"",
+                        help="An extra header sent with EVERY request (repeatable): a CSRF nonce for a cookie "
+                             "session (`--header \"CSRF-Token: <nonce>\"`), a tenant id, an API version.")
     parser.add_argument("--cookie", default=None, metavar="\"name=value; ...\"",
                         help="Authenticate with a session cookie instead of a token (copy it from your "
                              "browser's DevTools). Carried on every request. Best with --read-only; a full "
@@ -2191,9 +2194,11 @@ def run_scan_command() -> None:
     _usage.track()
     _usage.reset()
     _auth = None
-    if args.token or args.token_b or args.cookie:
+    if args.token or args.token_b or args.cookie or args.header:
+        from core.session_auth import parse_headers
         _auth = {"token": args.token, "token_b": args.token_b,
-                 "header": args.auth_header, "scheme": args.auth_scheme, "cookie": args.cookie}
+                 "header": args.auth_header, "scheme": args.auth_scheme, "cookie": args.cookie,
+                 "headers": parse_headers(args.header)}
         _how = "a session cookie" if (args.cookie and not args.token) else f"a supplied token via '{args.auth_header}'"
         print(f"  (authenticating with {_how})\n")
     _t0 = time.time()
@@ -2268,6 +2273,7 @@ def run_scan_command() -> None:
                                  reverify=int(args.reverify or 0), tour=bool(args.tour),
                                  repo_supplied=bool(args.repo), token_supplied=bool(args.token),
                                  token_b_supplied=bool(args.token_b), cookie_supplied=bool(args.cookie),
+                                 extra_headers=sorted(parse_headers(args.header)),
                                  auth_header=args.auth_header,
                                  auth_scheme=args.auth_scheme,
                                  accepted_file=args.accepted or None),
