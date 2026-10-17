@@ -162,7 +162,12 @@ def _cli_end_to_end() -> list[tuple[str, bool, str]]:
         proc.terminate()
     wrote = os.path.exists(out)
     rec = _json.load(open(out)) if wrote else {}
+    dead = subprocess.run([sys.executable, main_py, "scan", "--url", f"http://127.0.0.1:{_free_port()}", "--quick",
+                           "--authorized"], capture_output=True, text=True, timeout=120)
     return [
+        ("CLI: an unreachable target is an ERROR, not a clean scan",
+         dead.returncode != 0 and "nothing is listening" in (dead.stdout + dead.stderr),
+         f"rc={dead.returncode}"),
         ("CLI: `main.py demo` runs end to end", ok_demo, f"rc={demo.returncode}, tail={demo.stdout.strip()[-60:]!r}"),
         ("CLI: a credential-less `scan --out` writes a complete record",
          r.returncode == 0 and wrote and bool(rec.get("qax_version")) and bool(rec.get("confirmed")),

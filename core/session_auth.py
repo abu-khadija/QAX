@@ -31,6 +31,13 @@ def apply_extras(sess, auth: dict | None):
                     sess.cookies.set(k.strip(), v.strip())
         for k, v in (auth.get("headers") or {}).items():
             sess.headers[k] = v
+        if auth.get("insecure"):          # --insecure: the operator accepts an unverified certificate for THIS target
+            sess.verify = False
+            try:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except Exception:
+                pass
     except Exception:
         pass
     return sess

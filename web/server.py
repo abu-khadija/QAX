@@ -78,6 +78,10 @@ def _scan_plan(url: str, auth, read_only: bool, spec_url: str | None = None, ext
     from services.live_surface import authed_session
     sess = authed_session(auth)
     base = url.rstrip("/")
+    from core.preflight import check_reachable
+    unreachable = check_reachable(base, session=sess)
+    if unreachable:
+        raise RuntimeError(unreachable)
     spec = fetch_openapi(base, session=sess, spec_url=spec_url)
     if spec:
         eps = endpoints_from_spec(spec)
@@ -241,6 +245,7 @@ def _inputs():
     scheme = src.get("auth_scheme", "Bearer")
     scheme = "" if scheme == "" else (str(scheme).strip() or "Bearer")
     read_only = str(src.get("read_only", "")).strip().lower() in ("1", "true", "yes", "on")
+    insecure = str(src.get("insecure", "")).strip().lower() in ("1", "true", "yes", "on")
     spec_url = str(src.get("spec", "")).strip() or None
     from core.session_auth import parse_headers
     from services.live_surface import parse_endpoint_lines, parse_examples
@@ -249,9 +254,9 @@ def _inputs():
     extras = {"endpoints": parse_endpoint_lines(str(src.get("endpoints", "") or "")),
               "examples": parse_examples(str(src.get("examples", "") or ""))}
     auth = None
-    if token or token_b or cookie or headers:
+    if token or token_b or cookie or headers or insecure:
         auth = {"token": token, "token_b": token_b, "cookie": cookie, "header": header, "scheme": scheme,
-                "headers": headers}
+                "headers": headers, "insecure": insecure}
     return url, repo, auth, read_only, spec_url, extras
 
 

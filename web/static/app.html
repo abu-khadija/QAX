@@ -225,6 +225,11 @@
           <input id="specurl" placeholder="/apispec.json — only if your spec is not at a standard path" autocomplete="off" spellcheck="false"></div>
       </div>
     </details>
+    <label class="consent" for="insecure">
+      <input type="checkbox" id="insecure">
+      <span><b>Allow a self-signed certificate (staging only).</b> QAX will not verify this server's TLS certificate.
+        Tick it only for a target you control.</span>
+    </label>
     <label class="consent" for="readonly">
       <input type="checkbox" id="readonly" checked>
       <span><b>Read-only (recommended for a first scan).</b> QAX sends only GET/HEAD/OPTIONS requests. Checks
@@ -441,7 +446,7 @@ async function streamScan(ctl){
 function _scanFields(){
   return {url:$('url').value.trim(), token:$('token').value.trim(), token_b:$('tokenb').value.trim(),
     cookie:$('cookie').value.trim(), spec:$('specurl').value.trim(), headers:$('hdrs').value,
-    endpoints:$('eplist').value, examples:$('exbodies').value, read_only:$('readonly').checked};
+    endpoints:$('eplist').value, examples:$('exbodies').value, read_only:$('readonly').checked, insecure:$('insecure').checked};
 }
 function finish(){ if(_es){ try{ _es.abort(); }catch{} _es=null; } $('scanning').style.display='none'; $('go').disabled=false; setTimeout(loadRuns,600); }
 function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }

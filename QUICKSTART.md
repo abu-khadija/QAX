@@ -178,6 +178,8 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
 
 | You see | Fix |
 |---|---|
+| `nothing is listening at ...` / `could not be resolved` / `did not answer` | QAX could not reach the address at all and stopped (an unreachable target is an error, not a clean scan). Check the URL, the port, your VPN |
+| `could not verify the TLS certificate` | The server uses a self-signed or internal-CA certificate. For a staging server **you control**, add `--insecure` |
 | `Refusing to scan` | Add `--authorized` (and only if you are allowed to test the app) |
 | `could not self-register or log in` | Pass `--token` |
 | `needs two supplied identities` / `--token-b` | Pass a second, ordinary user's token with `--token-b` |

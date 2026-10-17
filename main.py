@@ -2146,6 +2146,9 @@ def run_scan_command() -> None:
                         help="A JSON file of VALID request bodies for endpoints whose creates need data QAX "
                              "cannot guess: {\"POST /api/pages\": {\"title\": \"T {{unique}}\", ...}}. "
                              "`{{unique}}` is replaced per request.")
+    parser.add_argument("--insecure", action="store_true",
+                        help="Do not verify the target's TLS certificate (a staging server with a self-signed or "
+                             "internal-CA certificate). Use ONLY for a target you control.")
     parser.add_argument("--header", action="append", default=[], metavar="\"Name: value\"",
                         help="An extra header sent with EVERY request (repeatable): a CSRF nonce for a cookie "
                              "session (`--header \"CSRF-Token: <nonce>\"`), a tenant id, an API version.")
@@ -2214,10 +2217,10 @@ def run_scan_command() -> None:
     _usage.reset()
     _auth = None
     from core.session_auth import parse_headers      # used below (--out run record) even with no credentials
-    if args.token or args.token_b or args.cookie or args.header:
+    if args.token or args.token_b or args.cookie or args.header or args.insecure:
         _auth = {"token": args.token, "token_b": args.token_b,
                  "header": args.auth_header, "scheme": args.auth_scheme, "cookie": args.cookie,
-                 "headers": parse_headers(args.header)}
+                 "headers": parse_headers(args.header), "insecure": bool(args.insecure)}
         _how = "a session cookie" if (args.cookie and not args.token) else f"a supplied token via '{args.auth_header}'"
         print(f"  (authenticating with {_how})\n")
     _t0 = time.time()
@@ -2286,13 +2289,14 @@ def run_scan_command() -> None:
             # state its environment — a bug report without one is not reproducible.
             from core.build_fingerprint import build_fingerprint
             from core.version import run_record
+            from services.live_surface import authed_session
             _out = {**result.to_dict(), "target_url": args.url,
                     "scan_mode": "quick" if args.quick else "deep",
                     # PLAN.md §6 run record: what produced this result (never the tokens themselves).
                     **run_record(quick=bool(args.quick), read_only=bool(args.read_only),
                                  reverify=int(args.reverify or 0), tour=bool(args.tour),
                                  repo_supplied=bool(args.repo), token_supplied=bool(args.token),
-                                 token_b_supplied=bool(args.token_b), cookie_supplied=bool(args.cookie),
+                                 token_b_supplied=bool(args.token_b), cookie_supplied=bool(args.cookie), insecure=bool(args.insecure),
                                  extra_headers=sorted(parse_headers(args.header)),
                                  auth_header=args.auth_header,
                                  auth_scheme=args.auth_scheme,
@@ -2300,7 +2304,7 @@ def run_scan_command() -> None:
                     "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
                     # Which build was scanned — so a later verify-fixes can tell "not fixed" from
                     # "not redeployed" (None = no stable component, i.e. unknown).
-                    "build": build_fingerprint(args.url)}
+                    "build": build_fingerprint(args.url, session=authed_session(_auth))}
             Path(args.out).write_text(json.dumps(_out, indent=2, ensure_ascii=False),
                                       encoding="utf-8")
             print(f"  Full result written to {args.out}\n")

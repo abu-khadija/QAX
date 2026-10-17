@@ -114,6 +114,14 @@ class OrchestratorService:
         from services.probe_service import ProbeService
         from services.redteam_service import RedTeamService
 
+        # 0) Can we reach the target at all? An unreachable address must be an ERROR, not a clean-looking scan.
+        from core.preflight import check_reachable
+        from core.session_auth import apply_extras
+        _pf = check_reachable(base_url, session=apply_extras(__import__("requests").Session(), auth))
+        if _pf:
+            prog.emit("orchestrate", "warn", _pf)
+            return OrchestratorResult(error=_pf)
+
         # 1) Understand the whole system (cached when the source is unchanged).
         prog.emit("orchestrate", "step", "modelling the system")
         model = AppModelService(self.context).build(repo_path, use_cache=use_cache, progress=prog)

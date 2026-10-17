@@ -7,6 +7,8 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- A reachability check before every scan: an address QAX cannot reach is an error with the reason (refused, DNS, timeout,
+  certificate) instead of a clean-looking "0 findings" scan. `--insecure` (web: a checkbox) for a self-signed certificate.
 - Web UI: extra headers, endpoint list and example bodies; the scan is streamed over a POST so tokens, cookies and CSRF
   nonces never appear in a URL (they used to be in the query string).
 - `qax demo --web`: the bundled demo app and the web UI together, with the target pre-filled.
