@@ -1308,12 +1308,17 @@ def _record_created(sess, collection: str, body: dict, headers: dict) -> None:
         if reg is None:
             return
         entry = {"collection": collection, "body": dict(body or {}), "headers": dict(headers or {})}
-        same = next((a for a in reg if str(a.get("collection", "")).rstrip("/") == str(collection).rstrip("/")
-                     and a.get("body") == entry["body"]), None)
-        if same is not None:          # already captured at the session boundary (track_writes)
-            same.update(entry)
-            same.pop("auto", None)
-            return
+        # The session boundary (track_writes) already registered this very request as an "auto" entry: claim the
+        # most recent UNCLAIMED one instead of adding a duplicate. Identical bodies are NOT the same record —
+        # five tests that each POST {"text": "owned by A"} created five records (found on microblog-api: two of
+        # them were never cleaned because the registry had merged them into one).
+        for same in reversed(reg):
+            if (same.get("auto") and not same.get("claimed")
+                    and str(same.get("collection", "")).rstrip("/") == str(collection).rstrip("/")
+                    and same.get("body") == entry["body"]):
+                same.update({k: v for k, v in entry.items() if v})
+                same["claimed"] = True
+                return
         reg.append(entry)
     except Exception:
         pass
@@ -1373,13 +1378,8 @@ def track_writes(sess):
                     coll = _collection_of(urlparse(str(url)).path)
                     reg = sess._qax_created
                     rid = _response_id(r)
-                    prior = next((x for x in reg if str(x.get("collection", "")).rstrip("/") == coll.rstrip("/")
-                                  and x.get("body") == body), None)
-                    if prior is None:
-                        reg.append({"collection": coll, "body": dict(body), "headers": dict(kw.get("headers") or {}),
-                                    "auto": True, "resp_id": rid})
-                    elif rid is not None:
-                        prior.setdefault("resp_id", rid)
+                    reg.append({"collection": coll, "body": dict(body), "headers": dict(kw.get("headers") or {}),
+                                "auto": True, "resp_id": rid})     # one creation = one entry
         except Exception:
             pass
         return r

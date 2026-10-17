@@ -113,9 +113,9 @@ def test_track_writes_registers_accepted_creations_only():
     s.request("POST", "http://t/auth/login", json={"email": "e"})
     s.request("GET", "http://t/notes")
     assert [a["collection"] for a in s._qax_created] == ["/notes", "/orders"]
-    _record_created(s, "/notes", {"title": "a"}, {"Authorization": "Bearer t"})   # explicit record: de-duplicated
+    _record_created(s, "/notes", {"title": "a"}, {"Authorization": "Bearer t"})   # the probe claims its own auto entry
     assert len(s._qax_created) == 2 and s._qax_created[0]["headers"] == {"Authorization": "Bearer t"}
-    assert "auto" not in s._qax_created[0]
+    assert s._qax_created[0].get("claimed") is True
 
 
 def test_cookie_auth_is_carried_by_the_probe_session_end_to_end():
@@ -191,27 +191,37 @@ def test_cleanup_prefers_the_server_assigned_id_over_a_title_guess():
     assert cleanup_artifacts(m, "http://t", s) == 1 and s.deleted == ["http://t/api/bookmarks/42/"]
 
 
-def test_a_404_on_delete_means_already_gone_and_one_record_is_one_entry():
-    """Regression (linkding): the same record was registered under '/x' and '/x/', the second DELETE 404'd, and
-    QAX reported records 'left on the target' that no longer existed."""
+def test_identical_bodies_are_distinct_records_and_a_probe_claims_only_its_own():
+    """Regression (microblog-api): five tests that each POST the same body created five records; the registry
+    had merged them into one, so four were never cleaned. A probe's explicit record claims ONE auto entry."""
     from unittest.mock import MagicMock
-    from execution.probes import _record_created, cleanup_artifacts, leftover_artifacts
+    from execution.probes import _record_created, track_writes
+
+    class S:
+        def __init__(self): self._qax_created = []; self.n = 0
+        def request(self, method, url, **kw):
+            self.n += 1
+            r = MagicMock(status_code=201); r.json.return_value = {"id": self.n}; return r
+    s = track_writes(S())
+    for _ in range(3):
+        s.request("POST", "http://t/api/posts", json={"text": "owned by A"}, headers={"Authorization": "Bearer A"})
+    assert [a["resp_id"] for a in s._qax_created] == ["1", "2", "3"]          # three creations, three entries
+    _record_created(s, "/api/posts/", {"text": "owned by A"}, {"Authorization": "Bearer A"})   # claims the LAST one
+    assert len(s._qax_created) == 3 and [bool(a.get("claimed")) for a in s._qax_created] == [False, False, True]
+
+
+def test_a_404_on_delete_means_already_gone():
+    """A DELETE answering 404/410 means the record is gone (already removed), not left behind."""
+    from unittest.mock import MagicMock
+    from execution.probes import cleanup_artifacts, leftover_artifacts
     from services.results import AppModel
 
     class S:
-        def __init__(self): self._qax_created = []; self.calls = []
-        def delete(self, url, headers=None, timeout=None):
-            self.calls.append(url); return MagicMock(status_code=204 if len(self.calls) == 1 else 404)
+        def __init__(self): self._qax_created = [{"collection": "/api/bookmarks/", "body": {"t": 1}, "headers": {}, "resp_id": "3"}]
+        def delete(self, url, headers=None, timeout=None): return MagicMock(status_code=404)
     s = S()
-    _record_created(s, "/api/bookmarks/", {"title": "t"}, {})
-    s._qax_created[0]["resp_id"] = "9"
-    _record_created(s, "/api/bookmarks", {"title": "t"}, {})        # same record, other slash spelling
-    assert len(s._qax_created) == 1
     m = AppModel(root="/x", endpoints=[{"method": "DELETE", "path": "/api/bookmarks/{id}/"}])
     assert cleanup_artifacts(m, "http://t", s) == 1 and leftover_artifacts(s) == []
-    s2 = S(); s2.calls = ["x"]                                        # a lone 404: already gone, not left behind
-    _record_created(s2, "/api/bookmarks/", {"title": "u"}, {}); s2._qax_created[0]["resp_id"] = "3"
-    assert cleanup_artifacts(m, "http://t", s2) == 1 and leftover_artifacts(s2) == []
 
 
 def test_cleanup_asks_the_server_whether_delete_is_allowed_when_no_route_is_known():
