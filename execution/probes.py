@@ -2865,12 +2865,12 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
                 body[f] = False
             elif any(k in lf for k in _DATE_KW):
                 body[f] = "2020-01-01T00:00:00"
-            elif any(k in lf for k in _SERVER_OWNED):
-                body[f] = f"qax{uuid.uuid4().hex[:8]}"   # satisfy it, but don't track
             elif _declared_value(post, f, key) is not None:
                 body[f] = _declared_value(post, f, key)  # spec-declared type (boolean/int/array/enum/date)
             elif _plausible_value(f, key) is not None:
-                body[f] = _plausible_value(f, key)       # valid email/url the API will accept; not tracked
+                body[f] = _plausible_value(f, key)       # a VALID email/url/phone the API will accept; not tracked
+            elif any(k in lf for k in _SERVER_OWNED):
+                body[f] = f"qax{uuid.uuid4().hex[:8]}"   # satisfy it, but don't track
             else:
                 tok = f"qaxkeep{uuid.uuid4().hex[:10]}"
                 markers[f] = tok
