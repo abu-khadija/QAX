@@ -1543,18 +1543,26 @@ def _resolve_token(sess, base, recipe, model, identity, *, auth: dict | None = N
 
 def _route_key_field(param: str, fields: list[str]) -> str | None:
     """
-    Which create-body field is the identifier the read route {param} takes? An exact name match; for a
-    slug/name/title-like param the matching text field. For an ``id``/``pk``/``uuid`` param NONE — the server
-    assigns it, and using a title as the key made BOLA read /bookmarks/<title>/ and 404 on its own object
-    (found on linkding).
+    The create-body field that MIGHT be the identifier the read route {param} takes: an exact name match, else a
+    title/name/slug/key-like field. A guess only — an ``{id}`` route may take the server-assigned id instead of
+    any body field (linkding), while ``{note_id}`` may take the title (the golden target). The probes therefore try
+    both (see _key_candidates) and keep whichever lets user A read its OWN object, which is their control anyway.
     """
     low = param.lower()
     exact = next((f for f in fields if f.lower() == low), None)
-    if exact:
-        return exact
-    if low in ("id", "pk", "uuid", "guid", "_id") or low.endswith("_id") or low.endswith("id") and len(low) <= 4:
-        return None
-    return next((f for f in fields if any(k in f.lower() for k in ("slug", "name", "title", "key", "code"))), None)
+    return exact or next((f for f in fields if any(k in f.lower() for k in ("title", "name", "slug", "key", "id"))), None)
+
+
+def _key_candidates(param: str, body_key, resp_id) -> list[str]:
+    """Identifiers to try for the read route, best first: the server id for an id-like param, else the body value."""
+    low = param.lower()
+    id_like = low in ("id", "pk", "uuid", "guid", "_id") or low.endswith("_id") or low.endswith("id") and len(low) <= 4
+    cands = [resp_id, body_key] if id_like else [body_key, resp_id]
+    out: list[str] = []
+    for c in cands:
+        if c not in (None, "") and str(c) not in out:
+            out.append(str(c))
+    return out
 
 
 def _declared_value(endpoint: dict | None, field: str, unique: str):
@@ -1680,21 +1688,17 @@ def bola_probe(model, base_url: str, *, session: requests.Session | None = None,
                 continue
             created_ok += 1
             _record_created(sess, prefix, body, auth_a)
-            if key_field is None:
-                # Server-generated id: take it from the create response.
-                try:
-                    cj = cr.json()
-                    cj = cj.get("data", cj) if isinstance(cj, dict) else cj
-                    key = next((str(cj[k]) for k in ("id", "uuid", "_id", "pk") if isinstance(cj, dict) and k in cj), None)
-                except Exception:
-                    key = None
-                if not key:
-                    _skip(sess, "bola", f"{prefix}: the create response carried no id, so the object could not "
-                                        f"be read back by key", kind="missing-prerequisite")
-                    continue
-            read_path = f"{base}{str(ge['path']).replace('{' + param + '}', key)}"
-            ar = sess.get(read_path, headers=auth_a, timeout=15)
-            if ar.status_code >= 400:  # control: A must be able to read its own object
+            # Which identifier does the read route take? Try the server-assigned id and the body's key field and
+            # keep the one that lets A read its OWN object (the control the probe needs anyway).
+            rid = _response_id(cr)
+            read_path = ar = None
+            for cand in _key_candidates(param, key if key_field else None, rid):
+                rp = f"{base}{str(ge['path']).replace('{' + param + '}', cand)}"
+                ar_try = sess.get(rp, headers=auth_a, timeout=15)
+                if ar_try.status_code < 400:
+                    read_path, ar, key = rp, ar_try, cand
+                    break
+            if read_path is None:   # control: A must be able to read its own object
                 continue
             readable += 1
             br = sess.get(read_path, headers=auth_b, timeout=15)
@@ -2883,17 +2887,19 @@ def persistence_probe(model, base_url: str, *, session: requests.Session | None 
             continue
         created_ok += 1
         _record_created(sess, prefix, body, headers)
-        if key_field is None:                       # server-assigned id: take it from the create response
-            rid = _response_id(cr)
-            if rid is None:
+        # The read route may take the server-assigned id or the body's key field: keep whichever reads back.
+        rid = _response_id(cr)
+        read_url = rr = None
+        for cand in _key_candidates(param, key if key_field else None, rid):
+            url_try = f"{base}{str(ge['path']).replace('{' + param + '}', cand)}"
+            try:
+                rr_try = sess.get(url_try, headers=headers, timeout=15)
+            except Exception:
                 continue
-            key = rid
-        read_url = f"{base}{str(ge['path']).replace('{' + param + '}', str(key))}"
-        try:
-            rr = sess.get(read_url, headers=headers, timeout=15)
-        except Exception:
-            continue
-        if not (200 <= rr.status_code < 300):      # control: the object must read back
+            if 200 <= rr_try.status_code < 300:
+                read_url, rr, key = url_try, rr_try, cand
+                break
+        if read_url is None:                        # control: the object must read back
             continue
         read_ok += 1
         read_text = rr.text or ""

@@ -745,11 +745,10 @@ def test_declared_field_types_beat_name_guessing():
     assert _declared_value({}, "draft", "u") is None and _declared_value(None, "x", "u") is None
 
 
-def test_route_key_field_uses_the_server_id_for_id_routes_and_a_field_for_slug_routes():
-    from execution.probes import _route_key_field
-    assert _route_key_field("id", ["title", "url"]) is None            # server-assigned: never a title guess
-    assert _route_key_field("bookmark_id", ["title", "url"]) is None
-    assert _route_key_field("pk", ["name"]) is None
-    assert _route_key_field("slug", ["title", "slug"]) == "slug"        # exact name match
-    assert _route_key_field("username", ["username", "email"]) == "username"
-    assert _route_key_field("name", ["display_name", "x"]) == "display_name"
+def test_key_candidates_order_the_server_id_and_the_body_key_by_the_route_param():
+    from execution.probes import _key_candidates, _route_key_field
+    assert _key_candidates("id", "My title", "42") == ["42", "My title"]          # id route: server id first (linkding)
+    assert _key_candidates("note_id", "My title", "7") == ["7", "My title"]        # still tries the title (golden target)
+    assert _key_candidates("slug", "my-slug", "7") == ["my-slug", "7"]
+    assert _key_candidates("id", None, None) == []
+    assert _route_key_field("slug", ["title", "slug"]) == "slug" and _route_key_field("id", ["text"]) is None
