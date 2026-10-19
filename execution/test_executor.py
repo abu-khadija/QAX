@@ -21,6 +21,7 @@ Never crashes — returns error result dicts on unexpected failures.
 import asyncio
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -326,6 +327,37 @@ class TestExecutor:
     # Public: execute_batch
     # ─────────────────────────────────────────────────────────────────────────
 
+    _THROTTLE_TEXT = re.compile(r"(too many (attempts|requests|login)|rate.?limit|try (again )?later|"
+                                r"slow down|temporarily (locked|blocked))", re.I)
+
+    async def _mark_if_throttled(self, result: dict, runner) -> None:
+        """
+        A case that failed while the app was rate-limiting QAX is not a verdict on the
+        feature: turn it into ERROR (throttled). Signals: an HTTP 429 during the case, or
+        a rate-limit message on the page (Healthchecks answers 200 + "Too many attempts,
+        please try later." — found 2026-10-19). Never raises.
+        """
+        try:
+            n429 = runner.take_throttled() if hasattr(runner, "take_throttled") else 0
+            if result.get("status") not in ("FAIL", "ERROR"):
+                return
+            text = ""
+            page = await runner.get_page() if hasattr(runner, "get_page") else None
+            if page is not None:
+                try:
+                    text = await page.inner_text("body", timeout=2_000)
+                except Exception:  # noqa: BLE001
+                    text = ""
+            m = self._THROTTLE_TEXT.search(text or "")
+            if n429 or m:
+                why = f"{n429} HTTP 429 answer(s)" if n429 else f"the page says \"{m.group(0)}\""
+                result["status"] = "ERROR"
+                result["throttled"] = True
+                result["error"] = (f"The app rate-limited QAX ({why}) — not a verdict on the feature. "
+                                   "Wait and re-run, or raise the limit on the staging app.")
+        except Exception:  # noqa: BLE001
+            pass
+
     async def execute_batch(
         self,
         test_cases: list[dict],
@@ -384,7 +416,10 @@ class TestExecutor:
                 await runner.new_session()
             if hasattr(runner, "take_writes"):
                 runner.take_writes()                       # start this case's ledger empty
+            if hasattr(runner, "take_throttled"):
+                runner.take_throttled()
             result = await self.execute_test_case(tc, runner)
+            await self._mark_if_throttled(result, runner)
             # What this case sent that can change data on the target (form posts, deletes…).
             # QAX does not undo data created through the UI — it says what it sent.
             result["writes"] = runner.take_writes() if hasattr(runner, "take_writes") else []
@@ -395,6 +430,8 @@ class TestExecutor:
                 logger.info("stop_on_fail=True — halting after %s (%s)", tc_id, result["status"])
                 stopped_early = True
                 break
+
+        throttled = sum(1 for r in results if r.get("throttled"))
 
         # ── Tally results ──────────────────────────────────────────────────
         counts = {"PASS": 0, "FAIL": 0, "ERROR": 0, "SKIP": 0}
@@ -417,6 +454,7 @@ class TestExecutor:
         writes_sent = sum(len(r.get("writes") or []) for r in results)
         return {
             "writes_sent": writes_sent,
+            "throttled": throttled,
             "total": total,
             "passed": counts["PASS"],
             "failed": counts["FAIL"],

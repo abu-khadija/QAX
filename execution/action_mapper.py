@@ -100,6 +100,10 @@ async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
     except Exception:  # noqa: BLE001
         pass
 
+
+class _UnresolvedSelector(Exception):
+    """A structured step names an element that no selector source knows."""
+
 class ActionMapper:
     """
     Maps human-readable test step descriptions to Playwright actions.
@@ -126,6 +130,9 @@ class ActionMapper:
         """
         self.project = project or os.getenv("DEFAULT_PROJECT", "example")
         self.selectors: dict = {}
+        # key → [(section, selector), …] in file order: one name can mean different
+        # elements on different pages ("email" on /login vs on /settings).
+        self._candidates: dict = {}
         self._discovery_cache: dict = {}  # keyed by URL; caches DOMAnalyzer results per session
         self._load_selectors()
 
@@ -164,6 +171,9 @@ class ActionMapper:
                         self.selectors[f"{section}.{key}"] = selector
                         # Shorter key (may be overwritten by later sections — last wins)
                         self.selectors[key] = selector
+                        cands = self._candidates.setdefault(str(key).lower(), [])
+                        if selector not in [c[1] for c in cands]:
+                            cands.append((section, selector))
 
             logger.debug(
                 "Loaded %d selector(s) from %s", len(self.selectors), selectors_path
@@ -218,10 +228,35 @@ class ActionMapper:
 
         return None
 
+    @staticmethod
+    def _page_section(url: str) -> str:
+        """The selectors.json section `map` writes for a URL (/accounts/login/ → accounts_login)."""
+        try:
+            from core.app_mapper import page_template
+            return re.sub(r"[^a-z0-9]+", "_", page_template(url).lower()).strip("_") or "home"
+        except Exception:  # noqa: BLE001
+            return ""
+
+    async def _pick_for_page(self, cands: list, page) -> "str | None":
+        """
+        Choose among the selectors one name has on different pages: the current page's
+        section first, else the first candidate that is actually on this page.
+        """
+        section = self._page_section(getattr(page, "url", "") or "")
+        ordered = [c for c in cands if c[0] == section] + [c for c in cands if c[0] != section]
+        for _sec, sel in ordered:
+            try:
+                if await page.locator(sel).count() > 0:
+                    return sel
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
     async def find_selector_with_fallback(
         self,
         element_name: str,
         playwright_page: "Page",
+        exact: bool = False,
     ) -> "tuple[str | None, str]":
         """
         Find a CSS selector for an element using a 3-level fallback strategy.
@@ -244,13 +279,50 @@ class ActionMapper:
                   "Level 2 (discovered)" — found via live DOM discovery
                   "Level 3 (AI visual)"  — found via screenshot + Claude vision
                   "not found"            — all three levels exhausted
+
+        exact=True (structured automation steps): names must match a key exactly —
+        no partial matching, which once resolved "page" to a "man-pages" link and could
+        resolve "remove" to a "remove_project_button" (found on Healthchecks); Level 2
+        reads the CURRENT page without navigating (reloading lost filled forms/open modals).
         """
+        # ── Level 0: the key already IS a CSS selector ─────────────────────
+        # Generation grounded in a live map may write the real selector
+        # (e.g. "#id_url", "[data-testid='save']") instead of a key name.
+        raw = (element_name or "").strip()
+        is_key = raw in self.selectors or raw.lower() in self._candidates
+        if raw and not is_key and re.match(r"^([#.\[]|[a-z]+[#.\[:])", raw):
+            return raw, "Level 0 (selector given)"
+
+        # ── Level 0: a name used on several pages → the one on THIS page ───
+        cands = self._candidates.get((element_name or "").strip().lower()) or []
+        if len(cands) > 1 and playwright_page is not None:
+            picked = await self._pick_for_page(cands, playwright_page)
+            if picked:
+                return picked, "Level 1 (static, this page)"
+
         # ── Level 0: built-in key — the whole page ─────────────────────────
         # Text that only appears after an action (an error, a toast, a result)
         # cannot be discovered from a static page; "page" checks it anywhere.
         if (element_name or "").strip().lower() in ("page", "page_text", "body") \
-                and not self.find_selector(element_name):
+                and not self.selectors.get((element_name or "").strip()):
             return "body", "Level 0 (built-in: page)"
+
+        if exact:
+            name = (element_name or "").strip()
+            sel = self.selectors.get(name) or next(
+                (c[1] for c in self._candidates.get(name.lower(), [])), None)
+            if sel and not str(sel).startswith("TODO"):
+                return sel, "Level 1 (static)"
+            # Level 2 without navigation: name the CURRENT page's elements, exact key only
+            try:
+                if playwright_page is not None:
+                    from core.dom_analyzer import label_elements_deterministic
+                    live = await label_elements_deterministic(playwright_page)
+                    if live.get(name.lower()):
+                        return live[name.lower()], "Level 2 (this page, exact)"
+            except Exception as _l2_err:  # noqa: BLE001
+                logger.debug("Level 2 exact lookup failed: %s", _l2_err)
+            return None, "not found"
 
         # ── Level 1: Static selectors.json ────────────────────────────────
         selector = self.find_selector(element_name)
@@ -708,9 +780,11 @@ class ActionMapper:
             """Resolve selector_key → CSS via override, then the 3-level fallback."""
             if selector_override:
                 return selector_override
-            selector, level = await self.find_selector_with_fallback(selector_key, page)
+            selector, level = await self.find_selector_with_fallback(selector_key, page, exact=True)
             logger.debug("automation selector (%s) for '%s': %s", level, selector_key, selector)
-            return selector or f"[data-testid='{selector_key}']"
+            if not selector:
+                raise _UnresolvedSelector(selector_key)
+            return selector
 
         try:
             if action in ("navigate", "goto", "open", "visit"):
@@ -797,6 +871,15 @@ class ActionMapper:
                 if check["status"] != "PASS":      # FAIL, or a check that never ran
                     base_result.update(check)
 
+        except _UnresolvedSelector as e:
+            # The test names an element QAX cannot find — a problem in the test, not a
+            # verdict about the app: ERROR, never FAIL.
+            base_result.update({
+                "status": "ERROR",
+                "actual_result": f"No element named '{e}' on this page",
+                "error": (f"'{e}' is not in the project's selectors/app map — run "
+                          "`main.py map` or fix the step's selector_key"),
+            })
         except Exception as e:  # noqa: BLE001
             base_result.update({
                 "status": "FAIL",

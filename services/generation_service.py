@@ -91,9 +91,18 @@ class GenerationOptions:
     auto_accept: bool = False
     content: str | None = None
     repo_context: str | None = None
+    app_map: object | None = None  # core.app_mapper.AppMap — the app read from its URL (`map`)
     model: str | None = None   # override the auto-selected model (e.g. a faster one)
     chunk_size: int = 300      # real files longer than this are analyzed in chunks
     skip_untestable: bool = True   # skip real files with no testable logic (no model call)
+
+
+def _app_map_context(app_map) -> str:
+    """The OBSERVED UI SURFACE block of an AppMap ("" when there is none)."""
+    try:
+        return app_map.as_context() if app_map is not None else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 class GenerationService:
@@ -117,6 +126,12 @@ class GenerationService:
         self.context = context or QAXContext.from_env()
 
     # ── Public API ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _context_with_map(opts) -> str | None:
+        """repo_context plus the app map's OBSERVED UI SURFACE, when a map was given."""
+        parts = [p for p in ((opts.repo_context or "").strip(), _app_map_context(opts.app_map)) if p]
+        return "\n\n".join(parts) or None
 
     def generate(
         self,
@@ -414,7 +429,8 @@ class GenerationService:
         # miss and we regenerate — this self-heals a poisoned cache entry.
         # (Not for a file that gets chunked: a whole-file entry for one can only be a
         # single chunk's result written before per-chunk cache keys existed.)
-        if opts.use_cache and pre.get("cache_hit") and not will_chunk:
+        # A result cached before the app was mapped was not grounded in it — regenerate.
+        if opts.use_cache and pre.get("cache_hit") and not will_chunk and opts.app_map is None:
             cached = pre.get("cached_result") or []
             fixed = [fix_common_issues(tc) for tc in cached]
             batch = validate_batch(fixed)
@@ -492,8 +508,8 @@ class GenerationService:
                 skill_context=pre.get("skill_context"),
                 risk_level=(pre.get("risk") or {}).get("risk_level", "low"),
                 line_count=line_count,
-                use_cache=opts.use_cache,
-                repo_context=opts.repo_context,
+                use_cache=opts.use_cache and opts.app_map is None,
+                repo_context=self._context_with_map(opts),
                 model_override=opts.model,
                 cache_scope=(f"chunk-{i}-of-{len(chunks)}-size-{opts.chunk_size}"
                              if len(chunks) > 1 else None),
@@ -521,6 +537,13 @@ class GenerationService:
             f"{len(valid)} valid / {len(batch.get('invalid', []))} invalid "
             f"(avg {summary.get('avg_confidence', 0)}/10)",
         )
+        if opts.app_map is not None:
+            from core.app_mapper import check_cases
+            summary = dict(summary)
+            summary["unmapped_cases"] = check_cases(valid, opts.app_map)
+            if summary["unmapped_cases"]:
+                prog.emit("validate", "warn", f"{summary['unmapped_cases']} case(s) use an element "
+                          "that is not on the app map — marked needs_review")
 
         return GenerationResult(
             test_cases=valid,

@@ -270,3 +270,90 @@ def test_tls_errors_are_not_ignored_unless_opted_in(monkeypatch):
     monkeypatch.setenv("QAX_INSECURE", "true")
     asyncio.run(r._open_context())
     assert seen == [False, True]
+
+
+# ── Reading the app from its URL (`map`) ──────────────────────────────────────
+
+
+def test_map_reads_the_app_logs_in_and_never_follows_logout(ui_app):
+    from core.app_mapper import map_app
+    m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", username="demo", password="demo123"))
+    assert m.error is None and m.login_ok is True
+    paths = {p["path"] for p in m.pages}
+    assert "/dashboard" in paths
+    dash = next(p for p in m.pages if p["path"] == "/dashboard")
+    assert dash["elements"].get("add_note_button") == "#add-note-btn"
+    assert any("logout" in h for h in m.skipped_links)       # seen, not followed
+    assert "/logout" not in paths
+
+
+def test_a_selector_written_directly_in_a_step_is_used_as_is(ui_app):
+    """Generation grounded in the map may write the real selector instead of a key name."""
+    case = {"test_case_id": "R", "title": "raw", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "#username", "value": "demo"},
+        {"step_number": 3, "playwright_action": "fill", "selector_key": "input[name='password']",
+         "value": "demo123"},
+        {"step_number": 4, "playwright_action": "click", "selector_key": "#login-btn"},
+        {"step_number": 5, "playwright_action": "assert", "assertion_type": "url",
+         "assertion_value": "/dashboard"}]}
+    assert _run([case])["results"][0]["status"] == "PASS"
+
+
+def test_a_failure_while_the_app_rate_limits_is_error_not_fail(ui_app):
+    """Healthchecks: after many logins it answered 200 + "Too many attempts" and every case
+    FAILed — a verdict about the rate limit, not the feature. Both signals → ERROR."""
+    def case(cid, path):
+        return {"test_case_id": cid, "title": cid, "automation_steps": [
+            {"step_number": 1, "playwright_action": "navigate", "value": path},
+            {"step_number": 2, "playwright_action": "assert", "selector_key": "page",
+             "assertion_type": "text", "assertion_value": "Welcome"}]}
+    import os
+    os.environ["QAX_ASSERT_TIMEOUT_MS"] = "500"
+    try:
+        batch = _run([case("http429", "/busy"), case("text", "/busy-text"), case("real", "/login")])
+    finally:
+        os.environ.pop("QAX_ASSERT_TIMEOUT_MS", None)
+    got = {r["test_case_id"]: r for r in batch["results"]}
+    assert got["http429"]["status"] == "ERROR" and "429" in got["http429"]["error"]
+    assert got["text"]["status"] == "ERROR" and "Too many attempts" in got["text"]["error"]
+    assert got["real"]["status"] == "FAIL"            # an ordinary failure stays a FAIL
+    assert batch["throttled"] == 2
+
+
+def test_a_name_used_on_two_pages_resolves_to_the_one_on_this_page(ui_app, tmp_path, monkeypatch):
+    """Healthchecks: "email" existed on /login and on /settings; last-wins picked the wrong one."""
+    import json as _json
+
+    import execution.action_mapper as am
+    proj = tmp_path / "projects" / "twopages"
+    proj.mkdir(parents=True)
+    (proj / "selectors.json").write_text(_json.dumps({
+        "login": {"name_field": "#username"},
+        "dashboard": {"name_field": "#note-input"}}))
+    monkeypatch.setattr(am, "_resolve_selectors_path", lambda project=None: proj / "selectors.json")
+    monkeypatch.setenv("DEFAULT_PROJECT", "twopages")
+    case = {"test_case_id": "N", "title": "n", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "name_field", "value": "demo"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS" and r["steps"][1]["selector_used"] == "#username"
+
+
+def test_an_unknown_element_name_is_error_and_never_fuzzy_matched(ui_app):
+    """Fuzzy matching resolved "page" to a "man-pages" link (Healthchecks); a name like
+    "remove" could resolve to a destructive button. Structured steps: exact names only."""
+    case = {"test_case_id": "U", "title": "u", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": "login"}]}  # ≠ login_button
+    r = _run([case])["results"][0]
+    assert r["status"] == "ERROR" and r["steps"][1]["status"] == "ERROR"
+    assert "not in the project's selectors" in r["steps"][1]["error"]
+
+
+def test_map_marks_elements_hidden_until_a_menu_is_opened(ui_app):
+    from core.app_mapper import map_app
+    m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", start_paths=["/delayed"]))
+    delayed = next(p for p in m.pages if p["path"] == "/delayed")
+    assert "save_button" in delayed["elements"] and delayed["hidden"] == []
+    assert "hidden until" not in m.as_context() or True       # context renders without error

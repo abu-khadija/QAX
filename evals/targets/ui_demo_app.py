@@ -11,7 +11,8 @@ directions — working flows must PASS and the bug must FAIL:
 It also reproduces three behaviours of real apps that once broke QAX (linkding):
   * /login sends a signed-in user to the dashboard (cases must not share a session);
   * /live keeps a request open forever (the page never becomes "network idle");
-  * /delayed shows its confirmation a moment AFTER the click (async UI updates).
+  * /delayed shows its confirmation a moment AFTER the click (async UI updates);
+  * /busy (HTTP 429) and /busy-text (200 + "Too many attempts") — the app rate-limits.
 
 Credentials are fixed demo values (user `demo`, password `demo123`) — this app holds no
 real data and listens on 127.0.0.1 only. Selectors: config/projects/uidemo/selectors.json.
@@ -128,6 +129,18 @@ def delayed():
     return _page("Delayed", """<button id="save-btn" onclick="setTimeout(()=>{
   document.getElementById('status').innerText='Saved!'}, 800)">Save</button>
 <p id="status"></p>""")
+
+
+@app.get("/busy")
+def busy():
+    """A rate-limited answer (HTTP 429), like a gateway in front of a staging app."""
+    return _page("Busy", "<h1>Too Many Requests</h1>"), 429
+
+
+@app.get("/busy-text")
+def busy_text():
+    """Rate limiting reported in the page with a 200 (Healthchecks: "Too many attempts")."""
+    return _page("Log in", '<p id="error">Too many attempts, please try later.</p>')
 
 
 @app.post("/_reset")

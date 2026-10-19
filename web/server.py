@@ -427,8 +427,11 @@ def generate():
         ctx = QAXContext.from_env()
         # Virtual source ids: nothing is read from disk and nothing is cached by name.
         source = "code://web-input" if code else "story://web-input"
+        from core.app_mapper import load_map
+        app_map = load_map(_clean_project(data.get("project")))   # read with "Read the app"
         opts = GenerationOptions(user_story=story or None, content=code or story,
-                                 test_type=str(data.get("test_type") or "") or None)
+                                 test_type=str(data.get("test_type") or "") or None,
+                                 app_map=app_map)
         try:
             res = GenerationService(ctx).generate(source, options=opts,
                                                   progress=NullProgressReporter())
@@ -439,7 +442,48 @@ def generate():
     if res.error:
         return jsonify({"error": _ai_error_message(res.error)}), 502
     return jsonify({"tests": res.test_cases or [], "invalid": len(res.invalid or []),
-                    "summary": res.summary or {}})
+                    "summary": res.summary or {},
+                    "app_map_pages": len(app_map.pages) if app_map else 0})
+
+
+def _clean_project(value) -> str:
+    """A project name usable as a folder (letters, digits, - and _ only)."""
+    return "".join(ch for ch in str(value or "") if ch.isalnum() or ch in "-_")[:64]
+
+
+@app.post("/api/map")
+def map_app_route():
+    """
+    Read a running app from its URL (functional QA, step 1): GET links only, logout/delete
+    style links never followed, no form submitted; optional login. Saves the project's
+    app map + selectors, which generation and the browser engine then use. The login
+    values are used for this run only — never stored, never logged.
+    """
+    import asyncio
+    data = request.get_json(force=True, silent=True) or {}
+    url = str(data.get("url", "")).strip().rstrip("/")
+    project = _clean_project(data.get("project"))
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
+    if not project:
+        return jsonify({"error": "Give the project a name (letters, digits, - and _)."}), 400
+    if not _target_authorized():
+        return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
+    from core.app_mapper import map_app, save_map
+    try:
+        max_pages = max(1, min(int(data.get("max_pages") or 20), 60))
+    except (TypeError, ValueError):
+        max_pages = 20
+    result = asyncio.run(map_app(url, max_pages=max_pages,
+                                 username=str(data.get("username", "")),
+                                 password=str(data.get("password", "")),
+                                 insecure=str(data.get("insecure", "")).lower() in ("1", "true", "yes", "on")))
+    if result.error:
+        return jsonify({"error": result.error}), 502
+    save_map(result, project)
+    return jsonify({"project": project, "pages": [
+        {"path": p["path"], "elements": len(p.get("elements") or {})} for p in result.pages],
+        "login_ok": result.login_ok, "skipped_links": result.skipped_links})
 
 
 def _ai_error_message(err) -> str:

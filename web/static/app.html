@@ -267,6 +267,24 @@
       <button id="src-file-btn" role="tab" onclick="setSource('file')">Load a test-cases file</button>
     </div>
     <div id="src-gen">
+      <details class="adv" id="mapbox">
+        <summary>Read the app first (recommended for browser tests)</summary>
+        <div class="hint" style="margin:10px 0">QAX opens your app in a browser, follows its links (never logout / delete
+          style links, never submits a form) and records every page and element, so the generated tests use the real ones.</div>
+        <div class="field"><label for="mapurl">App URL</label>
+          <input id="mapurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="mapproj">Project name</label>
+          <input id="mapproj" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="mapuser">Login user (optional)</label>
+          <input id="mapuser" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="mappass">Login password (optional — used for this read only, never stored)</label>
+          <input id="mappass" type="password" autocomplete="new-password"></div>
+        <label class="consent" for="mapauth"><input type="checkbox" id="mapauth">
+          <span><b>I own this app or am authorized to test it.</b></span></label>
+        <div class="row" style="margin-top:10px;justify-content:flex-end">
+          <button class="btn2" id="mapgo" onclick="readApp()">Read the app</button></div>
+        <div id="mapout"></div>
+      </details>
       <div class="field">
         <label for="story">User story / acceptance criteria</label>
         <textarea id="story" rows="5" placeholder="As a user, I can reset my password via an emailed link that expires in 15 minutes. The link works once; an expired or reused link shows an error."></textarea>
@@ -423,11 +441,13 @@ async function runGenerate(){
   logLine('generate','start','asking QAX to draft test cases from your input');
   try{
     const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({story,code})});
+      body:JSON.stringify({story,code,project:($('mapproj').value||'').trim()})});
     const d=await r.json();
     if(d.error){ showErr(d.error); }
     else { logLine('generate','ok',(d.tests||[]).length+' valid test case(s) drafted'
-             +(d.invalid?(' · '+d.invalid+' rejected by schema validation'):''));
+             +(d.invalid?(' · '+d.invalid+' rejected by schema validation'):'')
+             +(d.app_map_pages?(' · grounded in '+d.app_map_pages+' real page(s)'):'')
+             +((d.summary||{}).unmapped_cases?(' · '+d.summary.unmapped_cases+' use an element not on the map (needs review)'):''));
            renderTests(d.tests||[]); }
   }catch(e){ showErr('Generation failed: '+e); }
   finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; }
@@ -507,6 +527,25 @@ function engineHint(){
   const ui=$('exengine').value==='ui'; $('exprojf').style.display=ui?'':'none';
   if(ui && !$('exproj').value) $('exproj').value=_cfg.project||'';
   if(ui && !_cfg.browser) $('exhint').innerHTML='⚠️ Playwright is not installed on the server: <code>pip install playwright && playwright install chromium</code>';
+}
+async function readApp(){
+  const out=$('mapout'), url=$('mapurl').value.trim(), project=$('mapproj').value.trim();
+  if(!$('mapauth').checked){ out.innerHTML='<div class="hk">Confirm you are authorized to test this app.</div>'; return; }
+  const btn=$('mapgo'); btn.disabled=true; out.innerHTML='<div class="hk">Reading the app…</div>';
+  try{
+    const r=await api('/api/map',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url,project,username:$('mapuser').value,password:$('mappass').value,authorized:true})});
+    const d=await r.json();
+    if(d.error){ out.innerHTML='<div class="hk">⚠️ '+esc(d.error)+'</div>'; return; }
+    const n=(d.pages||[]).reduce((a,p)=>a+p.elements,0);
+    out.innerHTML='<div class="hk"><b>'+(d.pages||[]).length+'</b> page(s), <b>'+n+'</b> element(s) read'
+      +(d.login_ok?' · logged in':(d.login_ok===false?' · ⚠️ login did not succeed — public pages only':''))
+      +'<br>'+(d.pages||[]).slice(0,12).map(p=>esc(p.path)+' ('+p.elements+')').join(' · ')
+      +((d.skipped_links||[]).length?'<br>Not followed (would log out / change data): '+d.skipped_links.slice(0,6).map(esc).join(', '):'')
+      +'<br>Generation now uses these pages. Run the tests with project <code>'+esc(d.project)+'</code>.</div>';
+    $('exurl').value=$('exurl').value||url; $('exproj').value=d.project;
+  }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
+  finally{ btn.disabled=false; $('mappass').value=''; }
 }
 async function runTests(preview){
   const out=$('exout'), url=$('exurl').value.trim();

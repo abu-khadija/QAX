@@ -87,7 +87,24 @@ def ai_discovery_enabled() -> bool:
     return os.getenv("QAX_AI_DISCOVER", "false").strip().lower() == "true"
 
 
-_ELEMENTS_JS = """() => {
+_ELEMENTS_JS = r"""() => {
+  // For each interactive element, pick a selector that matches EXACTLY ONE element on the
+  // page (checked here, in the browser): a[href='#'] or button:has-text('Save') can match
+  // several elements and a click would hit the wrong one (found on Healthchecks).
+  const one = (sel) => { try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; } };
+  const q = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const cssPath = (el) => {
+    const parts = [];
+    let n = el;
+    while (n && n.nodeType === 1 && n !== document.body) {
+      if (n.id && one('#' + CSS.escape(n.id))) { parts.unshift('#' + CSS.escape(n.id)); break; }
+      let i = 1, s = n;
+      while ((s = s.previousElementSibling)) if (s.tagName === n.tagName) i++;
+      parts.unshift(n.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
+      n = n.parentElement;
+    }
+    return parts.join(' > ');
+  };
   const out = [];
   const els = document.querySelectorAll("input, select, textarea, button, a[href], [role='button']");
   for (const e of els) {
@@ -96,12 +113,34 @@ _ELEMENTS_JS = """() => {
     let label = '';
     if (e.id) { const l = document.querySelector(`label[for="${CSS.escape(e.id)}"]`); if (l) label = l.innerText; }
     if (!label && e.closest('label')) label = e.closest('label').innerText;
-    out.push({tag: e.tagName.toLowerCase(), id: e.id || '', name: e.getAttribute('name') || '',
-      type: (e.getAttribute('type') || '').toLowerCase(), testid: e.getAttribute('data-testid') || '',
-      aria: e.getAttribute('aria-label') || '', ph: e.getAttribute('placeholder') || '',
-      value: (e.tagName === 'INPUT' ? (e.getAttribute('value') || '') : ''),
-      text: (e.innerText || '').trim().slice(0, 40), href: e.getAttribute('href') || '',
-      label: (label || '').trim().slice(0, 40)});
+    const tag = e.tagName.toLowerCase(), name = e.getAttribute('name') || '', href = e.getAttribute('href') || '';
+    const testid = e.getAttribute('data-testid') || '', aria = e.getAttribute('aria-label') || '';
+    const value = (tag === 'input' ? (e.getAttribute('value') || '') : '');
+    const cands = [];
+    if (e.id) cands.push('#' + CSS.escape(e.id));
+    if (testid) cands.push(`[data-testid='${q(testid)}']`);
+    if (name && value) cands.push(`${tag}[name='${q(name)}'][value='${q(value)}']`);
+    if (name) cands.push(`${tag}[name='${q(name)}']`);
+    if (aria) cands.push(`${tag}[aria-label='${q(aria)}']`);
+    if (tag === 'a' && href && href !== '#' && !href.startsWith('javascript:') && !/\/(\d+|[0-9a-f]{8,}(-[0-9a-f]{4,})*)(\/|$)/i.test(href))
+      cands.push(`a[href='${q(href)}']`);
+    if (tag === 'input' && value) cands.push(`input[type='${q(e.getAttribute('type') || 'submit')}'][value='${q(value)}']`);
+    let sel = cands.find(one) || '';
+    // textContent (what :text-is matches), not innerText — CSS text-transform shows
+    // "Checks" as "CHECKS" (found on Healthchecks); multi-line labels are skipped.
+    const norm = (x) => (x.textContent || '').replace(/\s+/g, ' ').trim();
+    const text = norm(e);
+    if (!sel && text && text.length <= 60 && !/\n/.test(e.innerText || '') && (tag === 'a' || tag === 'button')) {
+      // stable when the page layout changes: the only <a>/<button> with exactly this text
+      const same = [...document.querySelectorAll(tag)].filter(x => norm(x) === text);
+      if (same.length === 1) sel = `${tag}:text-is('${q(text)}')`;
+    }
+    if (!sel) sel = cssPath(e);
+    out.push({tag, id: e.id || '', name, type: (e.getAttribute('type') || '').toLowerCase(), testid, aria,
+      ph: e.getAttribute('placeholder') || '', value, text: (e.innerText || '').trim().slice(0, 40), href,
+      label: (label || '').trim().slice(0, 40), sel,
+      // visible now? (an element in a closed menu/modal is in the DOM but needs a click first)
+      vis: (typeof e.checkVisibility === 'function') ? e.checkVisibility() : !!(e.offsetWidth || e.offsetHeight)});
   }
   return out;
 }"""
@@ -149,8 +188,15 @@ def label_elements(elements: list) -> dict:
                 key += "_link"
             elif tag == "select" and not key.endswith("select"):
                 key += "_select"
-            if ident and not any(c in ident for c in " .:[]#"):
+            href = e.get("href", "")
+            href_has_id = bool(re.search(r"/(\d+|[0-9a-f]{8,}(-[0-9a-f]{4,})*)(/|$)", href, re.I))
+            if e.get("sel"):
+                sel = e["sel"]          # chosen in the page and checked to match one element
+            elif ident and not any(c in ident for c in " .:[]#"):
                 sel = f"#{ident}"
+            elif is_link and href_has_id and e.get("text"):
+                # an href with a record id only matches THIS database — the text is stable
+                sel = f"a:has-text('{e['text']}')"
             elif e.get("testid"):
                 sel = f"[data-testid='{e['testid']}']"
             elif e.get("name"):
@@ -165,22 +211,50 @@ def label_elements(elements: list) -> dict:
                 sel = f"{tag}:has-text('{e['text']}')"
             else:
                 continue
-            k, n = key, 2
+            k = key
+            if k in out and out[k] != sel and ident:
+                # a clearer name than name_2: the element's own id (add-check-name → add_check_name)
+                k = _slug(ident[3:] if ident.startswith("id_") else ident.replace("-", " "))
+            n = 2
+            base_k = k
             while k in out and out[k] != sel:
-                k, n = f"{key}_{n}", n + 1
+                k, n = f"{base_k}_{n}", n + 1
             out[k] = sel
         except Exception:  # noqa: BLE001
             continue
     return out
 
 
-async def label_elements_deterministic(page) -> dict:
-    """Read the page's interactive elements and label them with label_elements(). Never raises."""
+async def label_page(page) -> "tuple[dict, list]":
+    """
+    Label the page's elements and say which are hidden right now (inside a closed menu or
+    modal — a step must open it first; found on Healthchecks: "Log Out" in the account menu).
+
+    Returns:
+        (elements {key: selector}, hidden_keys [key, …]). Raises like label_elements_deterministic.
+    """
     try:
-        return label_elements(await page.evaluate(_ELEMENTS_JS))
+        raw = await page.evaluate(_ELEMENTS_JS)
     except Exception as e:  # noqa: BLE001
-        logger.warning("QAX DOMAnalyzer: deterministic labelling failed: %s", e)
-        return {}
+        raise RuntimeError(f"QAX could not read the page's elements: {str(e)[:200]}") from e
+    elements = label_elements(raw)
+    hidden_sel = {e.get("sel") for e in raw if e.get("sel") and e.get("vis") is False}
+    return elements, [k for k, sel in elements.items() if sel in hidden_sel]
+
+
+async def label_elements_deterministic(page) -> dict:
+    """
+    Read the page's interactive elements and label them with label_elements().
+
+    Raises:
+        RuntimeError: when the page script itself fails — a silent {} made a broken
+            labeller look like "0 elements on every page".
+    """
+    try:
+        elements = await page.evaluate(_ELEMENTS_JS)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"QAX could not read the page's elements: {str(e)[:200]}") from e
+    return label_elements(elements)
 
 class DOMAnalyzer:
     """

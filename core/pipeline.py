@@ -114,6 +114,10 @@ class QAXPipeline:
         self.headless     = headless
         self.base_url     = (base_url or os.getenv("APP_BASE_URL", "")).rstrip("/")
         self.output_dir   = output_dir
+        # The app read from its URL (`main.py map --project P`), if there is one:
+        # generation is grounded in its real pages and elements.
+        from core.app_mapper import load_map
+        self.app_map      = load_map(self.project)
 
         # Resolve exec_mode: explicit flag wins; legacy execute=True → "ui"
         if exec_mode is not None:
@@ -328,6 +332,9 @@ class QAXPipeline:
             missing.append("no target URL (--base-url or APP_BASE_URL)")
         if self.exec_mode in ("api", "both") and cases and not api_ready:
             missing.append("no case has api_steps — API execution will skip them all")
+        if self.exec_mode in ("ui", "both") and not self.app_map:
+            missing.append(f"no app map for project '{self.project or '-'}' — generated UI steps guess "
+                           "element names; run: python main.py map --url <app> --project <name> --authorized")
         if self.exec_mode in ("ui", "both"):
             try:
                 from execution.playwright_runner import PLAYWRIGHT_AVAILABLE
@@ -350,7 +357,10 @@ class QAXPipeline:
             if os.getenv("QAX_AI_HEAL", "false").strip().lower() == "true":
                 writes.append("AI healing ON: page HTML / screenshots of failing steps are "
                               "sent to the AI provider")
+        unmapped = sum(1 for tc in cases if tc.get("unmapped_elements"))
         return {
+            "app_map_pages": len(self.app_map.pages) if self.app_map else 0,
+            "unmapped_cases": unmapped,
             "cases": len(cases), "api_executable": api_ready, "ui_executable": ui_ready,
             "exec_mode": self.exec_mode, "base_url": self.base_url or None,
             "export": self.export_name, "live_writes": live, "writes": writes,
@@ -364,6 +374,10 @@ class QAXPipeline:
         print(f"  Cases:      {plan['cases']} (AI-generated proposals until executed)")
         print(f"  Execute:    {plan['exec_mode']} → {plan['base_url'] or '(no target URL)'}")
         print(f"  Runnable:   api {plan['api_executable']} / ui {plan['ui_executable']}")
+        if plan.get("app_map_pages"):
+            print(f"  App map:    {plan['app_map_pages']} page(s) — cases grounded in the real app"
+                  + (f"; {plan['unmapped_cases']} case(s) use an element not on the map (needs review)"
+                     if plan.get("unmapped_cases") else ""))
         print(f"  Export:     {plan['export']}  |  live writes: {plan['live_writes']}")
         for w in plan["writes"]:
             print(f"  Writes:     {w}")
@@ -568,6 +582,7 @@ class QAXPipeline:
             include_deps=bool(kwargs.get("include_deps")),
             include_bugs=bool(kwargs.get("include_bugs")),
             content=kwargs.get("content"),
+            app_map=self.app_map,
         )
 
         context = QAXContext.from_env(project=self.project, dry_run=self.dry_run)

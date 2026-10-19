@@ -1,0 +1,1203 @@
+{
+  "base_url": "http://127.0.0.1:9090",
+  "login_ok": true,
+  "pages": [
+    {
+      "path": "/login",
+      "example": "/login/",
+      "title": "Login - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "login_link": "a[href='/login/']",
+        "username": "#id_username",
+        "password": "#id_password",
+        "login_button": "input[type='submit'][value='Login']"
+      },
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/login/",
+          "fields": [
+            "username",
+            "password"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/bookmarks",
+      "example": "/bookmarks",
+      "title": "Bookmarks - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "q": "input[name='q']",
+        "search_preferences_button": "button[aria-label='Search preferences']",
+        "sort_by_select": "#id_sort",
+        "off": "#id_shared_0",
+        "shared": "#id_shared_1",
+        "unshared": "#id_shared_2",
+        "unread_0": "#id_unread_0",
+        "unread": "#id_unread_1",
+        "read": "#id_unread_2",
+        "apply_button": "button[name='apply']",
+        "save_as_default_button": "button[name='save']",
+        "filters_button": "button:text-is('Filters')",
+        "bulk_action_select": "select[name='bulk_action']",
+        "bulk_tag_string": "input[name='bulk_tag_string']",
+        "execute_button": "button[name='bulk_execute']",
+        "all_2_bookmarks": "input[name='bulk_select_across']",
+        "bookmark_id": "input[name='bookmark_id'][value='2']",
+        "qax_search_target_link": "a[href='http://127.0.0.1:9/qax-search-target']",
+        "today_link": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+        "view_link": "a[href='/bookmarks?details=2']",
+        "edit_link": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(3)",
+        "archive_button": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(1)",
+        "remove_button": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(2)",
+        "bookmark_id_2": "input[name='bookmark_id'][value='1']",
+        "qax_ui_test_bookmark_link": "a[href='http://127.0.0.1:9/qax-ui-test']",
+        "today_link_2": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+        "view_link_2": "a[href='/bookmarks?details=1']",
+        "edit_link_2": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(3)",
+        "archive_button_2": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(1)",
+        "remove_button_2": "#bookmark-list-container > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(2)",
+        "previous_link": "a:text-is('Previous')",
+        "1_link": "a[href='/bookmarks?page=1']",
+        "next_link": "a:text-is('Next')",
+        "bundles_menu_button": "button[aria-label='Bundles menu']",
+        "manage_bundles_link": "a[href='/bundles']",
+        "tags_menu_button": "button[aria-label='Tags menu']",
+        "manage_tags_link": "a[href='/tags']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2",
+        "sort_by_select",
+        "off",
+        "shared",
+        "unshared",
+        "unread_0",
+        "unread",
+        "read",
+        "apply_button",
+        "save_as_default_button",
+        "filters_button",
+        "bulk_action_select",
+        "bulk_tag_string",
+        "execute_button",
+        "all_2_bookmarks",
+        "bookmark_id",
+        "bookmark_id_2",
+        "manage_bundles_link",
+        "manage_tags_link"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "q"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "sort",
+            "shared",
+            "shared",
+            "shared",
+            "unread",
+            "unread",
+            "unread"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "/bookmarks/action",
+          "fields": [
+            "bulk_action",
+            "bulk_tag_string",
+            "bulk_select_across",
+            "bookmark_id",
+            "bookmark_id"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/bookmarks/new",
+      "example": "/bookmarks/new",
+      "title": "New bookmark - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "url": "#id_url",
+        "tags": "#id_tag_string",
+        "clear_button": "div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > ld-form:nth-of-type(1) > form:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > ld-clear-button:nth-of-type(1) > button:nth-of-type(1)",
+        "title": "#id_title",
+        "clear_button_2": "div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > ld-form:nth-of-type(1) > form:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) > ld-clear-button:nth-of-type(1) > button:nth-of-type(1)",
+        "description": "#id_description",
+        "notes": "#id_notes",
+        "mark_as_unread": "#id_unread",
+        "save_button": "input[type='submit'][value='Save']",
+        "cancel_link": "a:text-is('Cancel')"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2",
+        "clear_button",
+        "clear_button_2",
+        "notes"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/bookmarks/new",
+          "fields": [
+            "url",
+            "tag_string",
+            "title",
+            "description",
+            "notes",
+            "unread"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/settings/general",
+      "example": "/settings/general",
+      "title": "Settings - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "change_password_link": "a[href='/change-password/']",
+        "theme_select": "#id_theme",
+        "bookmark_date_format_select": "#id_bookmark_date_display",
+        "bookmark_description_select": "#id_bookmark_description_display",
+        "bookmark_description_max_lines": "#id_bookmark_description_max_lines",
+        "show_bookmark_url": "#id_display_url",
+        "show_notes_permanently": "#id_permanent_notes",
+        "view": "#id_display_view_bookmark_action",
+        "edit": "#id_display_edit_bookmark_action",
+        "archive": "#id_display_archive_bookmark_action",
+        "remove": "#id_display_remove_bookmark_action",
+        "open_bookmarks_in_select": "#id_bookmark_link_target",
+        "items_per_page": "#id_items_per_page",
+        "sticky_pagination": "#id_sticky_pagination",
+        "collapse_side_panel": "#id_collapse_side_panel",
+        "hide_bundles": "#id_hide_bundles",
+        "tag_search_select": "#id_tag_search",
+        "enable_legacy_search": "#id_legacy_search",
+        "github_link": "a[href='https://github.com/sissbruecker/linkding/issues']",
+        "tag_grouping_select": "#id_tag_grouping",
+        "auto_tagging_rules": "#id_auto_tagging_rules",
+        "enable_favicons": "#id_enable_favicons",
+        "options_documentation_link": "a[href='https://linkding.link/options/#ld_favicon_provider']",
+        "enable_preview_images": "#id_enable_preview_images",
+        "internet_archive_integration_select": "#id_web_archive_integration",
+        "internet_archive_wayback_machine_link": "a[href='https://web.archive.org/']",
+        "internet_archive_link": "a[href='https://archive.org/donate']",
+        "enable_bookmark_sharing": "#id_enable_sharing",
+        "enable_public_bookmark_sharing": "#id_enable_public_sharing",
+        "shared_bookmarks_page_link": "a[href='/bookmarks/shared']",
+        "create_bookmarks_as_unread": "#id_default_mark_unread",
+        "create_bookmarks_as_shared": "#id_default_mark_shared",
+        "custom_css": "#id_custom_css",
+        "save_button": "input[name='update_profile'][value='Save']",
+        "landing_page_select": "#id_landing_page",
+        "guest_user_profile_select": "#id_guest_profile_user",
+        "enable_prefetching_links_on": "#id_enable_link_prefetch",
+        "save_button_2": "input[name='update_global_settings'][value='Save']",
+        "import_public_bookmarks_as": "#import_map_private_flag",
+        "import_file": "input[name='import_file']",
+        "upload_button": "input[type='submit'][value='Upload']",
+        "download_html_link": "a[href='/settings/export']",
+        "github_link_2": "a[href='https://github.com/sissbruecker/linkding/']",
+        "documentation_link": "a[href='https://linkding.link/']",
+        "changelog_link": "a[href='https://github.com/sissbruecker/linkding/blob/master/CHANGELOG.md']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2",
+        "bookmark_description_max_lines",
+        "auto_tagging_rules",
+        "custom_css"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/settings/update",
+          "fields": [
+            "theme",
+            "bookmark_date_display",
+            "bookmark_description_display",
+            "bookmark_description_max_lines",
+            "display_url",
+            "permanent_notes",
+            "display_view_bookmark_action",
+            "display_edit_bookmark_action",
+            "display_archive_bookmark_action",
+            "display_remove_bookmark_action",
+            "bookmark_link_target",
+            "items_per_page",
+            "sticky_pagination",
+            "collapse_side_panel",
+            "hide_bundles",
+            "tag_search",
+            "legacy_search",
+            "tag_grouping",
+            "auto_tagging_rules",
+            "enable_favicons",
+            "enable_preview_images",
+            "web_archive_integration",
+            "enable_sharing",
+            "enable_public_sharing",
+            "default_mark_unread",
+            "default_mark_shared",
+            "custom_css",
+            "update_profile"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "/settings/update",
+          "fields": [
+            "landing_page",
+            "guest_profile_user",
+            "enable_link_prefetch",
+            "update_global_settings"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "/settings/import",
+          "fields": [
+            "map_private_flag",
+            "import_file"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/bookmarks/{id}/edit",
+      "example": "/bookmarks/2/edit?return_url=/bookmarks",
+      "title": "Edit bookmark - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "url": "#id_url",
+        "tags": "#id_tag_string",
+        "refresh_from_website_button": "#refresh-button",
+        "clear_button": "div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > ld-form:nth-of-type(1) > form:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > ld-clear-button:nth-of-type(1) > button:nth-of-type(1)",
+        "title": "#id_title",
+        "clear_button_2": "div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > ld-form:nth-of-type(1) > form:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) > ld-clear-button:nth-of-type(1) > button:nth-of-type(1)",
+        "description": "#id_description",
+        "notes": "#id_notes",
+        "mark_as_unread": "#id_unread",
+        "save_button": "input[type='submit'][value='Save']",
+        "cancel_link": "a:text-is('Cancel')"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2",
+        "clear_button_2",
+        "notes"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/bookmarks/2/edit?return_url=/bookmarks",
+          "fields": [
+            "url",
+            "tag_string",
+            "title",
+            "description",
+            "notes",
+            "unread"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/bookmarks/archived",
+      "example": "/bookmarks/archived",
+      "title": "Archived bookmarks - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "q": "input[name='q']",
+        "search_preferences_button": "button[aria-label='Search preferences']",
+        "sort_by_select": "#id_sort",
+        "off": "#id_shared_0",
+        "shared": "#id_shared_1",
+        "unshared": "#id_shared_2",
+        "unread_0": "#id_unread_0",
+        "unread": "#id_unread_1",
+        "read": "#id_unread_2",
+        "apply_button": "button[name='apply']",
+        "save_as_default_button": "button[name='save']",
+        "filters_button": "button:text-is('Filters')",
+        "bulk_action_select": "select[name='bulk_action']",
+        "bulk_tag_string": "input[name='bulk_tag_string']",
+        "execute_button": "button[name='bulk_execute']",
+        "all_0_bookmarks": "input[name='bulk_select_across']",
+        "adding_link": "a:text-is('adding')",
+        "importing_link": "a:text-is('importing')",
+        "browser_extension_link": "a:text-is('browser extension')",
+        "bookmarklet_link": "a:text-is('bookmarklet')",
+        "bundles_menu_button": "button[aria-label='Bundles menu']",
+        "manage_bundles_link": "a[href='/bundles']",
+        "tags_menu_button": "button[aria-label='Tags menu']",
+        "manage_tags_link": "a[href='/tags']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2",
+        "sort_by_select",
+        "off",
+        "shared",
+        "unshared",
+        "unread_0",
+        "unread",
+        "read",
+        "apply_button",
+        "save_as_default_button",
+        "filters_button",
+        "bulk_action_select",
+        "bulk_tag_string",
+        "execute_button",
+        "all_0_bookmarks",
+        "manage_bundles_link",
+        "manage_tags_link"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "q"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "sort",
+            "shared",
+            "shared",
+            "shared",
+            "unread",
+            "unread",
+            "unread"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "/bookmarks/archived/action",
+          "fields": [
+            "bulk_action",
+            "bulk_tag_string",
+            "bulk_select_across"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/settings/integrations",
+      "example": "/settings/integrations",
+      "title": "Integrations - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "firefox_link": "a[href='https://addons.mozilla.org/firefox/addon/linkding-extension/']",
+        "chrome_link": "a[href='https://chrome.google.com/webstore/detail/linkding-extension/beakmhbijpdhipnjhnclmhgjlddhidpe']",
+        "open_source_link": "a[href='https://github.com/sissbruecker/linkding-extension']",
+        "help_link": "a[href='https://linkding.link/troubleshooting/#automatically-detected-title-and-description-are-incorrect']",
+        "detect_title_and_description": "#detection-method-server",
+        "detection_method_client": "#detection-method-client",
+        "bookmarklet_server": "#bookmarklet-server",
+        "create_api_token_link": "a[href='/settings/integrations/create-api-token']",
+        "all_bookmarks_link": "a:text-is('All bookmarks')",
+        "unread_bookmarks_link": "a:text-is('Unread bookmarks')",
+        "shared_bookmarks_link": "a:text-is('Shared bookmarks')",
+        "public_shared_bookmarks_link": "a[href='/feeds/shared']",
+        "admin_panel_link": "a[href='/admin/bookmarks/feedtoken/']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "path": "/feeds/{id}/all",
+      "example": "/feeds/417e4f2e3a788bcad8c74bb7be494d67294c1f08/all",
+      "title": "",
+      "elements": {},
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/feeds/shared",
+      "example": "/feeds/shared",
+      "title": "",
+      "elements": {},
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/feeds/{id}/unread",
+      "example": "/feeds/417e4f2e3a788bcad8c74bb7be494d67294c1f08/unread",
+      "title": "",
+      "elements": {},
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/bundles",
+      "example": "/bundles",
+      "title": "Bundles - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bundle_link": "a[href='/bundles/new']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "path": "/bundles/new",
+      "example": "/bundles/new",
+      "title": "New bundle - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "name": "#id_name",
+        "search_terms": "#id_search",
+        "tags": "#id_any_tags",
+        "required_tags": "#id_all_tags",
+        "excluded_tags": "#id_excluded_tags",
+        "reading_state_select": "#id_filter_unread",
+        "sharing_state_select": "#id_filter_shared",
+        "save_button": "input[name='save'][value='Save']",
+        "cancel_link": "a[href='/bundles']",
+        "qax_search_target_link": "a[href='http://127.0.0.1:9/qax-search-target']",
+        "today_link": "#preview > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+        "qax_ui_test_bookmark_link": "a[href='http://127.0.0.1:9/qax-ui-test']",
+        "today_link_2": "#preview > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+        "previous_link": "a:text-is('Previous')",
+        "1_link": "a[href='/bundles/new?page=1']",
+        "next_link": "a:text-is('Next')"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/bundles/new",
+          "fields": [
+            "name",
+            "search",
+            "any_tags",
+            "all_tags",
+            "excluded_tags",
+            "filter_unread",
+            "filter_shared",
+            "save"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/bundles/preview",
+      "example": "/bundles/preview",
+      "title": "",
+      "elements": {
+        "qax_search_target_link": "a[href='http://127.0.0.1:9/qax-search-target']",
+        "today_link": "#preview > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+        "qax_ui_test_bookmark_link": "a[href='http://127.0.0.1:9/qax-ui-test']",
+        "today_link_2": "#preview > section:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+        "previous_link": "a:text-is('Previous')",
+        "1_link": "a[href='/bundles/preview?page=1']",
+        "next_link": "a:text-is('Next')"
+      },
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/bookmarks/shared",
+      "example": "/bookmarks/shared",
+      "title": "Shared bookmarks - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "q": "input[name='q']",
+        "search_preferences_button": "button[aria-label='Search preferences']",
+        "sort_by_select": "#id_sort",
+        "apply_button": "button[name='apply']",
+        "save_as_default_button": "button[name='save']",
+        "filters_button": "button:text-is('Filters')",
+        "adding_link": "a:text-is('adding')",
+        "importing_link": "a:text-is('importing')",
+        "browser_extension_link": "a:text-is('browser extension')",
+        "bookmarklet_link": "a:text-is('bookmarklet')",
+        "user_select": "#id_user",
+        "tags_menu_button": "button[aria-label='Tags menu']",
+        "manage_tags_link": "a[href='/tags']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2",
+        "sort_by_select",
+        "apply_button",
+        "save_as_default_button",
+        "filters_button",
+        "manage_tags_link"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "q"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "sort"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "/bookmarks/shared/action",
+          "fields": []
+        },
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "user"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/feeds/{id}/shared",
+      "example": "/feeds/417e4f2e3a788bcad8c74bb7be494d67294c1f08/shared",
+      "title": "",
+      "elements": {},
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/tags",
+      "example": "/tags",
+      "title": "Tags - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "create_tag_link": "a[href='/tags/new']",
+        "merge_tags_link": "a[href='/tags/merge']",
+        "search_tags": "#search",
+        "search_button": "button:text-is('Search')",
+        "sort_by_select": "#sort",
+        "show_only_unused_tags": "input[name='unused'][value='true']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "search",
+            "sort",
+            "unused"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/tags/new",
+      "example": "/tags/new",
+      "title": "",
+      "elements": {
+        "close_dialog_button": "button[aria-label='Close dialog']",
+        "name": "#id_name",
+        "cancel_button": "button:text-is('Cancel')",
+        "save_button": "button:text-is('Save')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/tags/new",
+          "fields": [
+            "name"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/tags/merge",
+      "example": "/tags/merge",
+      "title": "",
+      "elements": {
+        "close_dialog_button": "button[aria-label='Close dialog']",
+        "cancel_button": "button:text-is('Cancel')",
+        "merge_tags_button": "button:text-is('Merge Tags')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/tags/merge",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "path": "/change-password",
+      "example": "/change-password/",
+      "title": "Change password - Linkding",
+      "elements": {
+        "linkding_link": "a[href='/']",
+        "add_bookmark_link": "a:text-is('Add bookmark')",
+        "bookmarks_button": "button:text-is('Bookmarks')",
+        "active_link": "a:text-is('Active')",
+        "archived_link": "a:text-is('Archived')",
+        "unread_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_button": "button:text-is('Settings')",
+        "general_link": "a:text-is('General')",
+        "integrations_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2) > a:nth-of-type(1)",
+        "admin_link": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > ld-dropdown:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "logout_button": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "add_bookmark_link_2": "a[aria-label='Add bookmark']",
+        "navigation_menu_button": "button[aria-label='Navigation menu']",
+        "bookmarks_link": "a:text-is('Bookmarks')",
+        "archived_bookmarks_link": "a:text-is('Archived bookmarks')",
+        "unread_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(3) > a:nth-of-type(1)",
+        "untagged_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(4) > a:nth-of-type(1)",
+        "settings_link": "a:text-is('Settings')",
+        "integrations_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(6) > a:nth-of-type(1)",
+        "admin_link_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(7) > a:nth-of-type(1)",
+        "logout_button_2": "header:nth-of-type(1) > div:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(2) > ld-dropdown:nth-of-type(1) > ul:nth-of-type(1) > li:nth-of-type(8) > form:nth-of-type(1) > button:nth-of-type(1)",
+        "old_password": "#id_old_password",
+        "new_password": "#id_new_password1",
+        "confirm_new_password": "#id_new_password2",
+        "change_password_button": "input[type='submit'][value='Change Password']"
+      },
+      "hidden": [
+        "active_link",
+        "archived_link",
+        "unread_link",
+        "untagged_link",
+        "general_link",
+        "integrations_link",
+        "admin_link",
+        "add_bookmark_link_2",
+        "navigation_menu_button",
+        "bookmarks_link",
+        "archived_bookmarks_link",
+        "unread_link_2",
+        "untagged_link_2",
+        "settings_link",
+        "integrations_link_2",
+        "admin_link_2",
+        "logout_button_2"
+      ],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/logout/",
+          "fields": []
+        },
+        {
+          "method": "POST",
+          "action": "/change-password/",
+          "fields": [
+            "old_password",
+            "new_password1",
+            "new_password2"
+          ]
+        }
+      ]
+    }
+  ],
+  "skipped_links": [
+    "/admin/",
+    "/settings/export",
+    "/settings/integrations/create-api-token",
+    "/admin/bookmarks/feedtoken/"
+  ],
+  "error": null
+}

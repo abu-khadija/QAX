@@ -1,0 +1,288 @@
+{
+  "_comment": "Functional QA on a real app: Healthchecks (BSD-3) v5.0-dev @ de5a633, run locally. Selector keys come from `main.py map` (no hand-written selectors). Credentials: QAX_VAR_HC_USER / QAX_VAR_HC_PASSWORD. Paths with a project id are specific to this local instance (read from the map).",
+  "test_cases": [
+    {
+      "test_case_id": "HC-001",
+      "title": "Valid login opens the project's checks",
+      "module": "Checks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_HC_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_HC_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/checks/",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "HC-002",
+      "title": "Wrong password shows an error",
+      "module": "Checks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_HC_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "not-the-password",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "Incorrect email or password",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "HC-003",
+      "title": "A new check appears in the list",
+      "module": "Checks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_HC_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_HC_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_check_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "add_check_name",
+          "value": "QAX nightly backup",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_check_submit",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "QAX nightly backup",
+          "step_number": 8
+        }
+      ]
+    },
+    {
+      "test_case_id": "HC-004",
+      "title": "Renaming the project shows the new name",
+      "module": "Checks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_HC_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_HC_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/projects/516737ba-b3f0-4fc7-8a99-4aabc896e99d/settings/",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "change_project_name_link",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "project_name",
+          "value": "QAX renamed project",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "set_project_name_button",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "QAX renamed project",
+          "step_number": 9
+        }
+      ]
+    },
+    {
+      "test_case_id": "HC-005",
+      "title": "The account page shows the user's email",
+      "module": "Checks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_HC_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_HC_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/profile/",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax@example.invalid",
+          "step_number": 6
+        }
+      ]
+    },
+    {
+      "test_case_id": "HC-006",
+      "title": "Log out leaves the signed-in area",
+      "module": "Checks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/accounts/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_HC_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_HC_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "account_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_out_button",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/projects/516737ba-b3f0-4fc7-8a99-4aabc896e99d/checks/",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/accounts/login",
+          "step_number": 8
+        }
+      ]
+    }
+  ]
+}

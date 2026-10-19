@@ -181,7 +181,21 @@ class PlaywrightRunner:
             except Exception:  # noqa: BLE001
                 pass
         self.context.on("request", _on_request)
+        self._throttled = 0
+
+        def _on_response(resp):
+            try:
+                if resp.status == 429:
+                    self._throttled += 1
+            except Exception:  # noqa: BLE001
+                pass
+        self.context.on("response", _on_response)
         self.page = await self.context.new_page()
+
+    def take_throttled(self) -> int:
+        """Return and clear how many HTTP 429 answers the app sent since the last call."""
+        n, self._throttled = int(getattr(self, "_throttled", 0) or 0), 0
+        return n
 
     def take_writes(self) -> list:
         """Return and clear the write requests (method/host/path) sent since the last call."""

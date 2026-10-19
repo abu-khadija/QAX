@@ -77,6 +77,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -1044,6 +1045,9 @@ def run_execute_command() -> None:
     # ── Console summary ────────────────────────────────────────────────────
     reporter.generate_console_summary(batch_results)
     _print_writes_sent(batch_results)
+    if batch_results.get("throttled"):
+        print(f"  ⚠️  {batch_results['throttled']} case(s) hit the app's rate limit — reported as ERROR, "
+              "not FAIL. Wait and re-run, or raise the limit on staging.")
 
     # ── HTML report ────────────────────────────────────────────────────────
     report_folder = str(Path(args.output).parent) if args.output else "output/reports"
@@ -2036,6 +2040,7 @@ def show_help() -> None:
     print()
     print("Commands — functional QA:")
     print("  pipeline         Input → generate → plan → export → execute → report → Xray results")
+    print("  map              Read a running app from its URL (pages, elements) for generation")
     print("  analyze          Generate test cases from source code")
     print("  run              Config-driven pipeline with session tracking")
     print("  execute          Run test cases with Playwright browser")
@@ -2141,6 +2146,75 @@ def run_file_findings_command() -> None:
     """
     from cli.file_findings import run as _run_file_findings
     sys.exit(_run_file_findings(sys.argv[2:]))
+
+def run_map_command() -> None:
+    """
+    Handle the 'map' subcommand: read a running app from its URL.
+
+    Walks the app in a real browser (same-origin GET links only; logout/delete-style
+    links are never followed; no form is submitted), names each page's elements without
+    AI, and saves config/projects/<project>/app_map.json + selectors.json. Generation
+    for that project is then grounded in the real pages and elements.
+
+    Called when sys.argv[1] == "map".
+    """
+    import asyncio
+
+    parser = argparse.ArgumentParser(
+        prog="qax map",
+        description="Read a running app from its URL: pages, elements and selectors for functional QA.",
+    )
+    parser.add_argument("--url", required=True, help="Root URL of the running app.")
+    parser.add_argument("--project", required=True, help="Project name (config/projects/<name>/).")
+    parser.add_argument("--start", action="append", default=[], metavar="PATH",
+                        help="Extra path to start from (repeatable), e.g. --start /bookmarks")
+    parser.add_argument("--max-pages", type=int, default=20, help="Hard cap on pages visited (default 20).")
+    parser.add_argument("--user-env", default="", metavar="VAR",
+                        help="Name of the environment variable holding the login user (e.g. QAX_VAR_USER).")
+    parser.add_argument("--password-env", default="", metavar="VAR",
+                        help="Name of the environment variable holding the login password.")
+    parser.add_argument("--authorized", action="store_true",
+                        help="Confirm you own this app or are authorized to test it (required).")
+    parser.add_argument("--insecure", action="store_true",
+                        help="Do not verify the TLS certificate (self-signed staging only).")
+    parser.add_argument("--headed", action="store_true", help="Show the browser.")
+    args = parser.parse_args(sys.argv[2:])
+
+    if not args.authorized:
+        print("\n  Refusing to map without --authorized (you own this app or may test it).\n")
+        sys.exit(2)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", args.project):
+        print("\n  --project: letters, digits, - and _ only.\n")
+        sys.exit(2)
+    user = os.getenv(args.user_env, "") if args.user_env else ""
+    password = os.getenv(args.password_env, "") if args.password_env else ""
+    if (args.user_env or args.password_env) and not (user and password):
+        print(f"\n  Login variables not set: {args.user_env or '-'} / {args.password_env or '-'}\n")
+        sys.exit(2)
+
+    from core.app_mapper import map_app, save_map
+    print(f"\n  QAX — reading {args.url} (max {args.max_pages} pages, GET links only)…")
+    app_map = asyncio.run(map_app(args.url, start_paths=args.start, max_pages=args.max_pages,
+                                  username=user, password=password, headless=not args.headed,
+                                  insecure=args.insecure))
+    if app_map.error:
+        print(f"\n  ✗ {app_map.error}\n")
+        sys.exit(1)
+    if user and app_map.login_ok is False:
+        print("  ⚠️  Login did not succeed — only public pages were read.")
+    path = save_map(app_map, args.project)
+    n_el = sum(len(p.get("elements") or {}) for p in app_map.pages)
+    print(f"  Pages read: {len(app_map.pages)} · elements named: {n_el}"
+          + (f" · logged in" if app_map.login_ok else ""))
+    for p in app_map.pages[:30]:
+        print(f"    {p['path']:<40} {len(p.get('elements') or {}):>3} element(s)")
+    if app_map.skipped_links:
+        print(f"  Not followed (would log out / change data): {', '.join(app_map.skipped_links[:8])}")
+    print(f"  Saved: {path}")
+    print(f"         {path.parent / 'selectors.json'}")
+    print(f"  Next:  python main.py pipeline --input story --source \"…\" --project {args.project} "
+          f"--exec-mode ui --base-url {args.url} --plan-only\n")
+
 
 def run_diff_command() -> None:
     """
@@ -2508,13 +2582,14 @@ def main() -> None:
         "demo":             run_demo_command,
         "lint-tests":       run_lint_tests_command,
         "diff":             run_diff_command,
+        "map":              run_map_command,
     }
 
     if command in dispatch:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, discover, check-connection, init-project, cache, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
+        print("  Valid commands: analyze, run, execute, feedback, discover, map, check-connection, init-project, cache, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

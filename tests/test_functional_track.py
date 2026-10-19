@@ -580,3 +580,90 @@ def test_generation_errors_are_explained_in_plain_words(client, monkeypatch):
     d = client.post("/api/generate", json={"story": "s"}).get_json()
     assert "no credit left" in d["error"] and "Load a test-cases file" in d["error"]
     assert "{'message'" not in d["error"]
+
+
+def test_page_templates_and_risky_links():
+    from core.app_mapper import is_risky_link, page_template
+    assert page_template("http://a/bookmarks/12/edit?return_url=/x") == "/bookmarks/{id}/edit"
+    assert page_template("http://a/bookmarks?page=2") == "/bookmarks"
+    assert page_template("http://a/u/3f2a9c1e-77aa-4b2c/x") == "/u/{id}/x"
+    for h in ("/logout/", "/settings/integrations/create-api-token", "/items/3/delete", "/export.csv"):
+        assert is_risky_link(h), h
+    for h in ("/bookmarks/archived", "/bookmarks/new", "/tags/merge", "/exports", "/runs"):
+        assert not is_risky_link(h), h
+
+
+def _a_map():
+    from core.app_mapper import AppMap
+    return AppMap(base_url="http://a", pages=[
+        {"path": "/login", "elements": {"username": "#u", "login_button": "#go"}},
+        {"path": "/notes", "elements": {"note_input": "#n"}}])
+
+
+def test_check_cases_flags_steps_on_elements_that_are_not_on_the_map():
+    from core.app_mapper import check_cases
+    cases = [
+        {"automation_steps": [{"playwright_action": "fill", "selector_key": "username"},
+                              {"playwright_action": "assert", "selector_key": "page"},
+                              {"playwright_action": "click", "selector_key": "#go"}]},
+        {"automation_steps": [{"playwright_action": "navigate", "selector_key": "TODO_url"},
+                              {"playwright_action": "click", "selector_key": "save_btn"}]}]
+    assert check_cases(cases, _a_map()) == 1
+    assert cases[0]["unmapped_elements"] == [] and "needs_review" not in cases[0]
+    assert cases[1]["unmapped_elements"] == ["save_btn"] and cases[1]["needs_review"] is True
+    assert check_cases(cases, None) == 0
+
+
+def test_generation_is_grounded_in_the_map_and_flags_unknown_elements(monkeypatch):
+    import core.claude_client as cc
+    from services.context import QAXContext
+    from services.generation_service import GenerationOptions, GenerationService
+    seen = {}
+
+    def analyze_code(self, *a, **kw):
+        seen["ctx"] = kw.get("repo_context") or ""
+        seen["cache"] = kw.get("use_cache")
+        from tests.test_validator import make_valid_test_case
+        tc = make_valid_test_case()
+        steps = tc["automation_steps"]
+        steps[0]["selector_key"] = "username"                 # on the map
+        steps[-1]["selector_key"] = "ghost_button"            # not on the map
+        steps[-1]["playwright_action"] = "click"
+        return [tc]
+    monkeypatch.setattr(cc.ClaudeClient, "__init__", lambda self, *a, **k: None)
+    monkeypatch.setattr(cc.ClaudeClient, "analyze_code", analyze_code)
+    monkeypatch.setattr(QAXContext, "require_anthropic_key", lambda self: None, raising=False)
+    res = GenerationService(QAXContext.from_env()).generate(
+        "story://t", options=GenerationOptions(content="As a user I log in", user_story="log in",
+                                               app_map=_a_map()))
+    assert "OBSERVED UI SURFACE" in seen["ctx"] and "username: #u" in seen["ctx"]
+    assert seen["cache"] is False
+    assert len(res.test_cases) == 1, res.invalid            # the case passed validation …
+    assert res.test_cases[0]["unmapped_elements"] == ["ghost_button"]    # … and was flagged
+    assert res.summary["unmapped_cases"] == 1
+
+
+def test_web_map_needs_authorization_and_saves_the_map(client, monkeypatch, tmp_path):
+    import core.app_mapper as am
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path)
+
+    async def fake_map(url, **kw):
+        assert kw["username"] == "u" and kw["password"] == "p"
+        return _a_map()
+    monkeypatch.setattr(am, "map_app", fake_map)
+    body = {"url": "http://app.local", "project": "my/../app", "username": "u", "password": "p"}
+    assert client.post("/api/map", json=body).status_code == 400            # not authorized
+    d = client.post("/api/map", json=dict(body, authorized=True)).get_json()
+    assert d["project"] == "myapp" and [p["path"] for p in d["pages"]] == ["/login", "/notes"]
+    saved = (tmp_path / "myapp" / "app_map.json").read_text()
+    assert '"p"' not in saved and "password" not in saved.lower()          # login never stored
+    assert (tmp_path / "myapp" / "selectors.json").exists()
+
+
+def test_pipeline_plan_says_when_there_is_no_app_map(tmp_path):
+    p = _pipeline(tmp_path, exec_mode="ui")
+    p.app_map = None
+    assert any("no app map" in m for m in p.plan([])["missing"])
+    p.app_map = _a_map()
+    plan = p.plan([])
+    assert plan["app_map_pages"] == 2 and not any("no app map" in m for m in plan["missing"])
