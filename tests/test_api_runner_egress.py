@@ -66,3 +66,29 @@ def test_anonymous_steps_do_not_carry_the_operators_cookie():
     finally:
         srv.shutdown()
     assert seen == [(False, None), (True, "N1")]
+
+
+def test_a_case_with_no_condition_checked_nothing_and_is_not_a_pass():
+    """A step without expected_status/expect_json 'passes' on any answer, even a 500 —
+    so a case made only of such steps is SKIP, not PASS."""
+    import socket
+    import threading
+    import wsgiref.simple_server as ws
+    from execution.api_runner import APIRunner
+
+    def app(environ, start_response):
+        start_response("500 Internal Server Error", [("Content-Type", "text/plain")]); return [b"boom"]
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+    srv = ws.make_server("127.0.0.1", port, app, handler_class=type("Q", (ws.WSGIRequestHandler,),
+                                                                     {"log_message": lambda *a: None}))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        r = APIRunner(); r.setup(base_url=f"http://127.0.0.1:{port}")
+        unchecked = r.execute_test_case({"test_case_id": "U", "title": "u",
+                                         "api_steps": [{"method": "GET", "path": "/x"}]})
+        checked = r.execute_test_case({"test_case_id": "C", "title": "c",
+                                       "api_steps": [{"method": "GET", "path": "/x", "expected_status": 200}]})
+    finally:
+        srv.shutdown()
+    assert unchecked["status"] == "SKIP" and "nothing was checked" in unchecked["steps"][-1]["error"]
+    assert checked["status"] == "FAIL"                       # with a condition, the 500 is caught

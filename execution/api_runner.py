@@ -684,6 +684,19 @@ class APIRunner:
                 if r["status"] == "FAIL":
                     overall = "FAIL"
                     break
+            # A case proves something only if a step had a condition to check (an
+            # expected status or expected body fields). Steps with neither "pass" on
+            # any answer — even a 500 — so a case made only of those checked nothing:
+            # it is SKIP, never PASS (generated cases sometimes omit expected_status).
+            if overall == "PASS" and not any(
+                    s.get("expected_status") is not None or s.get("expect_json")
+                    for s in api_steps):
+                overall = "SKIP"
+                step_results.append({
+                    "step_number": 0, "action": "verdict", "status": "SKIP",
+                    "actual_result": "", "response_code": None, "duration_ms": 0,
+                    "error": "No step had an expected status or expected body — nothing was checked",
+                })
         else:
             # No API steps → the UI-shaped automation_steps can't be executed
             # meaningfully over HTTP. Mark SKIP rather than a hollow PASS.
