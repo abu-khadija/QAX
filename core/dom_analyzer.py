@@ -54,6 +54,134 @@ MAX_ELEMENTS = 80
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 
+
+async def _settle(page, timeout_ms: int = 15_000, idle_ms: int = 3_000) -> None:
+    """
+    Wait for the page to load, then briefly for network idle. Apps that keep a
+    connection open (live reload, Turbo/SSE, analytics polling) never reach
+    "networkidle"; waiting for it alone timed out and discovered nothing
+    (found on linkding, 2026-10-19). Never raises.
+    """
+    try:
+        await page.wait_for_load_state("load", timeout=timeout_ms)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await page.wait_for_load_state("networkidle", timeout=idle_ms)
+    except Exception:  # noqa: BLE001
+        pass   # still busy — the DOM is loaded, carry on
+
+
+async def _goto_settled(page, url: str, timeout_ms: int = 30_000) -> None:
+    """Navigate (waiting for "load", not "networkidle"), then settle. Raises on navigation errors."""
+    await page.goto(url, wait_until="load", timeout=timeout_ms)
+    await _settle(page, timeout_ms=timeout_ms)
+
+
+def ai_discovery_enabled() -> bool:
+    """
+    True only when the operator opted in (discover --ai or QAX_AI_DISCOVER=true).
+    Labelling with Claude sends the page's element list to the AI provider; the
+    default is the deterministic labeller, which works without a key or credit.
+    """
+    return os.getenv("QAX_AI_DISCOVER", "false").strip().lower() == "true"
+
+
+_ELEMENTS_JS = """() => {
+  const out = [];
+  const els = document.querySelectorAll("input, select, textarea, button, a[href], [role='button']");
+  for (const e of els) {
+    const st = getComputedStyle(e);
+    if (e.type === 'hidden' || st.display === 'none' || st.visibility === 'hidden') continue;
+    let label = '';
+    if (e.id) { const l = document.querySelector(`label[for="${CSS.escape(e.id)}"]`); if (l) label = l.innerText; }
+    if (!label && e.closest('label')) label = e.closest('label').innerText;
+    out.push({tag: e.tagName.toLowerCase(), id: e.id || '', name: e.getAttribute('name') || '',
+      type: (e.getAttribute('type') || '').toLowerCase(), testid: e.getAttribute('data-testid') || '',
+      aria: e.getAttribute('aria-label') || '', ph: e.getAttribute('placeholder') || '',
+      value: (e.tagName === 'INPUT' ? (e.getAttribute('value') || '') : ''),
+      text: (e.innerText || '').trim().slice(0, 40), href: e.getAttribute('href') || '',
+      label: (label || '').trim().slice(0, 40)});
+  }
+  return out;
+}"""
+
+
+def _slug(text: str) -> str:
+    """'Add bookmark…' → 'add_bookmark' (ASCII words, max 4)."""
+    import re
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return "_".join(words[:4])
+
+
+def label_elements(elements: list) -> dict:
+    """
+    Name interactive elements and pick a stable selector for each — no AI.
+
+    Key: from the visible label, then name / id (Django's "id_" prefix dropped),
+    aria-label, placeholder, button text or value; buttons get "_button", links
+    "_link", selects "_select". Selector: #id, then [data-testid], tag[name=…],
+    [aria-label], then a text/href selector. Duplicate keys get _2, _3 ….
+
+    Args:
+        elements (list[dict]): Element descriptors (see _ELEMENTS_JS).
+
+    Returns:
+        dict: {key: selector}. Never raises.
+    """
+    out: dict = {}
+    for e in elements or []:
+        try:
+            tag, typ = e.get("tag", ""), e.get("type", "")
+            is_button = tag == "button" or typ in ("submit", "button", "reset") or e.get("role") == "button"
+            is_link = tag == "a"
+            ident = e.get("id", "")
+            base = (e.get("label") or e.get("name") or (ident[3:] if ident.startswith("id_") else ident)
+                    or e.get("aria") or e.get("ph") or e.get("text") or e.get("value") or e.get("testid"))
+            if is_button or is_link:
+                base = e.get("text") or e.get("value") or e.get("aria") or base
+            key = _slug(base)
+            if not key:
+                continue
+            if is_button and not key.endswith("button"):
+                key += "_button"
+            elif is_link and not key.endswith("link"):
+                key += "_link"
+            elif tag == "select" and not key.endswith("select"):
+                key += "_select"
+            if ident and not any(c in ident for c in " .:[]#"):
+                sel = f"#{ident}"
+            elif e.get("testid"):
+                sel = f"[data-testid='{e['testid']}']"
+            elif e.get("name"):
+                sel = f"{tag}[name='{e['name']}']"
+            elif e.get("aria"):
+                sel = f"{tag}[aria-label='{e['aria']}']"
+            elif is_link and e.get("href"):
+                sel = f"a[href='{e['href']}']"
+            elif tag == "input" and e.get("value"):
+                sel = f"input[type='{typ or 'submit'}'][value='{e['value']}']"
+            elif e.get("text"):
+                sel = f"{tag}:has-text('{e['text']}')"
+            else:
+                continue
+            k, n = key, 2
+            while k in out and out[k] != sel:
+                k, n = f"{key}_{n}", n + 1
+            out[k] = sel
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+async def label_elements_deterministic(page) -> dict:
+    """Read the page's interactive elements and label them with label_elements(). Never raises."""
+    try:
+        return label_elements(await page.evaluate(_ELEMENTS_JS))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("QAX DOMAnalyzer: deterministic labelling failed: %s", e)
+        return {}
+
 class DOMAnalyzer:
     """
     Discovers CSS selectors for a live page by extracting its interactive
@@ -137,20 +265,19 @@ class DOMAnalyzer:
             )
             return {}
 
-        if not self._api_key:
-            logger.warning(
-                "QAX DOMAnalyzer: ANTHROPIC_API_KEY not set — "
-                "cannot call Claude for selector labelling."
-            )
-            return {}
-
         try:
             # ── Step 1: Navigate ───────────────────────────────────────────
             logger.info("QAX DOMAnalyzer: Navigating to %s", page_url)
-            await playwright_page.goto(page_url, wait_until="networkidle", timeout=30_000)
+            await _goto_settled(playwright_page, page_url)
 
             # ── Step 2: Auto-login if needed ───────────────────────────────
-            await self.login_if_needed(playwright_page)
+            # Not when the page asked for IS the login page: logging in first labelled
+            # the page behind it, so the login form's own fields were never recorded
+            # (found on linkding, 2026-10-19).
+            from urllib.parse import urlparse as _up
+            where = f"{page_name} {_up(page_url).path}".lower()
+            if not any(w in where for w in ("login", "signin", "sign_in", "sign-in", "logon")):
+                await self.login_if_needed(playwright_page)
 
             # ── Step 3: Extract interactive elements ───────────────────────
             elements_summary = await self._extract_elements_summary(playwright_page)
@@ -161,16 +288,17 @@ class DOMAnalyzer:
                 )
                 return {}
 
-            logger.info(
-                "QAX DOMAnalyzer: Found interactive elements on '%s' — "
-                "sending to Claude for labelling",
-                page_name,
-            )
-
-            # ── Step 4-5: Ask Claude to label the elements ─────────────────
-            selectors = await self._ask_claude_for_selectors(
-                page_name, elements_summary
-            )
+            # ── Step 4-5: Label the elements ───────────────────────────────
+            # Deterministic by default (nothing leaves the machine). Claude labels
+            # them only when the operator opted in (discover --ai / QAX_AI_DISCOVER),
+            # and its answer falls back to the deterministic one if it fails.
+            selectors = {}
+            if ai_discovery_enabled() and self._api_key:
+                logger.info("QAX DOMAnalyzer: sending the element list of '%s' to Claude "
+                            "for labelling (--ai)", page_name)
+                selectors = await self._ask_claude_for_selectors(page_name, elements_summary)
+            if not selectors:
+                selectors = await label_elements_deterministic(playwright_page)
 
             logger.info(
                 "QAX DOMAnalyzer: Discovered %d selector(s) for page '%s'",
@@ -252,7 +380,7 @@ class DOMAnalyzer:
             submit_btn = await playwright_page.query_selector(submit_sel)
             if submit_btn:
                 await submit_btn.click()
-                await playwright_page.wait_for_load_state("networkidle", timeout=15_000)
+                await _settle(playwright_page, timeout_ms=15_000)
 
             post_url = playwright_page.url
             success = "/login" not in post_url.lower()

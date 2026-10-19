@@ -1,6 +1,9 @@
 {
-  "_meta": {"auto_discovered": false, "manual_overrides": []},
-  "_comment": "Selectors for evals/targets/ui_demo_app.py — the browser-engine demo app.",
+  "_meta": {
+    "auto_discovered": false,
+    "manual_overrides": []
+  },
+  "_comment": "Selectors for evals/targets/ui_demo_app.py \u2014 the browser-engine demo app.",
   "login": {
     "username": "#username",
     "password": "#password",
@@ -14,5 +17,9 @@
     "note_count": "#note-count",
     "notes_list": "#notes",
     "logout_link": "#logout-link"
+  },
+  "delayed": {
+    "save_button": "#save-btn",
+    "status": "#status"
   }
 }

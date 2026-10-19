@@ -1582,8 +1582,17 @@ Examples:
         default=False,
         help="Run browser in headless mode (no visible window)."
     )
+    parser.add_argument(
+        "--ai",
+        action="store_true",
+        default=False,
+        help="Let Claude name the elements (sends the page's element list to the AI "
+             "provider). Default: deterministic naming, nothing leaves the machine."
+    )
 
     args = parser.parse_args(sys.argv[2:])
+    if args.ai:
+        os.environ["QAX_AI_DISCOVER"] = "true"
 
     # ── Validate combinations ──────────────────────────────────────────────
     if args.url and not args.page:

@@ -1,0 +1,272 @@
+{
+  "_comment": "Functional QA on a real app: linkding 1.47.0 (MIT), run locally. Credentials come from QAX_VAR_LD_USER / QAX_VAR_LD_PASSWORD \u2014 never stored here. expected_outcome = linkding's real, manually verified behaviour.",
+  "test_cases": [
+    {
+      "test_case_id": "LD-001",
+      "title": "Valid login opens the bookmarks page",
+      "module": "Bookmarks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/bookmarks",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "LD-002",
+      "title": "Wrong password shows an error",
+      "module": "Bookmarks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "not-the-password",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "error_hint",
+          "assertion_type": "text",
+          "assertion_value": "didn't match",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "LD-003",
+      "title": "A new bookmark appears in the list",
+      "module": "Bookmarks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/bookmarks/new",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "url",
+          "value": "http://127.0.0.1:9/qax-ui-test",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "QAX UI test bookmark",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page_main",
+          "assertion_type": "text",
+          "assertion_value": "QAX UI test bookmark",
+          "step_number": 9
+        }
+      ]
+    },
+    {
+      "test_case_id": "LD-004",
+      "title": "A bookmark without a URL is not saved",
+      "module": "Bookmarks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/bookmarks/new",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/bookmarks/new",
+          "step_number": 7
+        }
+      ]
+    },
+    {
+      "test_case_id": "LD-005",
+      "title": "Search finds the bookmark",
+      "module": "Bookmarks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/bookmarks?q=QAX+UI+test",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page_main",
+          "assertion_type": "text",
+          "assertion_value": "QAX UI test bookmark",
+          "step_number": 6
+        }
+      ]
+    },
+    {
+      "test_case_id": "LD-006",
+      "title": "Logout returns to the login page",
+      "module": "Bookmarks",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "logout_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/login",
+          "step_number": 6
+        }
+      ]
+    }
+  ]
+}

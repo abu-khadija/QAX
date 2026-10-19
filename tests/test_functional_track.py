@@ -522,3 +522,24 @@ def test_ai_healing_is_off_unless_opted_in(monkeypatch):
     assert ai_assist_enabled() is False
     monkeypatch.setenv("QAX_AI_HEAL", "true")
     assert ai_assist_enabled() is True
+
+
+def test_deterministic_labels_name_fields_buttons_and_links_without_ai():
+    from core.dom_analyzer import label_elements
+    sel = label_elements([
+        {"tag": "input", "id": "id_username", "name": "username", "type": "text"},          # Django ids
+        {"tag": "input", "id": "", "name": "", "type": "submit", "value": "Login"},
+        {"tag": "a", "href": "/bookmarks/new", "text": "Add bookmark"},
+        {"tag": "a", "href": "", "aria": "Add bookmark", "text": ""},                     # same name
+        {"tag": "button", "text": "Logout"},
+        {"tag": "input", "id": "q", "name": "q", "type": "search", "label": "Search"},
+        {"tag": "select", "name": "sort"},
+        {"tag": "div"},                                                                      # nameless
+    ])
+    assert sel["username"] == "#id_username"
+    assert sel["login_button"] == "input[type='submit'][value='Login']"
+    assert sel["add_bookmark_link"] == "a[href='/bookmarks/new']"
+    assert sel["logout_button"] == "button:has-text('Logout')"
+    assert sel["search"] == "#q" and sel["sort_select"] == "select[name='sort']"
+    assert sel["add_bookmark_link_2"] == "a[aria-label='Add bookmark']"   # 2nd element, own key
+    assert len(sel) == 7                                     # the nameless div is skipped

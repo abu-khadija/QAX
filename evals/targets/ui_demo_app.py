@@ -8,6 +8,11 @@ directions — working flows must PASS and the bug must FAIL:
   PLANTED BUG: an empty note is accepted and listed (the page should say
   "Note cannot be empty" and add nothing).
 
+It also reproduces three behaviours of real apps that once broke QAX (linkding):
+  * /login sends a signed-in user to the dashboard (cases must not share a session);
+  * /live keeps a request open forever (the page never becomes "network idle");
+  * /delayed shows its confirmation a moment AFTER the click (async UI updates).
+
 Credentials are fixed demo values (user `demo`, password `demo123`) — this app holds no
 real data and listens on 127.0.0.1 only. Selectors: config/projects/uidemo/selectors.json.
 
@@ -48,6 +53,8 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     """Login form; demo/demo123 logs in, anything else shows an error."""
+    if request.method == "GET" and _logged_in():
+        return redirect("/dashboard")          # like real apps: no login form when signed in
     error = ""
     if request.method == "POST":
         if request.form.get("username") == "demo" and request.form.get("password") == "demo123":
@@ -95,6 +102,34 @@ def logout():
     return resp
 
 
+@app.get("/live")
+def live():
+    """A page that keeps a request open forever (like live reload / SSE)."""
+    return _page("Live", """<h1 id="live-title">Live page</h1>
+<input id="live-input" name="live" placeholder="Live field">
+<script>fetch('/stream');</script>""")
+
+
+@app.get("/stream")
+def stream():
+    """Never-ending response (the page never reaches network idle)."""
+    import time
+
+    def gen():
+        while True:
+            time.sleep(1)
+            yield " "
+    return app.response_class(gen(), mimetype="text/plain")
+
+
+@app.get("/delayed")
+def delayed():
+    """The confirmation appears 800 ms after the click — no page navigation."""
+    return _page("Delayed", """<button id="save-btn" onclick="setTimeout(()=>{
+  document.getElementById('status').innerText='Saved!'}, 800)">Save</button>
+<p id="status"></p>""")
+
+
 @app.post("/_reset")
 def reset():
     """Test helper: clear the notes."""
@@ -106,4 +141,4 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="QAX browser-engine demo app")
     ap.add_argument("--port", type=int, default=8911)
     a = ap.parse_args()
-    app.run(host="127.0.0.1", port=a.port, debug=False)
+    app.run(host="127.0.0.1", port=a.port, debug=False, threaded=True)

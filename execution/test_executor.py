@@ -377,7 +377,11 @@ class TestExecutor:
             len(test_cases), stop_on_fail
         )
 
-        for tc in test_cases:
+        for n, tc in enumerate(test_cases):
+            # Every case starts in a clean browser session (no cookies/storage from
+            # the case before), so a verdict never depends on the order of the cases.
+            if n and hasattr(runner, "new_session"):
+                await runner.new_session()
             result = await self.execute_test_case(tc, runner)
             results.append(result)
 

@@ -161,6 +161,32 @@ class PlaywrightRunner:
             logger.error("Failed to launch browser: %s", e)
             await self.teardown()  # Clean up anything partially created
 
+    async def new_session(self) -> bool:
+        """
+        Replace the page and its browser context with fresh ones — no cookies, local
+        storage or open login from the previous test case. Each case must stand on
+        its own: with one shared session a logged-in case made the next case's login
+        form disappear (found on linkding, 2026-10-19).
+
+        Returns:
+            bool: True when a fresh page is ready. Never raises.
+        """
+        if not self.browser:
+            return False
+        try:
+            if self.context:
+                await self.context.close()
+            self.context = await self.browser.new_context(
+                viewport={"width": 1440, "height": 900},
+                ignore_https_errors=True,
+            )
+            self.context.set_default_timeout(DEFAULT_TIMEOUT_MS)
+            self.page = await self.context.new_page()
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("Could not open a fresh browser session: %s", e)
+            return False
+
     # ─────────────────────────────────────────────────────────────────────────
     # Teardown
     # ─────────────────────────────────────────────────────────────────────────

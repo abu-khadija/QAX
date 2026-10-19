@@ -48,7 +48,7 @@ def ui_app(monkeypatch, tmp_path):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
-    server = make_server("127.0.0.1", port, mod.app)
+    server = make_server("127.0.0.1", port, mod.app, threaded=True)   # /stream never ends
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setenv("APP_BASE_URL", f"http://127.0.0.1:{port}")
     monkeypatch.setenv("DEFAULT_PROJECT", "uidemo")
@@ -138,3 +138,96 @@ def test_web_execute_runs_the_browser_engine_end_to_end(ui_app, monkeypatch):
     assert got == {c["test_case_id"]: c["expected_outcome"].split()[0] for c in cases}
     import os
     assert os.environ.get("QAX_AI_HEAL") is None              # restored after the run
+
+
+
+# ── Regressions from the first real-app run (linkding 1.47.0, 2026-10-19) ─────
+# Each of these broke QAX on a real app while the demo app was green.
+
+
+def _login_case(cid):
+    return {"test_case_id": cid, "title": "login", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "username", "value": "demo"},
+        {"step_number": 3, "playwright_action": "fill", "selector_key": "password", "value": "demo123"},
+        {"step_number": 4, "playwright_action": "click", "selector_key": "login_button"},
+        {"step_number": 5, "playwright_action": "assert", "assertion_type": "url",
+         "assertion_value": "/dashboard"}]}
+
+
+def test_each_case_gets_a_fresh_session(ui_app):
+    """linkding: after one case logged in, /login redirected and every later case lost its form."""
+    batch = _run([_login_case("A"), _login_case("B"), _login_case("C")])
+    assert [r["status"] for r in batch["results"]] == ["PASS", "PASS", "PASS"], batch["results"]
+
+
+def test_an_assertion_waits_for_an_async_update_and_a_real_failure_still_fails(ui_app, monkeypatch):
+    """linkding (Turbo): checked 3 ms after the click → false FAIL. Now retried until a timeout."""
+    monkeypatch.setenv("QAX_ASSERT_TIMEOUT_MS", "3000")
+
+    def case(cid, expected):
+        return {"test_case_id": cid, "title": cid, "automation_steps": [
+            {"step_number": 1, "playwright_action": "navigate", "value": "/delayed"},
+            {"step_number": 2, "playwright_action": "click", "selector_key": "save_button"},
+            {"step_number": 3, "playwright_action": "assert", "selector_key": "status",
+             "assertion_type": "text", "assertion_value": expected}]}
+    batch = _run([case("late-text", "Saved!"), case("never", "Deleted!")])
+    got = {r["test_case_id"]: r for r in batch["results"]}
+    assert got["late-text"]["status"] == "PASS"
+    assert got["never"]["status"] == "FAIL"
+    assert "still failing after 3s" in got["never"]["steps"][2]["actual_result"]
+
+
+def test_a_secret_comes_from_the_environment_and_never_reaches_the_report(ui_app, monkeypatch, tmp_path):
+    """Case files must not hold passwords, and typed secrets must not be printed."""
+    monkeypatch.setenv("QAX_VAR_DEMO_PASSWORD", "demo123")
+    case = _login_case("S")
+    case["automation_steps"][2]["value"] = "{{env:QAX_VAR_DEMO_PASSWORD}}"
+    batch = _run([case])
+    r = batch["results"][0]
+    assert r["status"] == "PASS"                              # the real value was typed
+    shown = " ".join(s.get("actual_result", "") for s in r["steps"])
+    assert "demo123" not in shown and "QAX_VAR_DEMO_PASSWORD" in shown
+    from execution.results_reporter import ResultsReporter
+    html = Path(ResultsReporter().generate_html_report(batch, output_folder=str(tmp_path))).read_text()
+    assert "demo123" not in html
+
+
+def test_only_qax_var_names_can_be_typed_from_the_environment(monkeypatch):
+    from execution.action_mapper import resolve_step_value
+    monkeypatch.setenv("QAX_VAR_OK", "v")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
+    assert resolve_step_value("{{env:QAX_VAR_OK}}") == ("v", "QAX_VAR_OK")
+    assert resolve_step_value("{{env:ANTHROPIC_API_KEY}}")[0] != "sk-secret"   # never resolved
+
+
+def _discover(url, page_name):
+    from core.dom_analyzer import DOMAnalyzer
+    from playwright.async_api import async_playwright
+
+    async def go():
+        async with async_playwright() as p:
+            b = await p.chromium.launch(headless=True)
+            page = await b.new_page()
+            try:
+                return await DOMAnalyzer().discover_selectors(url, page_name, page)
+            finally:
+                await b.close()
+    return asyncio.run(go())
+
+
+def test_discovery_works_without_ai_and_on_a_page_that_never_goes_idle(ui_app, monkeypatch):
+    """linkding: waiting for network idle timed out (0 selectors); with no AI credit, 0 again."""
+    import anthropic
+    monkeypatch.delenv("QAX_AI_DISCOVER", raising=False)
+    monkeypatch.setattr(anthropic, "Anthropic", lambda *a, **k: pytest.fail("AI used without --ai"))
+    sel = _discover(f"http://127.0.0.1:{ui_app}/live", "live")
+    assert sel.get("live_field") == "#live-input" or "#live-input" in sel.values(), sel
+
+
+def test_discovering_the_login_page_records_the_login_form(ui_app, monkeypatch):
+    """linkding: with APP_USERNAME/PASSWORD set, discovery logged in first and labelled the page behind it."""
+    monkeypatch.setenv("APP_USERNAME", "demo")
+    monkeypatch.setenv("APP_PASSWORD", "demo123")
+    sel = _discover(f"http://127.0.0.1:{ui_app}/login", "login")
+    assert {"#username", "#password", "#login-btn"} <= set(sel.values()), sel

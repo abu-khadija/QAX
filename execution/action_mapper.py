@@ -65,6 +65,41 @@ STOP_WORDS = {
 }
 
 
+
+
+_ENV_REF = re.compile(r"^\{\{\s*env:(QAX_VAR_[A-Z0-9_]+)\s*\}\}$")
+
+
+def resolve_step_value(value: str) -> "tuple[str, str]":
+    """
+    Resolve a step value of the form {{env:QAX_VAR_NAME}} from the environment, so
+    case files never hold a password. Only QAX_VAR_* names are allowed: a generated or
+    shared case file must not be able to type an arbitrary secret (e.g. an API key)
+    into the app under test.
+
+    Returns:
+        (value_to_type, env_name) — env_name is "" when the value is literal. A
+        reference to an unset variable types "" (and the step's assertion decides).
+    """
+    m = _ENV_REF.match(str(value or "").strip())
+    if not m:
+        return value, ""
+    return os.getenv(m.group(1), ""), m.group(1)
+
+async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
+    """
+    After a click/submit: let a navigation it started load, and give background
+    requests a moment (bounded — some apps never go network-idle). Never raises.
+    """
+    try:
+        await page.wait_for_load_state("load", timeout=15_000)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await page.wait_for_load_state("networkidle", timeout=idle_ms)
+    except Exception:  # noqa: BLE001
+        pass
+
 class ActionMapper:
     """
     Maps human-readable test step descriptions to Playwright actions.
@@ -530,6 +565,7 @@ class ActionMapper:
                 base_result["selector_used"] = selector
                 logger.debug("click selector (%s): %s", level, selector)
                 await page.click(selector, timeout=15_000)
+                await _settle_after_action(page)
                 base_result.update({
                     "status": "PASS",
                     "actual_result": f"Clicked element: {selector}",
@@ -684,6 +720,7 @@ class ActionMapper:
                 selector = await _resolve_selector()
                 base_result["selector_used"] = selector
                 await page.click(selector, timeout=15_000)
+                await _settle_after_action(page)
                 base_result.update({
                     "status": "PASS",
                     "actual_result": f"Clicked element: {selector}",
@@ -692,10 +729,18 @@ class ActionMapper:
             elif action in ("fill", "type", "enter", "input", "set_value"):
                 selector = await _resolve_selector()
                 base_result["selector_used"] = selector
-                await page.fill(selector, value, timeout=15_000)
+                real_value, from_env = resolve_step_value(value)
+                await page.fill(selector, real_value, timeout=15_000)
+                is_password = False
+                try:
+                    is_password = (await page.get_attribute(selector, "type", timeout=1_000)) == "password"
+                except Exception:  # noqa: BLE001
+                    pass
+                shown = "••••" + (f" (from {from_env})" if from_env else "") \
+                    if (from_env or is_password) else f"'{value}'"
                 base_result.update({
                     "status": "PASS",
-                    "actual_result": f"Filled '{selector}' with value: '{value}'",
+                    "actual_result": f"Filled '{selector}' with value: {shown}",
                 })
 
             elif action in ("select", "choose", "pick"):
@@ -762,17 +807,58 @@ class ActionMapper:
         selector: "str | None",
     ) -> dict:
         """
-        Evaluate a structured assertion from an automation step.
+        Evaluate a structured assertion, retrying a FAIL until it passes or the
+        assertion timeout runs out (QAX_ASSERT_TIMEOUT_MS, default 5000).
+
+        Pages that update after the action (Turbo/htmx/SPA navigation, async form
+        errors) were checked a few milliseconds too early and reported as FAIL
+        although the app was right (found on linkding, 2026-10-19: 5 of 6 cases).
+        A real failure still FAILs — after the timeout, with the wait noted.
+        PASS, SKIP and ERROR are returned at once.
+
+        Args:
+            page (Page): Active Playwright Page.
+            assertion_type (str): "url" | "text" | "visible".
+            assertion_value (str): Expected value.
+            selector (str | None): Resolved CSS selector for text/visible checks.
+
+        Returns:
+            dict: Partial result with status / actual_result / error keys.
+        """
+        import asyncio
+        import time as _time
+        try:
+            budget_ms = max(0, int(os.getenv("QAX_ASSERT_TIMEOUT_MS", "5000")))
+        except ValueError:
+            budget_ms = 5000
+        deadline = _time.monotonic() + budget_ms / 1000
+        while True:
+            result = await self._check_automation_assertion_once(
+                page, assertion_type, assertion_value, selector)
+            if result.get("status") != "FAIL" or _time.monotonic() >= deadline:
+                if result.get("status") == "FAIL" and budget_ms:
+                    result["actual_result"] = (f"{result.get('actual_result', '')} "
+                                               f"(still failing after {budget_ms / 1000:g}s)").strip()
+                return result
+            await asyncio.sleep(0.25)
+
+    async def _check_automation_assertion_once(
+        self,
+        page: "Page",
+        assertion_type: str,
+        assertion_value: str,
+        selector: "str | None",
+    ) -> dict:
+        """
+        Evaluate a structured assertion from an automation step — one attempt.
 
         Supports the assertion_type values the generator emits:
           - "url"     → assertion_value must appear in the current URL
           - "text"    → assertion_value must appear in the selector's inner text
           - "visible" → the selector's element must exist and be visible
 
-        When an assertion cannot be evaluated (no expected value, unresolved
-        TODO selector, or unknown type), it passes with a note rather than
-        failing the step — the same permissive stance the manual assertion path
-        takes, so unfilled selectors don't produce false failures.
+        An assertion that cannot be evaluated (no expected value, unresolved
+        selector, unknown type) is SKIP — it checked nothing, so it is not a pass.
 
         Args:
             page (Page): Active Playwright Page.
