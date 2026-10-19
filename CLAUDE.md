@@ -7,13 +7,15 @@ prove; generating test cases from code/stories (→ Jira/Xray) is the on-ramp.
 Multi-project: works on any codebase.
 Formerly: example-qa-agent → QAFlow Agent → QAX
 
-## Current Status (2026-10-17)
+## Current Status (2026-10-19)
 The single plan and status/decision log is `strategy/PLAN.md` (founder-approved final plan:
 self-hosted validation → company beta after IP/legal review → hosted-mode security gate → minimum
 SaaS → public launch). Do not maintain a competing roadmap; update its status/decision log at each gate.
-Now: Phase 0 (external demos, 2026-10-17 → 10-23) in parallel with Phase 1 (spec-less endpoint
-discovery, then cookie-session + CSRF auth). `strategy/README.md` indexes the rest; superseded plans
-are in `strategy/archive/`.
+Now: product-completion engineering (PLAN.md decision 8) — the functional QA track (input →
+generate → plan → export → execute → report → Xray results) is part of the product (decision 9).
+Phase 0 demos and other human-dependent gates are deferred, not done. Spec-less discovery and
+cookie + CSRF auth are done. `strategy/README.md` indexes the rest; superseded plans are in
+`strategy/archive/`.
 
 ## File Structure
 core/

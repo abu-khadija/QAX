@@ -98,14 +98,15 @@ class ResultsReporter:
         upload_result = await reporter.report_to_xray(batch_results, xray_client)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dry_run: bool | None = None) -> None:
         """
         Initialize the reporter.
 
-        Reads DRY_RUN from the environment at construction time. This
-        value controls whether report_to_xray makes real API calls.
+        Args:
+            dry_run: Caller's explicit choice; DRY_RUN=true in the environment
+                     still forces a dry run. None = environment only (legacy).
         """
-        self._dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+        self._dry_run = os.getenv("DRY_RUN", "true").lower() == "true" or bool(dry_run)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public: generate_console_summary
@@ -239,114 +240,97 @@ class ResultsReporter:
         self,
         batch_results: dict,
         xray_client,
+        key_map: dict | None = None,
+        summary_text: str = "QAX automated execution",
     ) -> dict:
         """
-        Upload execution results to Xray Cloud via XrayClient.
+        Record execution results in Xray as ONE Test Execution (Xray JSON import).
 
-        IMPORTANT: Checks DRY_RUN before every API call. If DRY_RUN=true,
-        this method logs what it would upload and returns a mock result
-        without making any real API calls.
-
-        For each test case result with status PASS or FAIL:
-          - Calls xray_client.update_test_execution(test_case_id, status, comment)
+        Each result is attributed to its Jira Test key: `jira_key` on the result,
+        else `key_map[test_case_id]`. Nothing else — a local id such as TC-1 looks
+        like a Jira key but is not one, so it is never guessed. A result with no Jira
+        key is NOT uploaded and is counted as `unmapped`.
+        Status mapping: PASS→PASSED, FAIL→FAILED, SKIP/ERROR→TODO (not run).
 
         Args:
-            batch_results (dict): Batch result from TestExecutor.execute_batch().
-            xray_client: Initialized XrayClient instance.
+            batch_results (dict): Batch result from TestExecutor/APIRunner.execute_batch().
+            xray_client: XrayClient (its own dry_run decides whether anything is sent).
+            key_map (dict | None): {test_case_id: jira_key} from the export phase.
+            summary_text (str): Summary of the created Test Execution.
 
         Returns:
-            dict: Upload summary with keys:
-                    - dry_run (bool): Whether DRY_RUN was active
-                    - attempted (int): Number of results attempted
-                    - uploaded (int): Number successfully uploaded
-                    - failed (int): Number that failed to upload
-                    - skipped (int): Number skipped (no xray_client, status=SKIP)
-                    - details (list[dict]): Per-result upload status
+            dict: dry_run, attempted, uploaded, failed, skipped, unmapped,
+                  test_execution_key, error, details (per result). Never raises.
         """
-        results = batch_results.get("results", [])
+        import re
+        results = batch_results.get("results", []) or []
+        key_map = key_map or {}
         summary = {
-            "dry_run": self._dry_run,
-            "attempted": 0,
-            "uploaded": 0,
-            "failed": 0,
-            "skipped": 0,
+            "dry_run": self._dry_run, "attempted": 0, "uploaded": 0, "failed": 0,
+            "skipped": 0, "unmapped": 0, "test_execution_key": None, "error": None,
             "details": [],
         }
-
         if not xray_client:
             logger.warning("report_to_xray: no xray_client provided — skipping upload")
             summary["skipped"] = len(results)
             return summary
 
+        jira_key_re = re.compile(r"^[A-Z][A-Z0-9_]+-\d+$")
+        status_map = getattr(xray_client, "XRAY_STATUS", None) or {
+            "PASS": "PASSED", "HEALED": "PASSED", "FAIL": "FAILED",
+            "SKIP": "TODO", "ERROR": "TODO"}
+        tests = []
         for r in results:
-            tc_id  = r.get("test_case_id", "")
-            status = r.get("status", "SKIP")
-            title  = r.get("title", "")
-            healed = r.get("healed_steps", 0)
-
-            # ── Skip non-reportable statuses ───────────────────────────────
-            if status in ("SKIP", "ERROR") or not tc_id:
-                summary["skipped"] += 1
-                summary["details"].append({"test_case_id": tc_id, "upload_status": "SKIPPED"})
+            tc_id = r.get("test_case_id", "") or ""
+            key = r.get("jira_key") or key_map.get(tc_id) or ""
+            if not key or not jira_key_re.match(str(key)):
+                summary["unmapped"] += 1
+                summary["details"].append({"test_case_id": tc_id, "upload_status": "NO_JIRA_KEY"})
                 continue
-
-            summary["attempted"] += 1
-
-            # ── Build comment ──────────────────────────────────────────────
-            comment_lines = [f"Automated execution result: {status}"]
-            if healed:
-                comment_lines.append(f"  AI-healed steps: {healed}")
+            status = str(r.get("status", "ERROR")).upper()
+            lines = [f"QAX verdict: {status}"]
+            if status in ("SKIP", "ERROR"):
+                lines.append("Not executed to completion — this is NOT a pass.")
+            if r.get("healed_steps"):
+                lines.append(f"AI-healed steps: {r['healed_steps']}")
             if r.get("error"):
-                comment_lines.append(f"  Error: {r['error'][:200]}")
-            if r.get("screenshot"):
-                comment_lines.append(f"  Screenshot: {r['screenshot']}")
-            comment_lines.append(f"  Duration: {r.get('duration_seconds', 0):.1f}s")
-            comment = "\n".join(comment_lines)
+                lines.append(f"Error: {str(r['error'])[:200]}")
+            if r.get("bug_key"):
+                lines.append(f"Bug: {r['bug_key']}")
+            entry = {"testKey": key, "status": status_map.get(status, "TODO"),
+                     "comment": "\n".join(lines)}
+            if r.get("start_time"):
+                entry["start"] = r["start_time"]
+            if r.get("end_time"):
+                entry["finish"] = r["end_time"]
+            tests.append(entry)
+            summary["details"].append({"test_case_id": tc_id, "jira_key": key,
+                                       "xray_status": entry["status"]})
+        summary["attempted"] = len(tests)
 
-            # ── DRY_RUN guard ──────────────────────────────────────────────
-            if self._dry_run:
-                logger.info(
-                    "[DRY_RUN] Would upload to Xray: %s → %s", tc_id, status
-                )
-                summary["uploaded"] += 1
-                summary["details"].append({
-                    "test_case_id": tc_id,
-                    "upload_status": "DRY_RUN",
-                    "xray_status": status,
-                })
-                continue
-
-            # ── Real upload ────────────────────────────────────────────────
-            try:
-                ok = xray_client.update_test_execution(tc_id, status, comment)
-                if ok:
-                    summary["uploaded"] += 1
-                    summary["details"].append({
-                        "test_case_id": tc_id,
-                        "upload_status": "OK",
-                        "xray_status": status,
-                    })
-                    logger.info("Uploaded to Xray: %s → %s", tc_id, status)
-                else:
-                    summary["failed"] += 1
-                    summary["details"].append({
-                        "test_case_id": tc_id,
-                        "upload_status": "FAILED",
-                    })
-                    logger.warning("Xray upload failed for %s", tc_id)
-
-            except Exception as e:  # noqa: BLE001
-                logger.error("report_to_xray error for %s: %s", tc_id, e)
-                summary["failed"] += 1
-                summary["details"].append({
-                    "test_case_id": tc_id,
-                    "upload_status": "ERROR",
-                    "error": str(e)[:100],
-                })
+        if not tests:
+            summary["error"] = ("no result has a Jira test key — export the cases to Xray "
+                                "first (pipeline --export xray --live) or run tests fetched from Jira")
+            return summary
+        try:
+            res = xray_client.import_execution_results(tests, summary=summary_text)
+        except Exception as e:  # noqa: BLE001
+            res = {"success": False, "error": str(e)[:200]}
+        summary["dry_run"] = bool(res.get("dry_run", self._dry_run))
+        if res.get("success"):
+            summary["uploaded"] = len(tests)
+            summary["test_execution_key"] = res.get("key")
+        else:
+            summary["failed"] = len(tests)
+            summary["error"] = res.get("error")
+        for d in summary["details"]:
+            if "xray_status" in d:
+                d["upload_status"] = ("DRY_RUN" if summary["dry_run"] else "OK") \
+                    if res.get("success") else "FAILED"
 
         logger.info(
-            "Xray upload complete: %d uploaded, %d failed, %d skipped (dry_run=%s)",
-            summary["uploaded"], summary["failed"], summary["skipped"], self._dry_run
+            "Xray results: %d uploaded, %d failed, %d without a Jira key (dry_run=%s)",
+            summary["uploaded"], summary["failed"], summary["unmapped"], summary["dry_run"]
         )
 
         # ── Severity upgrade: promote critical failures ─────────────────────
@@ -354,7 +338,8 @@ class ResultsReporter:
         # risk_level=critical and a bug_key. If found, call update_severity()
         # to ensure the Jira severity field is set to "Critical" as a real
         # field value — not just text in the description.
-        self._upgrade_critical_severities(results)
+        if not summary["dry_run"]:
+            self._upgrade_critical_severities(results)
 
         return summary
 

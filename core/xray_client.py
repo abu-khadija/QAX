@@ -491,7 +491,7 @@ class XrayClient:
             f'ORDER BY created DESC'
         )
 
-        url = f"{self.jira_base_url.rstrip('/')}/rest/api/3/search"
+        base = self.jira_base_url.rstrip('/')
         params = {
             "jql": jql,
             "maxResults": 100,
@@ -500,12 +500,16 @@ class XrayClient:
 
         try:
             logger.info("Fetching tests tagged '%s' from Jira...", tag)
-            response = requests.get(
-                url,
-                auth=(self.jira_email, self.jira_api_token),
-                params=params,
-                timeout=15,
-            )
+            # Jira Cloud replaced /search with /search/jql; older servers only have /search.
+            for path in ("/rest/api/3/search/jql", "/rest/api/3/search"):
+                response = requests.get(
+                    f"{base}{path}",
+                    auth=(self.jira_email, self.jira_api_token),
+                    params=params,
+                    timeout=15,
+                )
+                if response.status_code not in (404, 405, 410):
+                    break
             response.raise_for_status()
 
             data = response.json()
@@ -743,6 +747,135 @@ class XrayClient:
             return False
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Test steps (Xray GraphQL) — so tests fetched from Jira can be executed
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def fetch_test_steps(self, keys: list[str]) -> dict:
+        """
+        Read the manual steps of Xray Test issues via the Xray Cloud GraphQL API.
+
+        Jira's issue API does not carry Xray steps, so a test fetched by key or
+        label has nothing to execute without this. Read-only (no write).
+
+        Args:
+            keys (list[str]): Jira issue keys of Xray Tests.
+
+        Returns:
+            dict: {key: [{"action", "data", "expected_result"}, …]} for the keys
+                  Xray returned. {} in dry-run, without credentials, or on any error.
+                  Not verified against a live Xray instance (PLAN.md: Xray untested).
+        """
+        keys = [k for k in (keys or []) if k and not str(k).startswith("DRY-RUN")]
+        if self.dry_run or not keys:
+            return {}
+        if not self.client_id or not self.client_secret:
+            logger.warning("XRAY_CLIENT_ID/SECRET not set — cannot read test steps from Xray.")
+            return {}
+        query = ("query($jql: String, $limit: Int!) { getTests(jql: $jql, limit: $limit) "
+                 "{ results { jira(fields: [\"key\"]) steps { action data result } } } }")
+        steps_by_key: dict = {}
+        try:
+            token = self._get_auth_token()
+            for i in range(0, len(keys), 100):
+                chunk = keys[i:i + 100]
+                jql = "key in (" + ",".join(f'"{k}"' for k in chunk) + ")"
+                response = requests.post(
+                    XRAY_GRAPHQL_URL,
+                    headers={"Authorization": f"Bearer {token}",
+                             "Content-Type": "application/json"},
+                    json={"query": query, "variables": {"jql": jql, "limit": len(chunk)}},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                body = response.json() or {}
+                if body.get("errors"):
+                    logger.warning("Xray GraphQL errors: %s", str(body["errors"])[:200])
+                results = (((body.get("data") or {}).get("getTests") or {}).get("results")) or []
+                for t in results:
+                    key = ((t.get("jira") or {}).get("key")) or ""
+                    if not key:
+                        continue
+                    steps_by_key[key] = [
+                        {"action": s.get("action") or "", "data": s.get("data") or "",
+                         "expected_result": s.get("result") or ""}
+                        for s in (t.get("steps") or [])
+                    ]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not read test steps from Xray: %s", e)
+        return steps_by_key
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Execution results (Xray JSON import) — one Test Execution per run
+    # ─────────────────────────────────────────────────────────────────────────
+
+    #: QAX verdict → Xray Cloud default test-run status. SKIP/ERROR did not
+    #: prove anything, so they are recorded as TODO (not run), never PASSED.
+    XRAY_STATUS = {"PASS": "PASSED", "HEALED": "PASSED", "FAIL": "FAILED",
+                   "SKIP": "TODO", "ERROR": "TODO"}
+
+    def import_execution_results(
+        self,
+        tests: list[dict],
+        summary: str = "QAX automated execution",
+        test_execution_key: str | None = None,
+    ) -> dict:
+        """
+        Record execution results in Xray as one Test Execution
+        (POST /api/v2/import/execution, Xray JSON format).
+
+        Args:
+            tests (list[dict]): Xray JSON test entries — testKey, status, comment,
+                                start, finish (built by ResultsReporter).
+            summary (str): Summary of the new Test Execution issue.
+            test_execution_key (str | None): Update this existing Test Execution
+                                              instead of creating one.
+
+        Returns:
+            dict: {"success", "dry_run", "key" (Test Execution key or None),
+                   "payload" (what is/would be sent), "error"}. Never raises.
+                   Not verified against a live Xray instance (PLAN.md).
+        """
+        payload: dict = {"tests": list(tests or [])}
+        if test_execution_key:
+            payload["testExecutionKey"] = test_execution_key
+        else:
+            payload["info"] = {"project": self.project_key, "summary": summary}
+        out = {"success": False, "dry_run": self.dry_run, "key": None,
+               "payload": payload, "error": None}
+        if not payload["tests"]:
+            out["error"] = "no results with a Jira test key to upload"
+            return out
+        if self.dry_run:
+            logger.info("[DRY RUN] Would import %d result(s) into Xray", len(payload["tests"]))
+            out["success"] = True
+            return out
+        if not self.client_id or not self.client_secret:
+            out["error"] = "XRAY_CLIENT_ID / XRAY_CLIENT_SECRET not set"
+            return out
+        try:
+            token = self._get_auth_token()
+            response = requests.post(
+                f"{XRAY_REST_URL}/import/execution",
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json"},
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json() if response.content else {}
+            out["key"] = (data or {}).get("key")
+            out["success"] = True
+            logger.info("Imported %d result(s) into Xray Test Execution %s",
+                        len(payload["tests"]), out["key"])
+        except requests.HTTPError as e:
+            out["error"] = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+            logger.error("Xray results import failed: %s", out["error"])
+        except Exception as e:  # noqa: BLE001
+            out["error"] = str(e)[:200]
+            logger.error("Xray results import failed: %s", out["error"])
+        return out
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Internal Helper: ADF Text Extractor
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -769,3 +902,38 @@ class XrayClient:
             text_parts.append(self._extract_adf_text(child))
 
         return " ".join(filter(None, text_parts)).strip()
+
+
+def issues_to_cases(issues: list[dict], steps_by_key: dict) -> list[dict]:
+    """
+    Turn Jira Test issues + their Xray steps into cases TestExecutor can run.
+
+    The Jira key becomes the case id and `jira_key`, so results are attributed to
+    the real issue. A test whose steps could not be read keeps an empty step list
+    and is reported as ERROR ("no steps"), never as passed.
+
+    Args:
+        issues (list[dict]): From XrayClient.fetch_test_by_id / fetch_tests_by_tag.
+        steps_by_key (dict): From XrayClient.fetch_test_steps.
+
+    Returns:
+        list[dict]: Executable test case dicts.
+    """
+    cases = []
+    for issue in issues or []:
+        key = issue.get("key", "")
+        steps = steps_by_key.get(key) or []
+        if not steps:
+            logger.warning("No Xray steps readable for %s — it will be reported as not run", key)
+        cases.append({
+            "test_case_id": key,
+            "jira_key": key,
+            "title": issue.get("summary", ""),
+            "priority": str(issue.get("priority", "medium")).lower(),
+            "manual_steps": [
+                {"step_number": n, "action": st.get("action", ""), "data": st.get("data", ""),
+                 "expected_result": st.get("expected_result", "")}
+                for n, st in enumerate(steps, start=1)
+            ],
+        })
+    return cases

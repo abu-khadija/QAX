@@ -30,7 +30,9 @@ def test_app_page_wires_plan_preview_history_and_readonly():
 
 def test_stream_is_posted_not_put_in_a_url_and_secrets_never_in_a_query_string():
     html = _c().get("/app").get_data(as_text=True)
-    assert "EventSource" not in html and "fetch('/api/scan/stream'" in html and "method:'POST'" in html
+    # api() is the token-aware fetch wrapper (adds X-QAX-Token as a header, never in a URL)
+    assert "EventSource" not in html and "api('/api/scan/stream'" in html and "method:'POST'" in html
+    assert "async function api(path, opts)" in html and "let r=await fetch(path, opts)" in html
     assert "URLSearchParams({url" not in html                         # the old query-string request is gone
 
 

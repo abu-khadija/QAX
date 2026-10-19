@@ -409,7 +409,9 @@ def scan():
 def generate():
     """
     Generate test cases from a user story and/or source code — the other half of the
-    platform (no running app needed). Returns {"tests": [...]} or {"error": ...}.
+    platform (no running app needed). Same stack as the CLI (GenerationService:
+    SmartChecker → Claude → schema validation), so the UI never shows unvalidated cases.
+    Returns {"tests": [...], "invalid": n, "summary": {...}} or {"error": ...}.
     """
     data = request.get_json(force=True, silent=True) or {}
     story = str(data.get("story", "")).strip()
@@ -417,18 +419,107 @@ def generate():
     if not story and not code:
         return jsonify({"error": "Enter a user story or paste some source code."}), 400
     try:
-        from core.claude_client import ClaudeClient
         from services.context import QAXContext
-        proj = getattr(QAXContext.from_env(), "project", "") or os.getenv("DEFAULT_PROJECT", "") or "example"
-        claude = ClaudeClient(project=proj)
-        # The story adapter feeds the story text to Claude AS the content to analyze;
-        # when real code is given we use that instead and keep the story as context.
-        content = code or story
-        cases = claude.analyze_code(code=content, file_path="input.py" if code else "story.txt",
-                                    user_story=story or None, use_cache=True)
+        from services.exceptions import QAXConfigError
+        from services.generation_service import GenerationOptions, GenerationService
+        from services.progress import NullProgressReporter
+        ctx = QAXContext.from_env()
+        # Virtual source ids: nothing is read from disk and nothing is cached by name.
+        source = "code://web-input" if code else "story://web-input"
+        opts = GenerationOptions(user_story=story or None, content=code or story,
+                                 test_type=str(data.get("test_type") or "") or None)
+        try:
+            res = GenerationService(ctx).generate(source, options=opts,
+                                                  progress=NullProgressReporter())
+        except QAXConfigError as exc:
+            return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"Generation failed: {exc}"}), 502
-    return jsonify({"tests": cases or []})
+    if res.error:
+        return jsonify({"error": f"Generation failed: {res.error}"}), 502
+    return jsonify({"tests": res.test_cases or [], "invalid": len(res.invalid or []),
+                    "summary": res.summary or {}})
+
+
+_SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _execute_plan(tests: list, url: str, read_only: bool) -> dict:
+    """
+    What /api/execute would run: each generated case is runnable over HTTP only when it
+    has api_steps; in read-only mode only cases whose steps are all GET/HEAD/OPTIONS.
+    Everything else is listed as not run, with the reason — never as passed.
+    """
+    runnable, not_run = [], []
+    for i, tc in enumerate(tests):
+        if not isinstance(tc, dict):
+            continue
+        tc.setdefault("test_case_id", f"TC-WEB-{i + 1:03d}")
+        steps = tc.get("api_steps") or []
+        if not steps:
+            not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
+                            "reason": "no api_steps — UI-shaped case; run it with "
+                                      "`python main.py execute --file` (browser)"})
+            continue
+        writes = [str(s.get("method") or "GET").upper() for s in steps
+                  if str(s.get("method") or "GET").upper() not in _SAFE_METHODS]
+        if read_only and writes:
+            not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
+                            "reason": f"read-only: would send {', '.join(sorted(set(writes)))}"})
+            continue
+        runnable.append(tc)
+    return {"url": url, "read_only": read_only, "engine": "api",
+            "runnable": [{"test_case_id": t["test_case_id"], "title": t.get("title", ""),
+                          "steps": len(t.get("api_steps") or [])} for t in runnable],
+            "not_run": not_run, "_cases": runnable}
+
+
+@app.post("/api/execute")
+def execute_tests():
+    """
+    Run generated test cases against the running app over HTTP (API engine) and return
+    per-case verdicts with the request/response evidence. Same gates as a scan: the
+    caller must confirm authorization; read-only is honoured; the API runner's egress
+    boundary keeps every request on the target origin. `preview: true` returns the
+    plan only (nothing is sent). Browser (UI) execution stays on the CLI.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    tests = data.get("tests") or []
+    url = str(data.get("url", "")).strip().rstrip("/")
+    read_only = str(data.get("read_only", "true")).lower() not in ("0", "false", "no", "off")
+    if not tests:
+        return jsonify({"error": "Generate test cases first."}), 400
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
+    plan = _execute_plan(tests, url, read_only)
+    cases = plan.pop("_cases")
+    if data.get("preview"):
+        return jsonify({"plan": plan})
+    if not _target_authorized():
+        return jsonify({"error": _UNAUTHORIZED_TARGET, "plan": plan}), 400
+    if not cases:
+        return jsonify({"plan": plan, "results": [], "total": 0, "passed": 0, "failed": 0,
+                        "not_run": len(plan["not_run"])})
+    try:
+        from services.execution_service import ExecutionService
+        token = str(data.get("token", "")).strip()
+        res = ExecutionService().execute(cases, mode="api", base_url=url,
+                                         auth={"token": token} if token else None)
+    except Exception as exc:
+        return jsonify({"error": f"Execution failed: {exc}", "plan": plan}), 502
+    raw = res.raw or {}
+    out = {"plan": plan, "results": raw.get("results", []), "total": raw.get("total", 0),
+           "passed": raw.get("passed", 0), "failed": raw.get("failed", 0),
+           "skipped": raw.get("skipped", 0), "errors": raw.get("errors", 0),
+           "not_run": len(plan["not_run"]), "error": res.error}
+    return (jsonify(out), 502) if res.error else jsonify(out)
+
+
+@app.get("/api/config")
+def ui_config():
+    """What the UI may offer: whether live export is enabled server-side (never a secret)."""
+    return jsonify({"live_export": os.getenv("QAX_ALLOW_LIVE_EXPORT", "false").lower() == "true",
+                    "token_required": bool(os.getenv("QAX_API_TOKEN", ""))})
 
 
 _EXPORT_TARGETS = ("xray", "zephyr", "excel", "csv", "memory")

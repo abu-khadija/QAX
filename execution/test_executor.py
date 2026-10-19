@@ -69,13 +69,19 @@ class TestExecutor:
         healer (ClaudeHealer): AI selector self-healer.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dry_run: bool = True) -> None:
         """
         Initialise executor with an ActionMapper and ClaudeHealer.
 
         Logs a warning if the execution dependencies are not available.
         All execute methods will return safe error dicts in that case.
+
+        Args:
+            dry_run: Auto-filed Jira bugs (AUTO_BUG_REPORT) are only drafted unless the
+                caller passes False — an explicit operator opt-in such as `execute --upload`.
+                DRY_RUN=true in the environment still forces a dry run.
         """
+        self.dry_run = dry_run
         if not _EXECUTION_AVAILABLE:
             logger.warning(
                 "TestExecutor: execution dependencies not available. "
@@ -229,6 +235,16 @@ class TestExecutor:
                 # HEALED means it eventually passed after AI healing
                 # Don't mark overall as FAIL
 
+        # A case is PASS only when every step actually ran and passed. A step that
+        # crashed (ERROR) or was not executed (SKIP: unrecognised action, no browser)
+        # proved nothing — never report the case as PASS on its strength.
+        if overall_status == "PASS":
+            step_statuses = {sr.get("status") for sr in step_results}
+            if "ERROR" in step_statuses:
+                overall_status = "ERROR"
+            elif not step_statuses <= {"PASS", "HEALED"}:
+                overall_status = "SKIP"
+
         end_ts = datetime.now(timezone.utc).isoformat()
         duration = round(time.monotonic() - start_time, 2)
 
@@ -258,7 +274,7 @@ class TestExecutor:
         if overall_status == "FAIL" and first_failure_step and auto_enabled:
             try:
                 from core.bug_reporter import BugReporter
-                reporter = BugReporter()
+                reporter = BugReporter(dry_run=getattr(self, "dry_run", True))
                 bug_result = reporter.create_bug(
                     test_case=test_case,
                     failure=first_failure_step,

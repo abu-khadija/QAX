@@ -151,6 +151,12 @@
   footer{color:var(--faint);font-size:12.5px;text-align:center;padding:40px 0 30px}
   footer b{color:var(--muted)}
   @media(max-width:560px){.hero h1{font-size:30px}}
+  .tc .ai{font-size:11px;color:var(--muted);border:1px dashed var(--line);border-radius:7px;padding:3px 9px}
+  .tc .vd{font-size:11px;font-weight:700;border-radius:7px;padding:3px 9px;border:1px solid var(--line)}
+  .tc .vd.PASS{color:var(--ok);border-color:var(--ok)} .tc .vd.FAIL{color:var(--p1);border-color:var(--p1)}
+  .tc .vd.SKIP,.tc .vd.ERROR,.tc .vd.NOTRUN{color:var(--p2);border-color:var(--p2)}
+  .tc .ev{margin-top:8px;font:12px/1.45 ui-monospace,Menlo,monospace;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+  #execpanel{margin-top:16px}
 </style>
 </head>
 <body>
@@ -293,6 +299,24 @@
     <div class="sec-title">Generated test cases <span id="gencount" style="color:var(--txt)"></span></div>
     <div id="tests"></div>
     <div class="hint" id="genjira" style="margin-top:14px"></div>
+    <div class="panel" id="execpanel" style="display:none">
+      <div class="sec-title">Run these tests against your app</div>
+      <div class="field"><label for="exurl">App URL</label>
+        <input id="exurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="extoken">Bearer token (optional)</label>
+        <input id="extoken" placeholder="for apps behind auth" autocomplete="off" spellcheck="false"></div>
+      <label class="consent" for="exro"><input type="checkbox" id="exro" checked>
+        <span><b>Read-only.</b> Only cases whose requests are all GET/HEAD/OPTIONS run; the rest are listed as not run.</span></label>
+      <label class="consent" for="exauth"><input type="checkbox" id="exauth">
+        <span><b>I own this app or am authorized to test it.</b></span></label>
+      <div class="row" style="margin-top:10px;justify-content:flex-end;gap:8px">
+        <button class="btn2" onclick="runTests(true)">Preview run</button>
+        <button class="btn" id="exgo" onclick="runTests(false)">Run tests</button>
+      </div>
+      <div class="hint">HTTP (API) engine — cases with API steps. Browser cases run from the CLI:
+        <code>python main.py execute --file …</code></div>
+      <div id="exout"></div>
+    </div>
   </section>
 </div>
 
@@ -303,6 +327,22 @@ hygiene) are higher-recall but may vary — shown separately, on purpose.</foote
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?"":s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+/* /api calls carry X-QAX-Token when the server requires one (QAX_API_TOKEN). The token is asked
+   once, kept for this tab only (sessionStorage), and never put in a URL. */
+function _tok(){ try{ return sessionStorage.getItem('qaxTok')||''; }catch(e){ return ''; } }
+async function api(path, opts){
+  opts=Object.assign({}, opts||{}); opts.headers=Object.assign({}, opts.headers||{});
+  if(_tok()) opts.headers['X-QAX-Token']=_tok();
+  let r=await fetch(path, opts);
+  if(r.status===401){
+    const t=window.prompt('This QAX server needs its API token (QAX_API_TOKEN):');
+    if(t){ try{ sessionStorage.setItem('qaxTok', t.trim()); }catch(e){}
+      opts.headers['X-QAX-Token']=t.trim(); r=await fetch(path, opts); }
+  }
+  return r;
+}
+let _cfg={live_export:false};
+api('/api/config').then(r=>r.ok?r.json():{}).then(c=>{ _cfg=c||_cfg; }).catch(()=>{});
 
 let _es=null;
 const ICON={start:'▸',ok:'✓',info:'›',warn:'!',error:'✕'};
@@ -333,11 +373,13 @@ async function runGenerate(){
   $('scanning').style.display='block'; $('scanmsg').textContent='Generating test cases…'; $('live').innerHTML='';
   logLine('generate','start','asking QAX to draft test cases from your input');
   try{
-    const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({story,code})});
     const d=await r.json();
     if(d.error){ showErr(d.error); }
-    else { logLine('generate','ok',(d.tests||[]).length+' test case(s) drafted'); renderTests(d.tests||[]); }
+    else { logLine('generate','ok',(d.tests||[]).length+' valid test case(s) drafted'
+             +(d.invalid?(' · '+d.invalid+' rejected by schema validation'):''));
+           renderTests(d.tests||[]); }
   }catch(e){ showErr('Generation failed: '+e); }
   finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; }
 }
@@ -349,7 +391,7 @@ function renderTests(cases){
   $('gencount').textContent = cases.length ? '· '+cases.length : '';
   if(!cases.length){ $('tests').innerHTML='<div class="hint">No test cases generated — try a more specific story.</div>'; $('genjira').innerHTML=''; return; }
   $('tests').innerHTML = cases.map(tc=>{
-    const raw=(tc.steps||tc.test_steps||tc.automation_steps||[]);
+    const raw=(tc.manual_steps||tc.steps||tc.test_steps||tc.automation_steps||[]);
     const steps=Array.isArray(raw)?raw:[];
     const fmtStep=s=>{
       if(typeof s==='string') return s;
@@ -364,23 +406,29 @@ function renderTests(cases){
     const exp = tc.expected_result||tc.expected||tc.expectedResult||'';
     const pri = tc.priority||tc.severity||'';
     const rev = tc.needs_review||tc.needsReview;
+    const v=tc._verdict;
     return '<div class="tc"><div class="th"><span class="tt">'+esc(tc.title||tc.name||'Test case')+'</span>'
+      +(v?'<span class="vd '+esc(v.status)+'">'+esc(v.label)+'</span>':'<span class="ai">AI proposal · not run</span>')
       +(pri?'<span class="pri">'+esc(pri)+'</span>':'')
       +(rev?'<span class="rev">needs review</span>':'')+'</div>'
       +stepsH
       +(exp?'<div class="exp"><div class="k">Expected</div>'+esc(exp)+'</div>':'')
+      +(v&&v.evidence?'<div class="ev">'+esc(v.evidence)+'</div>':'')
       +'</div>';
   }).join('');
-  $('genjira').innerHTML = 'Review, then <b>push to Jira / Xray</b> with the button above.';
+  $('execpanel').style.display='block';
+  $('genjira').innerHTML = 'Review, run them against your app below, then <b>push to Jira / Xray</b> with the button above.';
 }
 
 async function doExport(items, kind, btn, msgEl){
   if(!items || !items.length){ msgEl.style.display='block'; msgEl.innerHTML='Nothing to file yet.'; return; }
+  // Live filing only when the operator enabled it on the server AND confirms here.
+  const live = !!(_cfg.live_export && window.confirm('File '+items.length+' item(s) for real in Jira/Xray? Cancel = dry-run preview.'));
   const orig=btn.textContent; btn.disabled=true; btn.textContent='Filing…';
   msgEl.style.display='block'; msgEl.innerHTML='Filing to Jira/Xray…';
   try{
-    const r=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({items,kind,target:'xray'})});
+    const r=await api('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({items,kind,target:'xray',dry_run:!live})});
     const d=await r.json();
     if(d.error){ msgEl.innerHTML='⚠️ '+esc(d.error); }
     else {
@@ -389,10 +437,44 @@ async function doExport(items, kind, btn, msgEl){
       const where=(d.kind==='findings')?'Jira':esc((d.target||'xray').toUpperCase());
       msgEl.innerHTML=(dry?'🧪 <b>Dry run</b> — would file ':'✅ filed ')+n+' '+noun+' in <b>'+where+'</b>'
         +(d.references&&d.references.length?' ('+d.references.slice(0,3).map(esc).join(', ')+(d.references.length>3?'…':'')+')':'')
-        +(dry?'. Add your Jira/Xray credentials to <code>.env</code> to file for real.':'.');
+        +(dry?('. Nothing was filed. '+(_cfg.live_export?'Confirm the prompt to file for real.'
+              :'Live filing from the web UI is off — set <code>QAX_ALLOW_LIVE_EXPORT=true</code> (plus Jira/Xray credentials) on the server, or use the CLI with <code>--live</code>.')):'.');
     }
   }catch(e){ msgEl.innerHTML='⚠️ Export failed: '+esc(String(e)); }
   finally{ btn.disabled=false; btn.textContent=orig; }
+}
+async function runTests(preview){
+  const out=$('exout'), url=$('exurl').value.trim();
+  if(!window._lastTests.length){ out.innerHTML='<div class="hk">Generate test cases first.</div>'; return; }
+  if(!preview && !$('exauth').checked){ out.innerHTML='<div class="hk">Confirm you are authorized to test this app.</div>'; return; }
+  const btn=$('exgo'); btn.disabled=true; out.innerHTML='<div class="hk">'+(preview?'Planning…':'Running…')+'</div>';
+  try{
+    const r=await api('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tests:window._lastTests,url,preview,read_only:$('exro').checked,
+        authorized:$('exauth').checked,token:$('extoken').value.trim()})});
+    const d=await r.json(); const p=d.plan||{};
+    let h='';
+    if(d.error) h+='<div class="hk">⚠️ '+esc(d.error)+'</div>';
+    h+='<div class="hk"><b>Plan</b> — '+(p.runnable||[]).length+' runnable over HTTP against '+esc(p.url||url)
+      +(p.read_only?' (read-only)':'')+'; '+(p.not_run||[]).length+' will not run'
+      +((p.not_run||[]).length?':<br>'+p.not_run.map(n=>'• '+esc(n.title||n.test_case_id)+' — '+esc(n.reason)).join('<br>'):'')+'</div>';
+    if(!preview && d.results){
+      h+='<div class="hk"><b>Result</b> — '+(d.passed||0)+' passed · '+(d.failed||0)+' failed · '
+        +((d.skipped||0)+(d.errors||0)+(d.not_run||0))+' not run (not passes)</div>';
+      const byId={}; (d.results||[]).forEach(x=>{ byId[x.test_case_id]=x; });
+      const notRun={}; (p.not_run||[]).forEach(n=>{ notRun[n.test_case_id]=n.reason; });
+      window._lastTests.forEach(tc=>{
+        const x=byId[tc.test_case_id];
+        if(x){ const ev=(x.steps||[]).map(s=>(s.action||'')+' → '+(s.response_code??'-')+' '+(s.status||'')
+                 +(s.error?(' — '+s.error):'')).join('\n');
+               tc._verdict={status:x.status,label:x.status==='PASS'?'PASS · executed':x.status, evidence:ev}; }
+        else if(notRun[tc.test_case_id]) tc._verdict={status:'NOTRUN',label:'not run',evidence:notRun[tc.test_case_id]};
+      });
+      renderTests(window._lastTests);
+    }
+    out.innerHTML=h;
+  }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
+  finally{ btn.disabled=false; }
 }
 function fileFindings(){
   const d=window._last||{}; const items=[].concat(d.claims||[]).concat(d.leads||[]);
@@ -418,7 +500,7 @@ function runScan(){
 // The scan is streamed over a POST (fetch) so credentials never appear in a URL.
 async function streamScan(ctl){
   try{
-    const resp=await fetch('/api/scan/stream',{method:'POST',headers:{'Content-Type':'application/json'},
+    const resp=await api('/api/scan/stream',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({..._scanFields(), repo:$('repo').value.trim(), authorized:'true'}), signal:ctl.signal});
     if(!resp.ok){ let j={}; try{ j=await resp.json(); }catch{} finish(); showError(j.error||('Scan request failed (HTTP '+resp.status+')')); return; }
     const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='';
@@ -648,7 +730,7 @@ async function previewPlan(){
   const box=$('plan'); box.style.display='block'; box.innerHTML='<div class="hint">Reading the app (read-only requests only)…</div>';
   $('planbtn').disabled=true;
   try{
-    const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await api('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(_scanFields())});
     const p=await r.json();
     if(!r.ok){ box.innerHTML='<div class="hk">⚠ '+esc(p.error||'Could not build a plan')+'</div>'; return; }
@@ -670,7 +752,7 @@ async function previewPlan(){
 
 async function loadRuns(){
   try{
-    const r=await fetch('/api/runs'); const j=await r.json(); const runs=j.runs||[];
+    const r=await api('/api/runs'); const j=await r.json(); const runs=j.runs||[];
     $('history').style.display=runs.length?'block':'none';
     $('runs').innerHTML=runs.slice(0,15).map(x=>
       '<div class="hk" style="cursor:pointer" onclick="openRun(\''+esc(x.run_id)+'\')">'
@@ -681,7 +763,7 @@ async function loadRuns(){
 }
 async function openRun(id){
   try{
-    const r=await fetch('/api/runs/'+encodeURIComponent(id)); if(!r.ok) return;
+    const r=await api('/api/runs/'+encodeURIComponent(id)); if(!r.ok) return;
     const d=await r.json(); $('genresults').style.display='none';
     $('err').style.display='none'; render(d); window._last=d; window.scrollTo({top:0,behavior:'smooth'});
   }catch(e){}

@@ -12,7 +12,7 @@ SaaS):
 
 No behaviour change: given the same input it produces the same test cases as
 `QAXPipeline._run_generation`. This service is what `main.py analyze`, the
-Streamlit UI, an MCP tool, and a SaaS endpoint will all call.
+the web UI, an MCP tool, and a SaaS endpoint will all call.
 
 Usage:
     from services import QAXContext, PrintProgressReporter

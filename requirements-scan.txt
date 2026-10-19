@@ -3,7 +3,7 @@
 #     python3 -m venv .venv && . .venv/bin/activate
 #     pip install -r requirements-scan.txt
 #     python main.py demo
-# The full set (Streamlit UI, test generation extras) is requirements.txt.
+# The full set (web UI, test generation and execution extras) is requirements.txt.
 anthropic>=0.40.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0

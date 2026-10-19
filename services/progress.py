@@ -5,7 +5,7 @@ Services report progress through a ProgressReporter instead of print().
 This is the mechanism that lets one service drive four different faces:
 
     CLI   → PrintProgressReporter  (prints each step to the terminal)
-    UI    → a custom reporter that updates a Streamlit progress bar
+    UI    → a custom reporter that streams progress to the web UI
     MCP   → a reporter that appends events to a list returned as JSON
     SaaS  → a reporter that writes events to a DB / websocket per tenant
 

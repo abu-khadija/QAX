@@ -185,9 +185,14 @@ class BugReporter:
                                      risk_level="critical")
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dry_run: bool | None = None) -> None:
         """
         Initialise the reporter from .env variables.
+
+        Args:
+            dry_run: Caller's explicit choice. True forces a dry run; False allows a
+                live write only if DRY_RUN in the environment is not "true" as well
+                (either one saying "dry" wins). None = environment only (legacy).
 
         Required for real operation:
           JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
@@ -209,7 +214,7 @@ class BugReporter:
         self._env_field  = os.getenv("JIRA_ENVIRONMENT_FIELD", "environment")
         self._auto_mode  = os.getenv("AUTO_BUG_REPORT", "true").lower() == "true"
 
-        self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+        self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true" or bool(dry_run)
         self.enabled = bool(
             self._base_url and self._email and self._token and self._project
         )

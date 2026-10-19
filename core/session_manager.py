@@ -926,7 +926,7 @@ class SessionManager:
 
         # ── Fetch tests tagged 'smoke' ─────────────────────────────────────
         try:
-            xray = XrayClient()
+            xray = XrayClient(dry_run=False)   # read-only fetch: real tests, not mocks
             tests = xray.fetch_tests_by_tag("smoke")
         except ValueError as e:
             logger.warning("Xray not configured: %s — cannot fetch smoke tests", e)
@@ -982,24 +982,76 @@ class SessionManager:
             })
             return results
 
-        # ── For now: confirm list and note Enhancement 3 ──────────────────
-        print("\n  ✓ Smoke test list confirmed.")
-        print("  → Playwright execution engine is coming in Enhancement 3.")
-        print("  → Test IDs logged to session for the executor to pick up.")
-
-        results = {
-            "test_list": tests,
-            "total": len(tests),
-            "executed": 0,
-            "duration_seconds": round(time.time() - start_time, 2),
-            "message": "Test list ready — Playwright execution pending (Enhancement 3)",
-        }
+        print("\n  ✓ Smoke test list confirmed — executing.")
+        results = self._execute_fetched_tests(tests, config, start_time)
         self.save_session("smoke", config, {
             "files_processed": 0, "total_generated": len(tests),
             "total_valid": len(tests), "pushed_count": 0, "failed_count": 0,
             "duration_seconds": results["duration_seconds"], "output_file": "",
         })
         return results
+
+    def _execute_fetched_tests(self, tests: list[dict], config: dict, start_time: float) -> dict:
+        """
+        Execute Xray tests fetched by label (smoke/regression) in the browser.
+
+        Reads each test's steps from Xray, runs them with the UI engine, prints the
+        console summary and writes the HTML report. Results go back to Xray as one
+        Test Execution only when the config asks (push_to_xray) AND DRY_RUN is off.
+
+        Args:
+            tests (list[dict]): Issues from XrayClient.fetch_tests_by_tag().
+            config (dict): Merged run config (headless, push_to_xray, …).
+            start_time (float): time.time() when the run started.
+
+        Returns:
+            dict: test_list, total, executed, passed, failed, skipped, errors,
+                  report, upload, duration_seconds, message. Never raises.
+        """
+        import asyncio
+        import time
+
+        out = {"test_list": tests, "total": len(tests), "executed": 0, "passed": 0,
+               "failed": 0, "skipped": 0, "errors": 0, "report": "", "upload": None,
+               "message": ""}
+        try:
+            from core.xray_client import XrayClient, issues_to_cases
+            from execution.results_reporter import ResultsReporter
+            from services.execution_service import ExecutionService
+
+            try:
+                reader = XrayClient(dry_run=False)      # reads only
+                steps = reader.fetch_test_steps([t.get("key", "") for t in tests])
+            except ValueError as e:                     # no Xray credentials
+                logger.warning("Cannot read test steps from Xray: %s", e)
+                steps = {}                              # → each case reported as not run
+            cases = issues_to_cases(tests, steps)
+            res = ExecutionService().execute(
+                cases, mode="ui", headless=str(config.get("headless", "true")).lower() != "false")
+            batch = res.raw or {}
+            out.update(executed=int(batch.get("total", 0)), passed=res.passed,
+                       failed=int(batch.get("failed", 0)), skipped=int(batch.get("skipped", 0)),
+                       errors=int(batch.get("errors", 0)))
+            if res.error:
+                out["message"] = f"Execution failed: {res.error}"
+                print(f"  ✗ {res.error}")
+            reporter = ResultsReporter()
+            if batch.get("results"):
+                reporter.generate_console_summary(batch)
+                out["report"] = reporter.generate_html_report(batch) or ""
+            dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+            if config.get("push_to_xray") and not dry_run and batch.get("results"):
+                key_map = {c["test_case_id"]: c["jira_key"] for c in cases if c.get("jira_key")}
+                out["upload"] = asyncio.run(reporter.report_to_xray(
+                    batch, XrayClient(dry_run=False), key_map=key_map))
+            out["message"] = out["message"] or (
+                f"{out['passed']} passed, {out['failed']} failed, "
+                f"{out['skipped'] + out['errors']} not run")
+        except Exception as e:  # noqa: BLE001
+            logger.error("Executing fetched tests failed: %s", e)
+            out["message"] = f"Execution failed: {e}"
+        out["duration_seconds"] = round(time.time() - start_time, 2)
+        return out
 
     def run_regression(self, config: dict) -> dict:
         """
@@ -1021,7 +1073,7 @@ class SessionManager:
         logger.info("Fetching regression tests from Xray...")
 
         try:
-            xray = XrayClient()
+            xray = XrayClient(dry_run=False)   # read-only fetch: real tests, not mocks
             tests = xray.fetch_tests_by_tag("regression")
         except ValueError as e:
             logger.warning("Xray not configured: %s", e)
@@ -1061,14 +1113,8 @@ class SessionManager:
             })
             return {"test_list": tests, "total": len(tests), "executed": 0, "message": "Cancelled"}
 
-        print("\n  ✓ Regression test list confirmed.")
-        print("  → Playwright execution engine is coming in Enhancement 3.")
-
-        results = {
-            "test_list": tests, "total": len(tests), "executed": 0,
-            "duration_seconds": round(time.time() - start_time, 2),
-            "message": "Test list ready — Playwright execution pending (Enhancement 3)",
-        }
+        print("\n  ✓ Regression test list confirmed — executing.")
+        results = self._execute_fetched_tests(tests, config, start_time)
         self.save_session("regression", config, {
             "files_processed": 0, "total_generated": len(tests),
             "total_valid": len(tests), "pushed_count": 0, "failed_count": 0,

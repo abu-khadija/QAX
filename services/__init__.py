@@ -9,7 +9,7 @@ NEVER print, call input(), call sys.exit(), or read os.environ as state —
 those are the concerns of the *faces* that sit on top of this layer:
 
     CLI (main.py)  ──┐
-    UI (Streamlit) ──┤
+    UI (web/)      ──┤
     MCP server     ──┼──►  services/  ──►  core/ + execution/
     SaaS API       ──┘
 

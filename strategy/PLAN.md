@@ -15,7 +15,9 @@ QAX today is a self-hosted CLI with a local web UI. It is single-tenant and read
 
 The initial product hypothesis is a QA or development team that needs to find actionable web-application security defects in an authorized staging environment, with evidence they can review and a practical path to Jira. Treat this as a hypothesis to validate, not established market demand.
 
-For now, keep the product claim narrow: a self-hosted scanner that runs deterministic probes, reports evidence-backed findings, and can support a human-reviewed workflow. Test generation is an adjacent path; do not let it distract from proving the scan-to-evidence workflow. Publish only capabilities supported by measured results.
+For now, keep the product claim narrow: a self-hosted scanner that runs deterministic probes, reports evidence-backed findings, and can support a human-reviewed workflow. Publish only capabilities supported by measured results.
+
+**Functional QA track (founder decision 9, 2026-10-19):** end-to-end functional QA — input (code, story, Jira, PR) → plan → AI-generated test cases → execution against the running app → verification → report → Jira/Xray — is a core part of the product story, not an adjacent path. The same honesty rules apply: generated cases are AI proposals until executed; a case that did not run is never PASS; no external write without the operator's explicit opt-in; Xray is not claimed until tested end to end on a real instance.
 
 ## 2. Current evidence baseline
 
@@ -40,7 +42,7 @@ The following is the founder’s report of runs against commit 436d039 on 2026-1
 ## 3. Execution rules
 
 1. Work through phase gates. Dates are planning windows, not permission to advance without meeting the exit criteria.
-2. Run the first external demos during 2026-10-17 to 2026-10-23. In parallel, continue the current endpoint-discovery work.
+2. Run the first external demos after product-completion engineering (decision 8; the original 2026-10-17 to 2026-10-23 window is deferred). Engineering does not wait on them.
 3. Use only applications and environments the operator is authorized to test. For external alpha users, default to read-only against their own staging systems. Self-hosting reduces QAX’s data custody and infrastructure egress exposure; it does not remove target-side risk, local secret risk, or data sent by an explicitly invoked deep AI workflow.
 4. Explain what data leaves the user’s machine, what is sent to an AI provider, and what Jira actions may write before a user enables those workflows.
 5. Record metrics with definitions and denominators. Do not use a dashboard target as if it were a measured result.
@@ -76,7 +78,7 @@ The following is the founder’s report of runs against commit 436d039 on 2026-1
 
 **Window:** 2026-10-19 to 2026-11-15  
 **Status:** In progress  
-**Current work order:** spec-less endpoint discovery, then cookie-session and CSRF authentication.
+**Current work order:** spec-less endpoint discovery, then cookie-session and CSRF authentication — both done (see §9). Remaining work is product completion: close evidence-backed engineering defects first; the human-dependent exit criteria below are deferred until that is done (decision 8).
 
 **Actions, in sequence**
 
@@ -93,7 +95,7 @@ The following is the founder’s report of runs against commit 436d039 on 2026-1
 **Exit criteria**
 
 - The current test suite and make eval pass on the release candidate; preserve commit-level output.
-- Golden and SECURE controls pass; mutation evidence records 39/40 from the last full sweep and the separate forge-jwt source-lane verification.
+- Golden and SECURE controls pass; mutation evidence records the last full sweep (40/40 on 4c2fabd, source lane included — see §9).
 - Read-only regression still measures zero write requests; per-run ledger agrees with server-side method counts.
 - Spec-less discovery reports its known coverage limits and passes a documented regression corpus.
 - SQL/NoSQL and other ambiguous truth cases cannot be silently accepted by substring overlap.
@@ -307,7 +309,9 @@ These references support the security and operating principles; review current g
 | Privacy: AI calls | Done 2026-10-17 | A quick scan makes zero calls to an AI provider even with a key set (a Critic leak was found and fixed; the gate counts requests to a local listener) |
 | Release hygiene | Partly done | Version 0.1.0 + `--version`, run record in every scan output, CHANGELOG, SECURITY.md, QUICKSTART verified in a clean venv (27 s to 44 findings), `demo --web`. The gate now also drives the REAL command line (`demo`, credential-less `scan --out`) after a regression that broke `qax demo` went unseen by 800 tests. LICENSE intentionally not added (D12/B9: with counsel) |
 | Current engineering sequence | Phase 1 engineering complete | Discovery, cookie+CSRF (`--cookie`, `--header`), 429/WAF throttle layer, class-aware truth matching, run records + versioning, plan preview/run history UI, Quickstart, 10-app corpus. Left in Phase 1: the exit-criteria items that need people (a new user completes the Quickstart unaided) and a refreshed mutation sweep |
-| Phase 0 demos | Ready | Target window 2026-10-17 to 2026-10-23; show to 2–3 QA/dev practitioners |
+| Phase 0 demos | Deferred (2026-10-19) | Founder decision 8: after product implementation. Requirement unchanged (2–3 QA/dev practitioners); not done |
+| Functional QA track | Engineering done 2026-10-19 (uncommitted at time of writing); live Xray unverified | Decision 9. Closed gaps: PR input used local disk; pipeline `success` ignored failures; no report/results phase; results "uploaded" as Jira comments to local TC ids; `execute --suite` ran tests with no steps; `run --mode smoke/regression` was a placeholder; a UI case with skipped steps counted PASS; auto-filed Jira bugs ignored `--dry-run`; `analyze` pushed live without asking; web UI could not execute, skipped validation, never sent the API token. Added: plan stage (`--plan-only`), `--base-url`, `--live`, HTML/JSON report, Xray results import (`/import/execution`) and step fetch (GraphQL) — **Xray never exercised against a real instance**. Evidence (local, this machine): 47 focused tests pass; full suite **860 passed, 4 skipped, 0 failed**; `make eval` **GATE: PASS** (recall 32/32, 0 FP, read-only 0 writes, secure control silent, pipeline execute leg E2E). The tests caught two of my own bugs before the gate (a local id like TC-1 accepted as a Jira key; a crash with no Xray credentials). Not tested: browser (Playwright) execution — Playwright is not installed here; any real Jira/Xray call |
+| Human-dependent Phase 1 exit criteria | Deferred (2026-10-19), pending | Unaided Quickstart user, live verify-fixes write, LICENSE/IP review, Xray against a real instance, PR gate on a real repo. Requirements unchanged; not met; do not report as passed |
 | Self-hosted private alpha | Planned | 2026-11-16 to 2026-12-31, gated on Phase 1 |
 | Company design-partner beta | Blocked | Wait for founder’s IP/legal review, expected early 2027 |
 | Hosted-mode gate | Deferred | Start only after beta evidence justifies investment |
@@ -332,5 +336,8 @@ These references support the security and operating principles; review current g
 5. Make a separate hosted-mode security gate mandatory before any scan runs from QAX infrastructure.
 6. Treat the current benchmark results as bounded evidence, not a universal accuracy claim.
 7. Keep this document as the single roadmap and update its status/decision log at each phase gate.
+8. (2026-10-19) Product completion first: human-dependent and external activities (demos, interviews, user/participant testing, outreach, lawyer/IP review, external approvals) are deferred until the engineering work is done. They keep their requirements and stay pending; no phase gate that depends on them is passed by code tests.
 
-**Next action:** Complete the Phase 0 demos during 2026-10-17 to 2026-10-23 while continuing Phase 1 endpoint-discovery work. Do not start hosted SaaS implementation until beta evidence justifies it and the hosted-mode security gate is approved.
+9. (2026-10-19) The functional QA track (generate → execute → verify → report → Jira/Xray) is part of the product and is completed in this phase: close its evidence-backed gaps (see §9 "Functional QA track").
+
+**Next action:** Finish product-completion engineering (evidence-backed defects); then run the deferred Phase 0 demos and the human-dependent Phase 1 exit criteria. Do not start hosted SaaS implementation until beta evidence justifies it and the hosted-mode security gate is approved.

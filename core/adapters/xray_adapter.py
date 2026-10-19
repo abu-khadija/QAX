@@ -101,7 +101,15 @@ class XrayAdapter(BaseExportAdapter):
                 "QAX XrayAdapter: pushed %d, failed %d",
                 len(pushed), len(failed),
             )
-            return self._success_result(len(pushed), len(failed), keys)
+            result = self._success_result(len(pushed), len(failed), keys)
+            # test_case_id → created Jira key, so execution results can be attributed
+            # to the real Test issue later (dry-run keys are placeholders, never real).
+            result["key_map"] = {
+                r["test_case_id"]: r["jira_key"] for r in pushed
+                if r.get("test_case_id") and r.get("jira_key")
+                and not str(r["jira_key"]).startswith("DRY-RUN")
+            }
+            return result
 
         except Exception as exc:
             logger.error("QAX XrayAdapter: export failed — %s", exc)

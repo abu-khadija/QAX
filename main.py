@@ -191,6 +191,13 @@ Examples:
         help="Skip Xray push entirely (still saves JSON locally)."
     )
     parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Confirm a LIVE Xray push without the interactive prompt (CI). "
+             "Without it, a live push asks first, and is skipped when nobody can answer."
+    )
+    parser.add_argument(
         "--skip-low-confidence",
         type=int,
         default=0,
@@ -408,6 +415,10 @@ Examples:
             logger.info("Skipped %d cases below confidence threshold %d", skipped, args.skip_low_confidence)
 
     # ── Push to Xray ───────────────────────────────────────────────────────
+    if xray and cases_to_push and not getattr(xray, "dry_run", True) \
+            and not _confirm_live_push(len(cases_to_push), args.yes):
+        print(f"  Push skipped — test cases saved locally only: {saved_path}")
+        xray = None
     if xray and cases_to_push:
         push_result = xray.push_batch(cases_to_push)
         _print_push_summary(push_result)
@@ -985,7 +996,8 @@ def run_execute_command() -> None:
     async def _run_pipeline() -> dict:
         """Async execution pipeline: setup → execute → report → teardown."""
         runner   = PlaywrightRunner()
-        executor = TestExecutor()
+        # Auto-filed bugs on FAIL are live only with --upload (the operator's explicit OK).
+        executor = TestExecutor(dry_run=dry_run or not args.upload)
         reporter = ResultsReporter()
 
         await runner.setup(headless=headless)
@@ -1027,14 +1039,20 @@ def run_execute_command() -> None:
         else:
             print("  Uploading results to Xray...")
             try:
-                xray = XrayClient()
+                xray = XrayClient(dry_run=False)
+                key_map = {tc.get("test_case_id", ""): tc.get("jira_key")
+                           for tc in test_cases if tc.get("jira_key")}
                 upload_summary = asyncio.run(
-                    reporter.report_to_xray(batch_results, xray)
+                    reporter.report_to_xray(batch_results, xray, key_map=key_map)
                 )
                 print(
-                    f"  Xray upload : {upload_summary['uploaded']} uploaded, "
-                    f"{upload_summary['failed']} failed"
+                    f"  Xray upload : {upload_summary['uploaded']} uploaded"
+                    f" (Test Execution {upload_summary.get('test_execution_key') or '-'}), "
+                    f"{upload_summary['failed']} failed, "
+                    f"{upload_summary.get('unmapped', 0)} without a Jira key"
                 )
+                if upload_summary.get("error"):
+                    print(f"  ✗ {upload_summary['error']}")
             except Exception as e:
                 logger.error("Xray upload failed: %s", e)
                 print(f"  ✗ Xray upload failed: {e}")
@@ -1065,6 +1083,30 @@ def run_execute_command() -> None:
     # ── Exit code ──────────────────────────────────────────────────────────
     if batch_results.get("failed", 0) > 0 or batch_results.get("errors", 0) > 0:
         sys.exit(1)
+
+
+def _confirm_live_push(count: int, assume_yes: bool) -> bool:
+    """
+    Ask the operator before creating real Jira/Xray issues.
+
+    Args:
+        count (int): How many test issues would be created.
+        assume_yes (bool): --yes was given (non-interactive opt-in).
+
+    Returns:
+        bool: True only with --yes or an explicit "y" at an interactive prompt.
+              A non-interactive run without --yes never writes.
+    """
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print(f"  [QAX] Live push of {count} test case(s) needs --yes when not interactive.")
+        return False
+    try:
+        answer = input(f"\n  Create {count} Test issue(s) in Jira/Xray now? (y/n): ")
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip().lower() == "y"
 
 
 def _collect_test_cases_for_execute(args) -> list[dict]:
@@ -1104,25 +1146,29 @@ def _collect_test_cases_for_execute(args) -> list[dict]:
 
     # ── Fetch from Xray ────────────────────────────────────────────────────
     try:
-        xray = XrayClient()
+        # Reads only: fetching tests and their steps never writes, so it is not
+        # gated by DRY_RUN (the upload of results is, separately).
+        xray = XrayClient(dry_run=False)
 
         if args.test_case:
             tc = xray.fetch_test_by_id(args.test_case)
-            return [tc] if tc else []
-
-        if args.suite:
-            return xray.fetch_tests_by_tag(args.suite)
+            issues = [tc] if tc else []
+        elif args.suite:
+            issues = xray.fetch_tests_by_tag(args.suite)
+        else:
+            return []
+        return _issues_to_executable_cases(issues, xray.fetch_test_steps(
+            [i.get("key", "") for i in issues]))
 
     except Exception as e:
         logger.error("Could not fetch test cases from Xray: %s", e)
         return []
 
-    return []
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# DASHBOARD COMMAND
-# ══════════════════════════════════════════════════════════════════════════════
+def _issues_to_executable_cases(issues: list[dict], steps_by_key: dict) -> list[dict]:
+    """Jira Test issues + Xray steps → executable cases (see core.xray_client.issues_to_cases)."""
+    from core.xray_client import issues_to_cases
+    return issues_to_cases(issues, steps_by_key)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1792,12 +1838,36 @@ def run_pipeline_command() -> None:
         help="Run Playwright browser headless when using UI execution (default: True).",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
-        default=os.getenv("DRY_RUN", "true").lower() == "true",
-        help="Simulate export/push without making external API calls.",
+        "--headed", action="store_true", default=False,
+        help="Show the browser during UI execution (overrides --headless).",
+    )
+    parser.add_argument(
+        "--base-url", default=None,
+        help="The running app to execute against (default: APP_BASE_URL from .env).",
+    )
+    parser.add_argument(
+        "--output-dir", default=None,
+        help="Where cases, results and the HTML report go (default: output/pipeline/<ts>).",
+    )
+    parser.add_argument(
+        "--plan-only", action="store_true", default=False,
+        help="Generate and show the plan (what would run and be written), then stop.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", default=True,
+        help="Simulate every external write (the default; kept for compatibility).",
+    )
+    parser.add_argument(
+        "--live", action="store_true", default=False,
+        help="Really write to Xray/Zephyr/Jira (test issues, results, auto-filed bugs). "
+             "Ignored when DRY_RUN=true in .env.",
     )
 
     args = parser.parse_args(sys.argv[2:])
+    # External writes need BOTH the operator's --live and an .env that allows them.
+    args.dry_run = not args.live or os.getenv("DRY_RUN", "true").lower() == "true"
+    if args.live and args.dry_run:
+        print("  [QAX] --live ignored: DRY_RUN=true in .env — nothing will be written.")
 
     # Resolve source: --source wins over legacy --file
     source = args.source or args.legacy_file
@@ -1816,9 +1886,11 @@ def run_pipeline_command() -> None:
         export=args.export,
         project=args.project,
         dry_run=args.dry_run,
-        headless=args.headless,
+        headless=not args.headed,
         input_type=args.input,
         exec_mode=args.exec_mode,
+        base_url=args.base_url,
+        output_dir=args.output_dir,
     )
 
     src_display = source[:37] if source else ""
@@ -1834,6 +1906,7 @@ def run_pipeline_command() -> None:
 
     result = pipeline.run(
         source=source,
+        plan_only=args.plan_only,
         module=args.module,
         user_story=args.story,
         include_git=args.include_git,
@@ -1864,10 +1937,19 @@ def run_pipeline_command() -> None:
             print(f"  Executed:   {exc.get('total', 0)} total")
             print(f"  Passed:     {exc.get('passed', 0)}")
             print(f"  Failed:     {exc.get('failed', 0)}")
+            print(f"  Not run:    {exc.get('skipped', 0)} skipped, {exc.get('errors', 0)} error(s)"
+                  " — not passes")
             if exc.get("error"):
                 print(f"  Exec error: {exc['error']}")
+    rep = result.get("report") or {}
+    if rep.get("dir"):
+        print(f"  Report:     {rep['dir']}")
+        for h in rep.get("html") or []:
+            print(f"              → {h}")
     if exp.get("error"):
         print(f"  Export err: {exp['error']}")
+    for err in result.get("errors") or []:
+        print(f"  ERROR:      {err}")
     print()
 
     if not result.get("success"):
@@ -1885,7 +1967,16 @@ def show_help() -> None:
     print(__doc__)
     print("Use 'python main.py <command> --help' for details on any command.")
     print()
-    print("Commands:")
+    print("Commands — security scan:")
+    print("  scan             Scan a running app with deterministic probes")
+    print("  demo             Scan QAX's bundled vulnerable app (no setup)")
+    print("  diff             Compare two scans (NEW / STILL THERE / GONE)")
+    print("  file-findings    Preview / file scan findings as Jira bugs")
+    print("  verify-fixes     Re-check filed bugs: FIXED / STILL REPRODUCES / COULD NOT TEST")
+    print("  lint-tests       Check generated tests for weak assertions")
+    print()
+    print("Commands — functional QA:")
+    print("  pipeline         Input → generate → plan → export → execute → report → Xray results")
     print("  analyze          Generate test cases from source code")
     print("  run              Config-driven pipeline with session tracking")
     print("  execute          Run test cases with Playwright browser")
@@ -1894,10 +1985,11 @@ def show_help() -> None:
     print("  check-connection Test all API connections (Claude + Jira + Xray)")
     print("  init-project     Create a new project config folder")
     print("  cache            Manage the file-level result cache (--stats / --clear)")
-    print("  pipeline         Generate → Export → Execute in one step")
     print()
     print("Examples:")
-    print("  python main.py pipeline --input file --source src/Controller.cs --export xray --dry-run")
+    print("  python main.py scan --url http://localhost:8000 --quick --authorized --read-only")
+    print("  python main.py pipeline --input story --source 'As a user I can log in' --exec-mode api --base-url http://localhost:8000")
+    print("  python main.py pipeline --input file --source src/Controller.cs --export xray --plan-only")
     print("  python main.py pipeline --input jira --source PROJ-123 --export excel")
     print("  python main.py pipeline --input pr --source 142 --export none --exec-mode ui")
     print("  python main.py pipeline --input story --source 'As a user I want to login' --exec-mode api")

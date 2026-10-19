@@ -1,7 +1,8 @@
 """
 core/pipeline.py — QAX Pipeline Orchestrator
 =============================================
-Orchestrates the full Generate → Export → Execute workflow in one call.
+Orchestrates the full functional-QA workflow in one call:
+Input → Generate → Plan → Export (test definitions) → Execute → Report → Results to Xray.
 
 Design principles:
   - Each phase is independent: failure in export never blocks execution.
@@ -10,6 +11,9 @@ Design principles:
   - Export is handled by swappable output adapters (Xray, Zephyr, Excel, none).
   - Execution supports three modes: ui (Playwright), api (HTTP), both, or none.
   - No phase raises — all errors are captured and returned in the result dict.
+  - Generated cases are AI proposals until executed; a case that did not run is
+    never counted as passed, and `success` is False when any phase errored.
+  - Nothing is written outside the machine unless dry_run=False (an explicit opt-in).
 
 Usage (generate + export to Excel):
     pipeline = QAXPipeline(export="excel", project="myapp", dry_run=True)
@@ -78,6 +82,8 @@ class QAXPipeline:
         headless: bool = True,
         input_type: str = "file",
         exec_mode: str | None = None,
+        base_url: str | None = None,
+        output_dir: str | None = None,
     ) -> None:
         """
         Initialise the pipeline and load the requested adapters.
@@ -95,6 +101,10 @@ class QAXPipeline:
                               or "story". Default: "file".
             exec_mode (str | None): Execution engine — "ui", "api", "both",
                                     or "none". Overrides the legacy execute flag.
+            base_url (str | None): The running app to execute against. Default:
+                                   APP_BASE_URL from the environment.
+            output_dir (str | None): Where cases, results and the HTML report are
+                                     written. Default: output/pipeline/<timestamp>.
         """
         import os
         self.export_name  = (export or "none").lower()
@@ -102,6 +112,8 @@ class QAXPipeline:
         self.project      = project or os.getenv("DEFAULT_PROJECT", "")
         self.dry_run      = dry_run
         self.headless     = headless
+        self.base_url     = (base_url or os.getenv("APP_BASE_URL", "")).rstrip("/")
+        self.output_dir   = output_dir
 
         # Resolve exec_mode: explicit flag wins; legacy execute=True → "ui"
         if exec_mode is not None:
@@ -131,6 +143,7 @@ class QAXPipeline:
         file_path: str | None = None,
         test_cases: list[dict] | None = None,
         source: str | None = None,
+        plan_only: bool = False,
         **analyze_kwargs,
     ) -> dict:
         """
@@ -146,6 +159,7 @@ class QAXPipeline:
                                      Still honoured for backward compatibility.
             test_cases (list[dict] | None): Pre-generated test cases.
                                             When supplied, generation is skipped.
+            plan_only (bool): Stop after the plan (no export, execution or report).
             source (str | None): Generic source for the input adapter —
                                   file path, folder path, Jira key, PR number,
                                   or story text depending on input_type.
@@ -168,9 +182,13 @@ class QAXPipeline:
         """
         result: dict = {
             "generation": None,
+            "plan":       None,
             "export":     None,
             "execution":  None,
+            "report":     None,
+            "results_upload": None,
             "success":    False,
+            "errors":     [],
         }
 
         # ── Phase 1: Generation ───────────────────────────────────────────────
@@ -226,7 +244,15 @@ class QAXPipeline:
             )
             result["generation"] = {"count": len(test_cases), "success": True}
 
-        # ── Phase 2: Export ───────────────────────────────────────────────────
+        # ── Plan: what will run, against what, and what may be written ────────
+        plan = self.plan(test_cases)
+        result["plan"] = plan
+        self._print_plan(plan)
+        if plan_only:
+            result["success"] = bool(result["generation"].get("success"))
+            return result
+
+        # ── Phase 2: Export (test definitions) ────────────────────────────────
         print(f"\n  ━━━ Phase 2: Export [{self.export_name}] ━━━")
         export_result = self.adapter.export(
             test_cases,
@@ -234,8 +260,14 @@ class QAXPipeline:
             dry_run=self.dry_run,
         )
         result["export"] = export_result
+        key_map = dict(export_result.get("key_map") or {})
+        for tc in test_cases:
+            key = key_map.get(tc.get("test_case_id", ""))
+            if key:
+                tc["jira_key"] = key
 
-        if not export_result["success"]:
+        if not export_result["success"] and self.export_name != "none":
+            result["errors"].append(f"export: {export_result.get('error')}")
             logger.warning(
                 "QAX Pipeline: export [%s] failed — %s — continuing to execution",
                 self.export_name, export_result.get("error"),
@@ -248,11 +280,181 @@ class QAXPipeline:
             print(f"\n  ━━━ Phase 3: Execution [{self.exec_mode}] ━━━")
             exec_result = self._run_execution(test_cases)
             result["execution"] = exec_result
+            for b in self._batches(exec_result):
+                if b.get("error"):
+                    result["errors"].append(f"execution ({b.get('mode', '?')}): {b['error']}")
         else:
             print("\n  ━━━ Phase 3: Skipped (--exec-mode none) ━━━")
 
-        result["success"] = True
+        # ── Phase 4: Report (cases, results, HTML) ────────────────────────────
+        result["report"] = self._write_report(test_cases, result.get("execution"))
+
+        # ── Phase 5: Results to Xray (only when the cases went to Xray) ──────
+        if self.export_name == "xray" and result.get("execution"):
+            print("\n  ━━━ Phase 5: Results → Xray ━━━")
+            uploads = self._upload_results(result["execution"], key_map)
+            result["results_upload"] = uploads
+            for u in uploads:
+                if u.get("failed") or (u.get("error") and not u.get("unmapped")):
+                    result["errors"].append(f"results upload: {u.get('error')}")
+
+        result["success"] = bool(result["generation"] and result["generation"].get("success")) \
+            and not result["errors"]
         return result
+
+    # ── Plan ──────────────────────────────────────────────────────────────────
+
+    def plan(self, test_cases: list[dict]) -> dict:
+        """
+        Describe what the run will do before anything executes or is written.
+
+        Args:
+            test_cases (list[dict]): The (generated or supplied) cases.
+
+        Returns:
+            dict: cases, executable counts per engine (a case with no api_steps
+                  cannot run over HTTP; one with no steps cannot run at all),
+                  target base URL, export target, whether writes are live, and
+                  missing prerequisites. Never raises.
+        """
+        cases = list(test_cases or [])
+        api_ready = sum(1 for tc in cases if tc.get("api_steps"))
+        ui_ready = sum(1 for tc in cases if tc.get("automation_steps")
+                       or tc.get("manual_steps") or tc.get("steps"))
+        missing: list[str] = []
+        if self.exec_mode != "none" and not self.base_url:
+            missing.append("no target URL (--base-url or APP_BASE_URL)")
+        if self.exec_mode in ("api", "both") and cases and not api_ready:
+            missing.append("no case has api_steps — API execution will skip them all")
+        if self.exec_mode in ("ui", "both"):
+            try:
+                from execution.playwright_runner import PLAYWRIGHT_AVAILABLE
+            except Exception:  # noqa: BLE001
+                PLAYWRIGHT_AVAILABLE = False
+            if not PLAYWRIGHT_AVAILABLE:
+                missing.append("Playwright not installed (pip install playwright && "
+                               "playwright install chromium)")
+        live = not self.dry_run
+        writes: list[str] = []
+        if self.export_name in ("xray", "zephyr"):
+            writes.append(f"create {len(cases)} test issue(s) in {self.export_name}"
+                          + ("" if live else " (dry run — nothing sent)"))
+        if self.export_name == "xray" and self.exec_mode != "none":
+            writes.append("import results as one Xray Test Execution"
+                          + ("" if live else " (dry run — nothing sent)"))
+        if self.exec_mode in ("ui", "both"):
+            writes.append("auto-file a Jira bug per UI failure when AUTO_BUG_REPORT=true"
+                          + ("" if live else " (dry run — drafted only)"))
+        return {
+            "cases": len(cases), "api_executable": api_ready, "ui_executable": ui_ready,
+            "exec_mode": self.exec_mode, "base_url": self.base_url or None,
+            "export": self.export_name, "live_writes": live, "writes": writes,
+            "missing": missing,
+        }
+
+    @staticmethod
+    def _print_plan(plan: dict) -> None:
+        """Print the plan block (see plan())."""
+        print("\n  ━━━ Plan ━━━")
+        print(f"  Cases:      {plan['cases']} (AI-generated proposals until executed)")
+        print(f"  Execute:    {plan['exec_mode']} → {plan['base_url'] or '(no target URL)'}")
+        print(f"  Runnable:   api {plan['api_executable']} / ui {plan['ui_executable']}")
+        print(f"  Export:     {plan['export']}  |  live writes: {plan['live_writes']}")
+        for w in plan["writes"]:
+            print(f"  Writes:     {w}")
+        for m in plan["missing"]:
+            print(f"  MISSING:    {m}")
+
+    # ── Report / results upload ───────────────────────────────────────────────
+
+    @staticmethod
+    def _batches(execution: dict | None) -> list[dict]:
+        """The single-engine batch dicts inside an execution result ("both" has two)."""
+        if not execution:
+            return []
+        if "api" in execution and "ui" in execution:
+            return [dict(execution["api"], mode="api"), dict(execution["ui"], mode="ui")]
+        return [execution]
+
+    def _write_report(self, test_cases: list[dict], execution: dict | None) -> dict:
+        """
+        Save the cases, the raw results and an HTML report for every executed engine.
+
+        Returns:
+            dict: {"dir", "cases", "results", "html": [paths], "error"}. Never raises.
+        """
+        import json
+        from datetime import datetime
+        from pathlib import Path
+
+        out = {"dir": None, "cases": None, "results": None, "html": [], "error": None}
+        try:
+            folder = Path(self.output_dir or Path("output") / "pipeline" /
+                          datetime.now().strftime("%Y%m%d_%H%M%S"))
+            folder.mkdir(parents=True, exist_ok=True)
+            out["dir"] = str(folder)
+            cases_path = folder / "test_cases.json"
+            cases_path.write_text(json.dumps({"test_cases": test_cases}, indent=2,
+                                             default=str), encoding="utf-8")
+            out["cases"] = str(cases_path)
+            if execution:
+                results_path = folder / "results.json"
+                results_path.write_text(json.dumps(execution, indent=2, default=str),
+                                        encoding="utf-8")
+                out["results"] = str(results_path)
+                from execution.results_reporter import ResultsReporter
+                reporter = ResultsReporter(dry_run=self.dry_run)
+                for b in self._batches(execution):
+                    if b.get("results"):
+                        path = reporter.generate_html_report(b, output_folder=str(folder))
+                        if path:
+                            out["html"].append(path)
+            print(f"\n  Report:     {out['dir']}")
+        except Exception as exc:  # noqa: BLE001
+            out["error"] = str(exc)[:200]
+            logger.error("QAX Pipeline: report failed — %s", exc)
+        return out
+
+    def _upload_results(self, execution: dict, key_map: dict) -> list[dict]:
+        """
+        Import execution results into Xray (one Test Execution per engine).
+
+        Uses the same dry_run as the export: nothing is sent unless the operator
+        opted in. Results whose case has no real Jira key are counted, not sent.
+
+        Returns:
+            list[dict]: One ResultsReporter.report_to_xray summary per engine.
+        """
+        import asyncio
+
+        from core.xray_client import XrayClient
+        from execution.results_reporter import ResultsReporter
+
+        uploads = []
+        reporter = ResultsReporter(dry_run=self.dry_run)
+        try:
+            client = XrayClient(dry_run=self.dry_run)
+        except Exception as exc:  # noqa: BLE001 — e.g. live mode without Xray credentials
+            return [{"mode": b.get("mode", self.exec_mode), "failed": len(b.get("results") or []),
+                     "uploaded": 0, "error": str(exc).splitlines()[0][:200]}
+                    for b in self._batches(execution)]
+        for b in self._batches(execution):
+            try:
+                u = asyncio.run(reporter.report_to_xray(
+                    b, client, key_map=key_map,
+                    summary_text=f"QAX {b.get('mode', self.exec_mode)} execution"))
+            except Exception as exc:  # noqa: BLE001
+                u = {"failed": 1, "error": str(exc)[:200]}
+            u["mode"] = b.get("mode", self.exec_mode)
+            if self.dry_run and u.get("unmapped") and not u.get("attempted"):
+                u["error"] = (f"dry run: the cases were not created in Xray, so their "
+                              f"{u['unmapped']} result(s) have no Jira key yet — nothing sent")
+            uploads.append(u)
+            print(f"  [{u['mode']}] uploaded {u.get('uploaded', 0)}"
+                  f"{' (dry run)' if u.get('dry_run') else ''}, "
+                  f"no Jira key {u.get('unmapped', 0)}, failed {u.get('failed', 0)}"
+                  + (f" — {u['error']}" if u.get("error") else ""))
+        return uploads
 
     # ── Private: Input adapter loading ────────────────────────────────────────
 
@@ -441,7 +643,12 @@ class QAXPipeline:
                 test_type=kwargs.get("test_type"),
             )
 
-        # For file/folder/pr/git_diff: use the real file path (disk read)
+        # For file/folder: read from disk. For a PR (or any item whose content the
+        # adapter already fetched and that is not on local disk) use that content —
+        # re-reading the path would find nothing for a PR that is not checked out.
+        import os
+        if content and (source_type == "pr" or not os.path.isfile(file_path)):
+            return self._run_generation(file_path=file_path, content=content, **kwargs)
         return self._run_generation(file_path=file_path, **kwargs)
 
     # ── Private: Execution phase ───────────────────────────────────────────────
@@ -478,6 +685,8 @@ class QAXPipeline:
                 "total":  len(test_cases),
                 "passed": api_result.get("passed", 0) + ui_result.get("passed", 0),
                 "failed": api_result.get("failed", 0) + ui_result.get("failed", 0),
+                "skipped": api_result.get("skipped", 0) + ui_result.get("skipped", 0),
+                "errors": api_result.get("errors", 0) + ui_result.get("errors", 0),
                 "mode":   "both",
             }
 
@@ -497,7 +706,7 @@ class QAXPipeline:
         try:
             from execution.api_runner import APIRunner
             runner = APIRunner()
-            runner.setup()
+            runner.setup(base_url=self.base_url or None)
             result = runner.execute_batch(test_cases, stop_on_fail=False)
             runner.teardown()
             return result
@@ -525,13 +734,17 @@ class QAXPipeline:
             dict: Execution summary from TestExecutor.execute_batch().
         """
         import asyncio
+        import os
+
+        if self.base_url:
+            os.environ["APP_BASE_URL"] = self.base_url   # ActionMapper reads it
 
         async def _exec() -> dict:
             from execution.playwright_runner import PlaywrightRunner
             from execution.test_executor     import TestExecutor
 
             runner   = PlaywrightRunner()
-            executor = TestExecutor()
+            executor = TestExecutor(dry_run=self.dry_run)
 
             try:
                 await runner.setup(headless=self.headless)
