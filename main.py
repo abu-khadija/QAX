@@ -91,7 +91,8 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 # ── Load environment variables before importing project modules ───────────────
-load_dotenv(override=True)
+from core.env_loader import load_env
+load_env()
 
 # ── Project module imports ─────────────────────────────────────────────────────
 from core.code_reader import chunk_large_file, extract_dependencies, is_testable, read_file
@@ -926,6 +927,12 @@ def run_execute_command() -> None:
              "failing selector (off by default: nothing leaves the machine).",
     )
     parser.add_argument(
+        "--insecure",
+        action="store_true",
+        default=False,
+        help="Do not verify the target's TLS certificate (self-signed staging only).",
+    )
+    parser.add_argument(
         "--output",
         metavar="PATH",
         default=None,
@@ -942,6 +949,8 @@ def run_execute_command() -> None:
     args = parser.parse_args(sys.argv[2:])
     if args.ai_heal:
         os.environ["QAX_AI_HEAL"] = "true"
+    if args.insecure:
+        os.environ["QAX_INSECURE"] = "true"
 
     # ── Set project env so ActionMapper can resolve the correct selectors ──
     if args.project:
@@ -1034,6 +1043,7 @@ def run_execute_command() -> None:
 
     # ── Console summary ────────────────────────────────────────────────────
     reporter.generate_console_summary(batch_results)
+    _print_writes_sent(batch_results)
 
     # ── HTML report ────────────────────────────────────────────────────────
     report_folder = str(Path(args.output).parent) if args.output else "output/reports"
@@ -1092,6 +1102,21 @@ def run_execute_command() -> None:
     # ── Exit code ──────────────────────────────────────────────────────────
     if batch_results.get("failed", 0) > 0 or batch_results.get("errors", 0) > 0:
         sys.exit(1)
+
+
+def _print_writes_sent(batch: dict) -> None:
+    """Say what a browser run sent that can change data on the target (QAX does not undo it)."""
+    writes = [w for r in (batch.get("results") or []) for w in (r.get("writes") or [])]
+    if not writes:
+        return
+    seen: dict = {}
+    for w in writes:
+        k = f"{w.get('method')} {w.get('path')}"
+        seen[k] = seen.get(k, 0) + 1
+    print(f"  Writes sent to the target: {len(writes)} — QAX does not undo data created "
+          "through the UI; remove test data yourself if needed:")
+    for k, n in list(seen.items())[:10]:
+        print(f"    {n}× {k}")
 
 
 def _confirm_live_push(count: int, assume_yes: bool) -> bool:
@@ -1865,6 +1890,10 @@ def run_pipeline_command() -> None:
              "failing selectors (off by default).",
     )
     parser.add_argument(
+        "--insecure", action="store_true", default=False,
+        help="Do not verify the target's TLS certificate (self-signed staging only).",
+    )
+    parser.add_argument(
         "--base-url", default=None,
         help="The running app to execute against (default: APP_BASE_URL from .env).",
     )
@@ -1891,6 +1920,8 @@ def run_pipeline_command() -> None:
     args.dry_run = not args.live or os.getenv("DRY_RUN", "true").lower() == "true"
     if args.ai_heal:
         os.environ["QAX_AI_HEAL"] = "true"
+    if args.insecure:
+        os.environ["QAX_INSECURE"] = "true"
     if args.live and args.dry_run:
         print("  [QAX] --live ignored: DRY_RUN=true in .env — nothing will be written.")
 
@@ -1964,6 +1995,9 @@ def run_pipeline_command() -> None:
             print(f"  Failed:     {exc.get('failed', 0)}")
             print(f"  Not run:    {exc.get('skipped', 0)} skipped, {exc.get('errors', 0)} error(s)"
                   " — not passes")
+            if exc.get("writes_sent"):
+                print(f"  Writes:     {exc['writes_sent']} request(s) that can change data were sent "
+                      "to the target (not undone)")
             if exc.get("error"):
                 print(f"  Exec error: {exc['error']}")
     rep = result.get("report") or {}

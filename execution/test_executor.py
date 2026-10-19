@@ -382,7 +382,12 @@ class TestExecutor:
             # the case before), so a verdict never depends on the order of the cases.
             if n and hasattr(runner, "new_session"):
                 await runner.new_session()
+            if hasattr(runner, "take_writes"):
+                runner.take_writes()                       # start this case's ledger empty
             result = await self.execute_test_case(tc, runner)
+            # What this case sent that can change data on the target (form posts, deletes…).
+            # QAX does not undo data created through the UI — it says what it sent.
+            result["writes"] = runner.take_writes() if hasattr(runner, "take_writes") else []
             results.append(result)
 
             if stop_on_fail and result["status"] in ("FAIL", "ERROR"):
@@ -409,7 +414,9 @@ class TestExecutor:
             passed, total, pass_rate, duration
         )
 
+        writes_sent = sum(len(r.get("writes") or []) for r in results)
         return {
+            "writes_sent": writes_sent,
             "total": total,
             "passed": counts["PASS"],
             "failed": counts["FAIL"],

@@ -206,7 +206,8 @@ def index():
 
 @app.get("/app")
 def app_ui():
-    """The working app: scan a running app, generate test cases, file to Jira/Xray."""
+    """The working app — two tracks: the security scan, and functional QA (generate or load test
+    cases, run them in a browser or over HTTP); both file to Jira/Xray."""
     return send_from_directory(_STATIC, "app.html")
 
 
@@ -408,8 +409,8 @@ def scan():
 @app.post("/api/generate")
 def generate():
     """
-    Generate test cases from a user story and/or source code — the other half of the
-    platform (no running app needed). Same stack as the CLI (GenerationService:
+    Generate test cases from a user story and/or source code — step 1 of the functional QA
+    track (no running app needed to generate; running them is /api/execute). Same stack as the CLI (GenerationService:
     SmartChecker → Claude → schema validation), so the UI never shows unvalidated cases.
     Returns {"tests": [...], "invalid": n, "summary": {...}} or {"error": ...}.
     """
@@ -434,11 +435,29 @@ def generate():
         except QAXConfigError as exc:
             return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"error": f"Generation failed: {exc}"}), 502
+        return jsonify({"error": _ai_error_message(exc)}), 502
     if res.error:
-        return jsonify({"error": f"Generation failed: {res.error}"}), 502
+        return jsonify({"error": _ai_error_message(res.error)}), 502
     return jsonify({"tests": res.test_cases or [], "invalid": len(res.invalid or []),
                     "summary": res.summary or {}})
+
+
+def _ai_error_message(err) -> str:
+    """Turn an AI-provider error into a sentence the user can act on (the raw text stays in the log)."""
+    raw = str(err or "")
+    low = raw.lower()
+    hint = " You can still load a test-cases file (step 1 → Load a test-cases file) and run it."
+    if "credit balance is too low" in low:
+        return "Generation failed: the AI provider account has no credit left — add credit to the Anthropic account." + hint
+    if "invalid x-api-key" in low or "authentication_error" in low or "api key" in low and "missing" in low:
+        return "Generation failed: the Anthropic API key is missing or not valid (ANTHROPIC_API_KEY in .env)." + hint
+    if "rate_limit" in low or "429" in low:
+        return "Generation failed: the AI provider is rate-limiting this key — try again in a minute." + hint
+    if "overloaded" in low or "529" in low:
+        return "Generation failed: the AI provider is overloaded — try again shortly." + hint
+    import logging
+    logging.getLogger(__name__).warning("QAX generation error: %s", raw[:500])
+    return f"Generation failed: {raw[:300]}"
 
 
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
@@ -507,7 +526,7 @@ def execute_tests():
     engine = "ui" if str(data.get("engine", "api")).lower() in ("ui", "browser") else "api"
     project = "".join(ch for ch in str(data.get("project", "")) if ch.isalnum() or ch in "-_")
     if not tests:
-        return jsonify({"error": "Generate test cases first."}), 400
+        return jsonify({"error": "Generate or load test cases first."}), 400
     if not url.startswith(("http://", "https://")):
         return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
     plan = _execute_plan(tests, url, read_only, engine)
@@ -522,7 +541,8 @@ def execute_tests():
     try:
         from services.execution_service import ExecutionService
         if engine == "ui":
-            res = _run_browser(cases, url, project)
+            res = _run_browser(cases, url, project,
+                               insecure=str(data.get("insecure", "")).lower() in ("1", "true", "yes", "on"))
         else:
             token = str(data.get("token", "")).strip()
             res = ExecutionService().execute(cases, mode="api", base_url=url,
@@ -533,27 +553,29 @@ def execute_tests():
     out = {"plan": plan, "results": raw.get("results", []), "total": raw.get("total", 0),
            "passed": raw.get("passed", 0), "failed": raw.get("failed", 0),
            "skipped": raw.get("skipped", 0), "errors": raw.get("errors", 0),
-           "not_run": len(plan["not_run"]), "error": res.error}
+           "not_run": len(plan["not_run"]), "writes_sent": raw.get("writes_sent", 0),
+           "error": res.error}
     return (jsonify(out), 502) if res.error else jsonify(out)
 
 
 _BROWSER_LOCK = __import__("threading").Lock()
 
 
-def _run_browser(cases: list, url: str, project: str):
+def _run_browser(cases: list, url: str, project: str, insecure: bool = False):
     """
     One browser run at a time: the UI engine reads the target and the selector project
     from the process environment, so they are set — and restored — under a lock.
     AI healing is forced off for web runs.
     """
     from services.execution_service import ExecutionService
-    keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT")
+    keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT", "QAX_INSECURE")
     with _BROWSER_LOCK:
         saved = {k: os.environ.get(k) for k in keys}
         try:
             os.environ["APP_BASE_URL"] = url
             os.environ["QAX_AI_HEAL"] = "false"
             os.environ["AUTO_BUG_REPORT"] = "false"
+            os.environ["QAX_INSECURE"] = "true" if insecure else "false"
             if project:
                 os.environ["DEFAULT_PROJECT"] = project
             return ExecutionService().execute(cases, mode="ui", headless=True)

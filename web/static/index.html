@@ -353,17 +353,14 @@ No token                    → HTTP 401
     <div class="sec-head">
       <div class="eyebrow">One workflow</div>
       <h2 id="wf-h">Bugs, test cases and tickets in one place</h2>
-      <p class="lead">Scanning and test generation are two ways into the same flow: you review the result, then it goes to the tools your team already uses.</p>
+      <p class="lead">Two tracks into the same flow — the security scan and functional QA (generate, then run): you review what was proven, then it goes to the tools your team already uses.</p>
     </div>
-    <div class="grid g4">
+    <div class="grid g3">
       <div class="card"><div class="ic">SCAN</div><h3 style="margin-top:8px">Prove bugs in the running app</h3>
         <p>Confirmed findings with request and response evidence, a "why it matters" and a fix. Download the report as self-contained HTML or print it to PDF.</p>
         <p><a href="/app#scan">Open the scanner →</a></p></div>
-      <div class="card"><div class="ic">GENERATE</div><h3 style="margin-top:8px">Draft test cases from a story or code</h3>
-        <p>Paste a user story or a function and QAX drafts structured test cases with steps and expected results. They're drafts for a QA engineer to review, not a replacement for one.</p>
-        <p><a href="/app#generate">Generate test cases →</a></p></div>
-      <div class="card"><div class="ic">FUNCTIONAL QA</div><h3 style="margin-top:8px">Run the test cases end to end</h3>
-        <p>QAX runs your test cases against the app in a real browser or over HTTP: PASS / FAIL with step-by-step evidence and a screenshot of every failure. A case that did not fully run is never counted as passed.</p>
+      <div class="card"><div class="ic">FUNCTIONAL QA</div><h3 style="margin-top:8px">Generate the tests, then run them</h3>
+        <p>Paste a user story or a function (or load your own cases) and QAX drafts structured test cases — drafts for a QA engineer to review, not a replacement for one. Then it runs them against your app in a real browser or over HTTP: PASS / FAIL with step-by-step evidence and a screenshot of every failure. A case that did not fully run is never counted as passed.</p>
         <p><a href="/app#functional">Open functional QA →</a></p></div>
       <div class="card"><div class="ic">FILE</div><h3 style="margin-top:8px">Send to Jira, Xray, Zephyr or Excel <span class="status pre">dry run by default</span></h3>
         <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server. Live filing has been exercised on a real Jira Cloud project: only fields the project actually has are sent, repeat scans do not file duplicates, and the evidence is attached.</p></div>
@@ -468,7 +465,7 @@ No token                    → HTTP 401
     <details class="q"><summary>Is it a replacement for a penetration test?</summary><p>No. QAX covers a defined set of bug classes (listed above) automatically and repeatably. Most business-logic flaws and chained attacks still need a human. QAX has a first business-logic check, and more are on the roadmap.</p></details>
     <details class="q"><summary>Do I need an OpenAPI spec or the source code?</summary><p>No, though both help. QAX can scan from a URL alone, using common-path discovery and a UI tour. With source it maps endpoints from the code and checks them against the live app.</p></details>
     <details class="q"><summary>Can it change data on my app?</summary><p>Some probes create disposable records to test access control. They're labelled as writing data, use <code>qax*</code> names, and the report lists what was created and cleaned up. Only scan apps you're allowed to test, ideally staging.</p></details>
-    <details class="q"><summary>What leaves my machine?</summary><p>The scanning engine runs locally. The AI features (deeper investigation, test generation) send prompts to the model provider using your API key. Jira or Xray only receive data if you configure credentials and enable live export.</p></details>
+    <details class="q"><summary>What leaves my machine?</summary><p>The scanning engine and the test runner run locally. The AI features (deeper investigation, test generation) send prompts to the model provider using your API key. Running tests sends nothing to the AI provider unless you turn on AI healing (<code>--ai-heal</code>), which sends the page of a failing step; selector discovery uses AI only with <code>discover --ai</code>. Jira or Xray only receive data if you configure credentials and enable live export.</p></details>
     <details class="q"><summary>Which stacks does it support?</summary><p>QAX has been run on Python (Flask, FastAPI), Node/Express, Go/Gin and Java/Spring apps. The code reader also understands Ruby, PHP, C#, Kotlin, Rust and more, but those have been tested less.</p></details>
     <details class="q"><summary>How much does it cost?</summary><p>Running it locally is free during early access. You pay your model provider for AI features: a quick scan typically costs cents or nothing, and a deep scan has measured around $0.40. Paid plans will come later.</p></details>
   </div>
@@ -481,8 +478,7 @@ No token                    → HTTP 401
     <p class="lead">Scan an app you own and see the confirmed list in about a minute.</p>
     <div class="cta-row">
       <a href="/app#scan" class="btn btn-primary">Scan a running app →</a>
-      <a href="/app#generate" class="btn btn-ghost">Generate test cases</a>
-      <a href="/app#functional" class="btn btn-ghost">Run functional tests</a>
+      <a href="/app#functional" class="btn btn-ghost">Generate &amp; run functional tests</a>
     </div>
   </div>
 </section>
@@ -492,7 +488,7 @@ No token                    → HTTP 401
   <div class="wrap">
     <div><a href="/" class="logo">QA<span>X</span></a>
       <p style="margin-top:12px;max-width:380px">Runtime quality and security proof: scan the running app, prove the bugs, file them where your team works.</p></div>
-    <div><h4>Product</h4><ul><li><a href="/app#scan">Scanner</a></li><li><a href="/app#generate">Test generation</a></li><li><a href="#how">How it works</a></li><li><a href="#evidence">Confirmed vs leads</a></li></ul></div>
+    <div><h4>Product</h4><ul><li><a href="/app#scan">Scanner</a></li><li><a href="/app#functional">Functional QA</a></li><li><a href="#how">How it works</a></li><li><a href="#evidence">Confirmed vs leads</a></li></ul></div>
     <div><h4>Trust</h4><ul><li><a href="#security">Security &amp; privacy</a></li><li><a href="#start">Run locally</a></li><li><a href="#faq">FAQ</a></li></ul></div>
   </div>
 </footer>

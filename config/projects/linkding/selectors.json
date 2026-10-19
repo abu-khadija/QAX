@@ -1,11 +1,7 @@
 {
   "_meta": {
     "auto_discovered": true,
-    "manual_overrides": [
-      "manual.error_hint",
-      "manual.page_main",
-      "manual.search_box"
-    ],
+    "manual_overrides": [],
     "last_discovered": "2026-10-19T17:18:45Z"
   },
   "_comment": "TODO: add selector",
@@ -86,10 +82,5 @@
     "username": "#id_username",
     "password": "#id_password",
     "login_button": "input[type='submit'][value='Login']"
-  },
-  "manual": {
-    "error_hint": ".form-input-hint",
-    "page_main": "main",
-    "search_box": "input[name='q']"
   }
 }

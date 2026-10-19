@@ -7,6 +7,27 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- **Functional QA track** (web: one of two tracks; CLI: `pipeline`, `execute`): generate test cases from a story or
+  code — or load a cases file — review them, preview the run, run them in a real browser (Playwright) or over HTTP,
+  get PASS / FAIL with step evidence and a screenshot of every failure, and send results to Xray as one Test
+  Execution (Xray not yet exercised against a real instance). Plan stage (`--plan-only`), `--base-url`, an HTML/JSON
+  report per run, and the data-changing requests a browser run sent ("not undone").
+- `discover` names page elements without AI (`--ai` lets Claude do it); built-in `page` key for text anywhere on the
+  page; `{{env:QAX_VAR_*}}` values for secrets in case files, masked in results and reports.
+
+### Changed
+- External writes need an explicit opt-in: `pipeline --live`; `execute` files auto-bugs only with `--upload`;
+  `analyze` asks before a live push (`--yes` for CI).
+- A `.env` file fills missing variables but no longer overrides one set in the environment (a `.env` with
+  `DRY_RUN=false` used to override `DRY_RUN=true` from the command line or CI).
+- Browser runs verify TLS certificates unless `--insecure`; AI healing / AI selector fallback only with `--ai-heal`.
+
+### Fixed
+- A case or assertion that did not run/evaluate is SKIP/ERROR, never PASS (UI executor, browser assertions).
+- Browser runs on real apps (linkding): no more false FAILs from checking too early (assertions retried up to
+  `QAX_ASSERT_TIMEOUT_MS`) or from cases sharing one browser session (a fresh one per case).
+- Xray results are attributed to the Jira keys the export created, never to local ids.
+
 - A reachability check before every scan: an address QAX cannot reach is an error with the reason (refused, DNS, timeout,
   certificate) instead of a clean-looking "0 findings" scan. `--insecure` (web: a checkbox) for a self-signed certificate.
 - Web UI: extra headers, endpoint list and example bodies; the scan is streamed over a POST so tokens, cookies and CSRF

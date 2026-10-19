@@ -203,7 +203,8 @@ class DOMAnalyzer:
         the .env file. Reads ANTHROPIC_API_KEY for Claude calls.
         Logs a warning (but never crashes) if any value is missing.
         """
-        load_dotenv(override=True)
+        from core.env_loader import load_env
+        load_env()
 
         self.base_url = os.getenv("APP_BASE_URL", "").rstrip("/")
         self.username = os.getenv("APP_USERNAME", "")

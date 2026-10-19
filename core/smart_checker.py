@@ -45,7 +45,8 @@ from core.skill_library import SkillLibrary
 logger = logging.getLogger(__name__)
 
 # ── Model env vars ─────────────────────────────────────────────────────────────
-load_dotenv(override=True)
+from core.env_loader import load_env
+load_env()
 CLAUDE_MODEL_HEAVY = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 CLAUDE_MODEL_LIGHT = os.getenv("CLAUDE_MODEL_LIGHT", "claude-haiku-4-5-20251001")
 

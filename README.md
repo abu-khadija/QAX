@@ -100,8 +100,14 @@ python main.py execute --file output/pipeline/<run>/test_cases.json --project <y
   to Xray only under the Jira keys the export created — never under local ids.
 * **No page content goes to the AI provider during execution** unless you pass `--ai-heal`
   (selector repair sends the page HTML / a screenshot).
-* The web UI (`python -m web.server` → `/app`, *Generate test cases*) does the same: generate or
-  load a cases JSON, **Preview run**, then **Run tests** with the HTTP or Browser engine.
+* The web UI (`python -m web.server` → `/app`, **Functional QA**) does the same: generate from a story
+  or load a cases JSON, review, **Preview run**, then **Run tests** with the HTTP or Browser engine —
+  or push the cases to Jira/Xray without running them.
+* Selectors: `python main.py discover --url … --page … --project <yours>` names the elements of a page
+  without AI (`--ai` lets Claude name them). To check a text anywhere on the page, use the built-in
+  key `page` (e.g. an error message that only appears after a click).
+* Secrets in cases: `"value": "{{env:QAX_VAR_PASSWORD}}"` types `$QAX_VAR_PASSWORD`; typed secrets and
+  password fields are shown as `••••` in results and reports.
 * Try it with no API key: `python evals/targets/ui_demo_app.py --port 8911`, then run
   `evals/data/ui_demo_cases.json` with `--project uidemo` — 3 PASS, 1 FAIL (a planted bug), 1 SKIP.
 * Xray has **not** been exercised against a real Xray instance yet.

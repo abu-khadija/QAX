@@ -144,13 +144,7 @@ class PlaywrightRunner:
             )
 
             # Create an isolated browser context (fresh cookies/storage per run)
-            self.context = await self.browser.new_context(
-                viewport={"width": 1440, "height": 900},
-                ignore_https_errors=True,   # EXAMPLE RC env may have self-signed certs
-            )
-            self.context.set_default_timeout(DEFAULT_TIMEOUT_MS)
-
-            self.page = await self.context.new_page()
+            await self._open_context()
 
             logger.info(
                 "Browser launched: %s (headless=%s)",
@@ -160,6 +154,39 @@ class PlaywrightRunner:
         except Exception as e:  # noqa: BLE001
             logger.error("Failed to launch browser: %s", e)
             await self.teardown()  # Clean up anything partially created
+
+    async def _open_context(self) -> None:
+        """
+        Open a fresh context + page. TLS certificates are verified unless the
+        operator opted in with QAX_INSECURE=true (`--insecure`) — the same rule as
+        the scan; it used to be ignored silently for every target. Every request
+        that can change data (not GET/HEAD/OPTIONS) is recorded, so a run can say
+        what it sent to the target (see take_writes()).
+        """
+        insecure = os.getenv("QAX_INSECURE", "false").strip().lower() == "true"
+        self.context = await self.browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            ignore_https_errors=insecure,
+        )
+        self.context.set_default_timeout(DEFAULT_TIMEOUT_MS)
+        self._writes = []
+
+        def _on_request(req):
+            try:
+                if req.method.upper() not in ("GET", "HEAD", "OPTIONS"):
+                    from urllib.parse import urlparse
+                    u = urlparse(req.url)
+                    self._writes.append({"method": req.method.upper(),
+                                         "host": u.netloc, "path": u.path or "/"})
+            except Exception:  # noqa: BLE001
+                pass
+        self.context.on("request", _on_request)
+        self.page = await self.context.new_page()
+
+    def take_writes(self) -> list:
+        """Return and clear the write requests (method/host/path) sent since the last call."""
+        out, self._writes = list(getattr(self, "_writes", []) or []), []
+        return out
 
     async def new_session(self) -> bool:
         """
@@ -176,12 +203,7 @@ class PlaywrightRunner:
         try:
             if self.context:
                 await self.context.close()
-            self.context = await self.browser.new_context(
-                viewport={"width": 1440, "height": 900},
-                ignore_https_errors=True,
-            )
-            self.context.set_default_timeout(DEFAULT_TIMEOUT_MS)
-            self.page = await self.context.new_page()
+            await self._open_context()
             return True
         except Exception as e:  # noqa: BLE001
             logger.error("Could not open a fresh browser session: %s", e)

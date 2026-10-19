@@ -48,7 +48,8 @@ class JiraGapAnalyzer:
         Sets self._configured = False if any required credential is missing,
         which causes all subsequent methods to return empty results gracefully.
         """
-        load_dotenv(override=True)
+        from core.env_loader import load_env
+        load_env()
         self.jira_base = os.getenv("JIRA_BASE_URL", "").rstrip("/")
         self.jira_email = os.getenv("JIRA_EMAIL", "")
         self.jira_token = os.getenv("JIRA_API_TOKEN", "")

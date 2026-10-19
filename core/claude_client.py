@@ -63,8 +63,9 @@ class ClaudeClient:
             ValueError: If ANTHROPIC_API_KEY is not set in the environment.
         """
         # Load environment variables from .env file.
-        # override=True ensures .env values win over any empty shell env vars.
-        load_dotenv(override=True)
+        # .env fills missing/empty vars but never overrides one the operator set.
+        from core.env_loader import load_env
+        load_env()
 
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:

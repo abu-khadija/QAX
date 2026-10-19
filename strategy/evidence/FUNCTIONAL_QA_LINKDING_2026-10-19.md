@@ -33,10 +33,17 @@ Both new browser regressions were **mutation-checked**: with the fix disabled, e
 * **Persistence checked in linkding's database**: the bookmark exists with the typed title.
 * n = 1 app, 6 cases, written by the QAX author: this shows the engine can run a real app; it is not a coverage or accuracy claim.
 
-## Still open (not fixed)
+## Follow-up the same day (fixed, re-run)
 
-* **Discovery sees only what is on the page now**: error messages, toasts and result lists that appear after an action need hand-added selectors.
-* **Order dependence on data**: LD-005 (search) relies on the bookmark LD-003 created.
-* **No cleanup / "left on the target" for browser runs** (the scan has one; the browser engine does not).
-* The browser context ignores TLS errors by default (`ignore_https_errors=True`), unlike the scan's opt-in `--insecure`.
-* Not tested: AI-generated cases against this app (no credit), Xray, any second real app.
+| Open item | Fix | Check |
+|---|---|---|
+| Discovery sees only what is on the page now | built-in `page` key: a text check anywhere on the page (errors, toasts, results that appear after an action) | the 3 hand-added selectors were removed; 6/6 PASS with discovered selectors + `page` only |
+| Order dependence on data (LD-005 needed LD-003's bookmark) | LD-005 creates its own bookmark | 6/6 PASS in normal **and reversed** order |
+| No "left on the target" for browser runs | every request that can change data (not GET/HEAD/OPTIONS) is recorded per case and reported ("not undone") | linkding run: 10 writes (6× POST /login/, 3× POST /bookmarks/new, 1× POST /logout/) |
+| TLS errors ignored by default | verified unless `--insecure` (web: a checkbox), like the scan | `test_tls_errors_are_not_ignored_unless_opted_in` |
+| `.env` overrode the operator's environment (why the healer called the AI in the first browser run) | `.env` fills missing/empty variables only | `test_env_file_fills_gaps_but_never_overrides_…` |
+
+## Still open
+
+* QAX does not **undo** UI-created data — it reports what it sent; cleanup is the operator's.
+* Not tested: AI-generated cases against this app (no credit), Xray, a second real app.

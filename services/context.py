@@ -99,7 +99,8 @@ class QAXContext:
         Returns:
             QAXContext: A populated context object.
         """
-        load_dotenv(override=True)
+        from core.env_loader import load_env
+        load_env()
 
         if dry_run is None:
             dry_run = os.getenv("DRY_RUN", "true").strip().lower() == "true"

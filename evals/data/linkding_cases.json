@@ -1,5 +1,5 @@
 {
-  "_comment": "Functional QA on a real app: linkding 1.47.0 (MIT), run locally. Credentials come from QAX_VAR_LD_USER / QAX_VAR_LD_PASSWORD \u2014 never stored here. expected_outcome = linkding's real, manually verified behaviour.",
+  "_comment": "Functional QA on a real app: linkding 1.47.0 (MIT), run locally. Credentials come from QAX_VAR_LD_USER / QAX_VAR_LD_PASSWORD \u2014 never stored here. expected_outcome = linkding's real, manually verified behaviour. Each case stands alone (creates its own data); text checks use the built-in `page` key, so only discovered selectors are needed.",
   "test_cases": [
     {
       "test_case_id": "LD-001",
@@ -69,7 +69,7 @@
         },
         {
           "playwright_action": "assert",
-          "selector_key": "error_hint",
+          "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "didn't match",
           "step_number": 5
@@ -129,7 +129,7 @@
         },
         {
           "playwright_action": "assert",
-          "selector_key": "page_main",
+          "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "QAX UI test bookmark",
           "step_number": 9
@@ -185,7 +185,7 @@
     },
     {
       "test_case_id": "LD-005",
-      "title": "Search finds the bookmark",
+      "title": "Search finds a bookmark it created",
       "module": "Bookmarks",
       "priority": "high",
       "expected_outcome": "PASS",
@@ -214,15 +214,37 @@
         },
         {
           "playwright_action": "navigate",
-          "value": "/bookmarks?q=QAX+UI+test",
+          "value": "/bookmarks/new",
           "step_number": 5
         },
         {
-          "playwright_action": "assert",
-          "selector_key": "page_main",
-          "assertion_type": "text",
-          "assertion_value": "QAX UI test bookmark",
+          "playwright_action": "fill",
+          "selector_key": "url",
+          "value": "http://127.0.0.1:9/qax-search-target",
           "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "QAX search target",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/bookmarks?q=QAX+search+target",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "QAX search target",
+          "step_number": 10
         }
       ]
     },

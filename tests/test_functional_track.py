@@ -543,3 +543,40 @@ def test_deterministic_labels_name_fields_buttons_and_links_without_ai():
     assert sel["search"] == "#q" and sel["sort_select"] == "select[name='sort']"
     assert sel["add_bookmark_link_2"] == "a[aria-label='Add bookmark']"   # 2nd element, own key
     assert len(sel) == 7                                     # the nameless div is skipped
+
+
+def test_env_file_fills_gaps_but_never_overrides_what_the_operator_set(tmp_path, monkeypatch):
+    """A .env with DRY_RUN=false used to override DRY_RUN=true set on the command line / in CI."""
+    from core.env_loader import load_env
+    env = tmp_path / ".env"
+    env.write_text("DRY_RUN=false\nQAX_T_KEY=from-file\nQAX_T_EMPTY=filled\n")
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.delenv("QAX_T_KEY", raising=False)
+    monkeypatch.setenv("QAX_T_EMPTY", "")
+    applied = load_env(str(env))
+    import os
+    assert os.environ["DRY_RUN"] == "true"                      # the operator's choice wins
+    assert os.environ["QAX_T_KEY"] == "from-file" and os.environ["QAX_T_EMPTY"] == "filled"
+    assert "DRY_RUN" not in applied
+
+
+def test_the_app_has_two_tracks_and_generation_lives_inside_functional_qa(client):
+    html = client.get("/app").get_data(as_text=True)
+    assert 'id="mode-scan"' in html and 'id="mode-func"' in html and 'id="mode-gen"' not in html
+    assert 'id="panel-gen"' not in html and 'id="src-gen"' in html and 'id="src-file"' in html
+    assert "setSource(" in html and "if(m==='gen'){ m='func'; setSource('gen'); }" in html  # old links
+    landing = client.get("/").get_data(as_text=True)
+    assert "/app#functional" in landing and "/app#generate" not in landing
+
+
+def test_generation_errors_are_explained_in_plain_words(client, monkeypatch):
+    import services.generation_service as gs
+    from services.results import GenerationResult
+
+    def generate(self, source, options=None, progress=None):
+        return GenerationResult(source=source, error="Error code: 400 - {'message': 'Your credit balance "
+                                                     "is too low to access the Anthropic API.'}")
+    monkeypatch.setattr(gs.GenerationService, "generate", generate)
+    d = client.post("/api/generate", json={"story": "s"}).get_json()
+    assert "no credit left" in d["error"] and "Load a test-cases file" in d["error"]
+    assert "{'message'" not in d["error"]

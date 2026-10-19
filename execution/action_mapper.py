@@ -245,6 +245,13 @@ class ActionMapper:
                   "Level 3 (AI visual)"  — found via screenshot + Claude vision
                   "not found"            — all three levels exhausted
         """
+        # ── Level 0: built-in key — the whole page ─────────────────────────
+        # Text that only appears after an action (an error, a toast, a result)
+        # cannot be discovered from a static page; "page" checks it anywhere.
+        if (element_name or "").strip().lower() in ("page", "page_text", "body") \
+                and not self.find_selector(element_name):
+            return "body", "Level 0 (built-in: page)"
+
         # ── Level 1: Static selectors.json ────────────────────────────────
         selector = self.find_selector(element_name)
         if selector and not selector.startswith("TODO"):

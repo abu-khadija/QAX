@@ -19,17 +19,6 @@
         "8911"
       ],
       "port": 8911
-    },
-    {
-      "name": "qax-web-8901",
-      "runtimeExecutable": "/usr/bin/env",
-      "runtimeArgs": [
-        "QAX_WEB_PORT=8901",
-        "./.venv-exec/bin/python",
-        "-m",
-        "web.server"
-      ],
-      "port": 8901
     }
   ]
 }

@@ -231,3 +231,42 @@ def test_discovering_the_login_page_records_the_login_form(ui_app, monkeypatch):
     monkeypatch.setenv("APP_PASSWORD", "demo123")
     sel = _discover(f"http://127.0.0.1:{ui_app}/login", "login")
     assert {"#username", "#password", "#login-btn"} <= set(sel.values()), sel
+
+
+def test_page_key_checks_text_anywhere_and_writes_are_recorded(ui_app):
+    """No selector for an error that only appears after a click → the built-in `page` key;
+    and the run says which data-changing requests it sent (QAX does not undo them)."""
+    case = {"test_case_id": "P", "title": "p", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "username", "value": "demo"},
+        {"step_number": 3, "playwright_action": "fill", "selector_key": "password", "value": "nope"},
+        {"step_number": 4, "playwright_action": "click", "selector_key": "login_button"},
+        {"step_number": 5, "playwright_action": "assert", "selector_key": "page",
+         "assertion_type": "text", "assertion_value": "Invalid username or password"}]}
+    batch = _run([case])
+    r = batch["results"][0]
+    assert r["status"] == "PASS", r["steps"]
+    assert r["writes"] == [{"method": "POST", "host": f"127.0.0.1:{ui_app}", "path": "/login"}]
+    assert batch["writes_sent"] == 1
+
+
+def test_tls_errors_are_not_ignored_unless_opted_in(monkeypatch):
+    import execution.playwright_runner as pr
+    seen = []
+
+    class _Ctx:
+        def set_default_timeout(self, ms): pass
+        def on(self, ev, fn): pass
+        async def new_page(self): return object()
+
+    class _Browser:
+        async def new_context(self, **kw):
+            seen.append(kw.get("ignore_https_errors"))
+            return _Ctx()
+    r = pr.PlaywrightRunner()
+    r.browser = _Browser()
+    monkeypatch.delenv("QAX_INSECURE", raising=False)
+    asyncio.run(r._open_context())
+    monkeypatch.setenv("QAX_INSECURE", "true")
+    asyncio.run(r._open_context())
+    assert seen == [False, True]
