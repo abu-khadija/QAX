@@ -919,6 +919,13 @@ def run_execute_command() -> None:
         help="Stop execution after the first FAIL result.",
     )
     parser.add_argument(
+        "--ai-heal",
+        action="store_true",
+        default=False,
+        help="Let QAX send the page HTML / a screenshot to the AI provider to repair a "
+             "failing selector (off by default: nothing leaves the machine).",
+    )
+    parser.add_argument(
         "--output",
         metavar="PATH",
         default=None,
@@ -933,6 +940,8 @@ def run_execute_command() -> None:
     )
 
     args = parser.parse_args(sys.argv[2:])
+    if args.ai_heal:
+        os.environ["QAX_AI_HEAL"] = "true"
 
     # ── Set project env so ActionMapper can resolve the correct selectors ──
     if args.project:
@@ -1842,6 +1851,11 @@ def run_pipeline_command() -> None:
         help="Show the browser during UI execution (overrides --headless).",
     )
     parser.add_argument(
+        "--ai-heal", action="store_true", default=False,
+        help="UI execution may send page HTML / screenshots to the AI provider to repair "
+             "failing selectors (off by default).",
+    )
+    parser.add_argument(
         "--base-url", default=None,
         help="The running app to execute against (default: APP_BASE_URL from .env).",
     )
@@ -1866,6 +1880,8 @@ def run_pipeline_command() -> None:
     args = parser.parse_args(sys.argv[2:])
     # External writes need BOTH the operator's --live and an .env that allows them.
     args.dry_run = not args.live or os.getenv("DRY_RUN", "true").lower() == "true"
+    if args.ai_heal:
+        os.environ["QAX_AI_HEAL"] = "true"
     if args.live and args.dry_run:
         print("  [QAX] --live ignored: DRY_RUN=true in .env — nothing will be written.")
 

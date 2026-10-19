@@ -355,13 +355,16 @@ No token                    → HTTP 401
       <h2 id="wf-h">Bugs, test cases and tickets in one place</h2>
       <p class="lead">Scanning and test generation are two ways into the same flow: you review the result, then it goes to the tools your team already uses.</p>
     </div>
-    <div class="grid g3">
+    <div class="grid g4">
       <div class="card"><div class="ic">SCAN</div><h3 style="margin-top:8px">Prove bugs in the running app</h3>
         <p>Confirmed findings with request and response evidence, a "why it matters" and a fix. Download the report as self-contained HTML or print it to PDF.</p>
         <p><a href="/app#scan">Open the scanner →</a></p></div>
       <div class="card"><div class="ic">GENERATE</div><h3 style="margin-top:8px">Draft test cases from a story or code</h3>
         <p>Paste a user story or a function and QAX drafts structured test cases with steps and expected results. They're drafts for a QA engineer to review, not a replacement for one.</p>
         <p><a href="/app#generate">Generate test cases →</a></p></div>
+      <div class="card"><div class="ic">FUNCTIONAL QA</div><h3 style="margin-top:8px">Run the test cases end to end</h3>
+        <p>QAX runs your test cases against the app in a real browser or over HTTP: PASS / FAIL with step-by-step evidence and a screenshot of every failure. A case that did not fully run is never counted as passed.</p>
+        <p><a href="/app#functional">Open functional QA →</a></p></div>
       <div class="card"><div class="ic">FILE</div><h3 style="margin-top:8px">Send to Jira, Xray, Zephyr or Excel <span class="status pre">dry run by default</span></h3>
         <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server. Live filing has been exercised on a real Jira Cloud project: only fields the project actually has are sent, repeat scans do not file duplicates, and the evidence is attached.</p></div>
     </div>
@@ -479,6 +482,7 @@ No token                    → HTTP 401
     <div class="cta-row">
       <a href="/app#scan" class="btn btn-primary">Scan a running app →</a>
       <a href="/app#generate" class="btn btn-ghost">Generate test cases</a>
+      <a href="/app#functional" class="btn btn-ghost">Run functional tests</a>
     </div>
   </div>
 </section>

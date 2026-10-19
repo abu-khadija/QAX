@@ -79,14 +79,36 @@ scanned with 0 false alarms — QAX raised false alarms on two of them first; th
 
 ---
 
-## Test-case generation (the original workflow)
+## Functional QA: generate → run in a real browser → report → Xray
 
 ```bash
-pip install -r requirements.txt          # full set (test generation, execution, web UI)
-cp .env.example .env                     # fill in ANTHROPIC_API_KEY at minimum
-python main.py check-connection
-python main.py analyze --file your_file.cs --project example --dry-run   # nothing sent to Jira
-python main.py analyze --file your_file.cs --project example             # push to Xray
+pip install -r requirements.txt && playwright install chromium   # full set + the browser
+cp .env.example .env                     # ANTHROPIC_API_KEY for generation
+python main.py pipeline --input story --source "As a user I can reset my password" \
+    --exec-mode ui --base-url http://localhost:8000 --plan-only   # 1. see the plan first
+python main.py pipeline --input story --source "…" --exec-mode ui --base-url http://localhost:8000
+python main.py execute --file output/pipeline/<run>/test_cases.json --project <yours>  # re-run
+```
+
+* Generated cases are **AI proposals until they run**. A case whose steps did not all run is
+  **SKIP/ERROR, never PASS**. Every run writes the cases, the raw results and an HTML report
+  (screenshot + page snapshot of each failure) to `output/pipeline/<timestamp>/`.
+* Engines: `--exec-mode api` (HTTP, cases with `api_steps`), `ui` (Playwright; selectors from
+  `config/projects/<project>/selectors.json`), `both`.
+* **Nothing is written outside your machine without `--live`** (and `DRY_RUN` not `true`): test
+  issues in Xray/Zephyr, results as one Xray Test Execution, auto-filed Jira bugs. Results go
+  to Xray only under the Jira keys the export created — never under local ids.
+* **No page content goes to the AI provider during execution** unless you pass `--ai-heal`
+  (selector repair sends the page HTML / a screenshot).
+* The web UI (`python -m web.server` → `/app`, *Generate test cases*) does the same: generate or
+  load a cases JSON, **Preview run**, then **Run tests** with the HTTP or Browser engine.
+* Try it with no API key: `python evals/targets/ui_demo_app.py --port 8911`, then run
+  `evals/data/ui_demo_cases.json` with `--project uidemo` — 3 PASS, 1 FAIL (a planted bug), 1 SKIP.
+* Xray has **not** been exercised against a real Xray instance yet.
+
+```bash
+python main.py analyze --file your_file.cs --project example --dry-run   # generate only
+python main.py analyze --file your_file.cs --project example --yes       # + push to Xray (asks otherwise)
 ```
 
 ---

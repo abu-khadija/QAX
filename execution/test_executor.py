@@ -47,6 +47,15 @@ except ImportError:
     PlaywrightRunner = None  # type: ignore[assignment,misc]
 
 
+def ai_assist_enabled() -> bool:
+    """
+    True only when the operator opted in (QAX_AI_HEAL=true or --ai-heal). AI healing
+    and the AI visual selector fallback send page HTML / a screenshot of the app to the
+    AI provider, so they never run just because an API key happens to be in .env.
+    """
+    return os.getenv("QAX_AI_HEAL", "false").strip().lower() == "true"
+
+
 class TestExecutor:
     """
     Orchestrates Playwright execution of EXAMPLE QA test cases.
@@ -452,6 +461,13 @@ class TestExecutor:
             result["healed_selector"] = None
 
             if result["status"] != "FAIL":
+                return result
+
+            # ── AI healing sends the page HTML to the AI provider: opt-in only ──
+            if not ai_assist_enabled():
+                logger.info("[%s] Step %s FAILED — AI healing off (QAX_AI_HEAL=true / --ai-heal "
+                            "to send the page HTML to the AI provider for a selector fix)",
+                            tc_id, step_num)
                 return result
 
             # ── Step failed — attempt AI healing ───────────────────────────

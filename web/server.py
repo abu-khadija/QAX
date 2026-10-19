@@ -444,17 +444,31 @@ def generate():
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
 
-def _execute_plan(tests: list, url: str, read_only: bool) -> dict:
+def _execute_plan(tests: list, url: str, read_only: bool, engine: str = "api") -> dict:
     """
-    What /api/execute would run: each generated case is runnable over HTTP only when it
-    has api_steps; in read-only mode only cases whose steps are all GET/HEAD/OPTIONS.
-    Everything else is listed as not run, with the reason — never as passed.
+    What /api/execute would run.
+
+    api engine: a case is runnable only when it has api_steps; in read-only mode only
+    cases whose steps are all GET/HEAD/OPTIONS. ui (browser) engine: a case is runnable
+    when it has automation or manual steps; it clicks and submits forms, so it never runs
+    in read-only mode. Everything else is listed as not run, with the reason — never passed.
     """
     runnable, not_run = [], []
     for i, tc in enumerate(tests):
         if not isinstance(tc, dict):
             continue
         tc.setdefault("test_case_id", f"TC-WEB-{i + 1:03d}")
+        if engine == "ui":
+            has_steps = tc.get("automation_steps") or tc.get("manual_steps") or tc.get("steps")
+            if not has_steps:
+                not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
+                                "reason": "no steps"})
+            elif read_only:
+                not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
+                                "reason": "read-only: the browser engine clicks and submits forms"})
+            else:
+                runnable.append(tc)
+            continue
         steps = tc.get("api_steps") or []
         if not steps:
             not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
@@ -468,30 +482,35 @@ def _execute_plan(tests: list, url: str, read_only: bool) -> dict:
                             "reason": f"read-only: would send {', '.join(sorted(set(writes)))}"})
             continue
         runnable.append(tc)
-    return {"url": url, "read_only": read_only, "engine": "api",
+    return {"url": url, "read_only": read_only, "engine": engine,
             "runnable": [{"test_case_id": t["test_case_id"], "title": t.get("title", ""),
-                          "steps": len(t.get("api_steps") or [])} for t in runnable],
+                          "steps": len(t.get("api_steps") or t.get("automation_steps")
+                                       or t.get("manual_steps") or [])} for t in runnable],
             "not_run": not_run, "_cases": runnable}
 
 
 @app.post("/api/execute")
 def execute_tests():
     """
-    Run generated test cases against the running app over HTTP (API engine) and return
-    per-case verdicts with the request/response evidence. Same gates as a scan: the
-    caller must confirm authorization; read-only is honoured; the API runner's egress
-    boundary keeps every request on the target origin. `preview: true` returns the
-    plan only (nothing is sent). Browser (UI) execution stays on the CLI.
+    Run generated test cases against the running app and return per-case verdicts with
+    evidence. engine "api" = HTTP requests; engine "ui" = a real headless browser
+    (Playwright), with selectors from config/projects/<project>/selectors.json. Same gates
+    as a scan: the caller must confirm authorization; read-only is honoured (the browser
+    engine does not run in read-only); the API runner keeps every request on the target
+    origin. AI healing stays off (no page content leaves the machine). `preview: true`
+    returns the plan only (nothing is sent).
     """
     data = request.get_json(force=True, silent=True) or {}
     tests = data.get("tests") or []
     url = str(data.get("url", "")).strip().rstrip("/")
     read_only = str(data.get("read_only", "true")).lower() not in ("0", "false", "no", "off")
+    engine = "ui" if str(data.get("engine", "api")).lower() in ("ui", "browser") else "api"
+    project = "".join(ch for ch in str(data.get("project", "")) if ch.isalnum() or ch in "-_")
     if not tests:
         return jsonify({"error": "Generate test cases first."}), 400
     if not url.startswith(("http://", "https://")):
         return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
-    plan = _execute_plan(tests, url, read_only)
+    plan = _execute_plan(tests, url, read_only, engine)
     cases = plan.pop("_cases")
     if data.get("preview"):
         return jsonify({"plan": plan})
@@ -502,9 +521,12 @@ def execute_tests():
                         "not_run": len(plan["not_run"])})
     try:
         from services.execution_service import ExecutionService
-        token = str(data.get("token", "")).strip()
-        res = ExecutionService().execute(cases, mode="api", base_url=url,
-                                         auth={"token": token} if token else None)
+        if engine == "ui":
+            res = _run_browser(cases, url, project)
+        else:
+            token = str(data.get("token", "")).strip()
+            res = ExecutionService().execute(cases, mode="api", base_url=url,
+                                             auth={"token": token} if token else None)
     except Exception as exc:
         return jsonify({"error": f"Execution failed: {exc}", "plan": plan}), 502
     raw = res.raw or {}
@@ -515,11 +537,45 @@ def execute_tests():
     return (jsonify(out), 502) if res.error else jsonify(out)
 
 
+_BROWSER_LOCK = __import__("threading").Lock()
+
+
+def _run_browser(cases: list, url: str, project: str):
+    """
+    One browser run at a time: the UI engine reads the target and the selector project
+    from the process environment, so they are set — and restored — under a lock.
+    AI healing is forced off for web runs.
+    """
+    from services.execution_service import ExecutionService
+    keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT")
+    with _BROWSER_LOCK:
+        saved = {k: os.environ.get(k) for k in keys}
+        try:
+            os.environ["APP_BASE_URL"] = url
+            os.environ["QAX_AI_HEAL"] = "false"
+            os.environ["AUTO_BUG_REPORT"] = "false"
+            if project:
+                os.environ["DEFAULT_PROJECT"] = project
+            return ExecutionService().execute(cases, mode="ui", headless=True)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
 @app.get("/api/config")
 def ui_config():
     """What the UI may offer: whether live export is enabled server-side (never a secret)."""
+    try:
+        from execution.playwright_runner import PLAYWRIGHT_AVAILABLE
+    except Exception:  # noqa: BLE001
+        PLAYWRIGHT_AVAILABLE = False
     return jsonify({"live_export": os.getenv("QAX_ALLOW_LIVE_EXPORT", "false").lower() == "true",
-                    "token_required": bool(os.getenv("QAX_API_TOKEN", ""))})
+                    "token_required": bool(os.getenv("QAX_API_TOKEN", "")),
+                    "browser": bool(PLAYWRIGHT_AVAILABLE),
+                    "project": os.getenv("DEFAULT_PROJECT", "")})
 
 
 _EXPORT_TARGETS = ("xray", "zephyr", "excel", "csv", "memory")

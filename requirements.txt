@@ -22,7 +22,7 @@ requests==2.34.2
 # NOTE: Playwright requires Python 3.11 or 3.12 (not 3.14 yet).
 # If you want screenshot support, install Python 3.12 from python.org
 # then run: pip install playwright==1.44.0 && playwright install chromium
-# playwright==1.44.0   ← uncomment when on Python 3.11/3.12
+playwright==1.44.0     # browser execution; then: playwright install chromium
 
 # ── Async test support (for Playwright async API) ────────────────────────────
 pytest-asyncio==1.4.0

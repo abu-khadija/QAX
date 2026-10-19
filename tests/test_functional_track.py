@@ -460,10 +460,12 @@ def test_generate_goes_through_the_validating_generation_service(client, monkeyp
 
 
 def test_ui_config_and_page_wire_execution_token_and_honest_export(client, monkeypatch):
-    assert client.get("/api/config").get_json() == {"live_export": False, "token_required": False}
+    cfg = client.get("/api/config").get_json()
+    assert cfg["live_export"] is False and cfg["token_required"] is False and "browser" in cfg
     html = client.get("/app").get_data(as_text=True)
     for needle in ("/api/execute", "runTests(", "X-QAX-Token", "AI proposal · not run",
-                   "QAX_ALLOW_LIVE_EXPORT", "dry_run:!live", "tc.manual_steps"):
+                   "QAX_ALLOW_LIVE_EXPORT", "dry_run:!live", "tc.manual_steps",
+                   'id="exengine"', "loadTests(", "engine:$('exengine').value"):
         assert needle in html, needle
     assert "Add your Jira/Xray credentials to <code>.env</code> to file for real" not in html
 
@@ -475,3 +477,48 @@ def test_api_token_gate_covers_the_new_routes(monkeypatch):
     assert c.get("/api/config").status_code == 401
     assert c.post("/api/execute", json={}).status_code == 401
     assert c.get("/api/config", headers={"X-QAX-Token": "sekret"}).status_code == 200
+
+
+def test_browser_engine_never_runs_in_read_only_and_needs_steps(client):
+    cases = [{"title": "ui", "automation_steps": [{"playwright_action": "navigate", "value": "/"}]},
+             {"title": "empty"}]
+    plan = client.post("/api/execute", json={"tests": cases, "url": "http://app.local", "engine": "ui",
+                                             "preview": True, "read_only": True}).get_json()["plan"]
+    assert plan["engine"] == "ui" and plan["runnable"] == []
+    assert {n["title"]: n["reason"] for n in plan["not_run"]} == {
+        "ui": "read-only: the browser engine clicks and submits forms", "empty": "no steps"}
+    plan = client.post("/api/execute", json={"tests": cases, "url": "http://app.local", "engine": "ui",
+                                             "preview": True, "read_only": False}).get_json()["plan"]
+    assert [x["title"] for x in plan["runnable"]] == ["ui"]
+
+
+def test_web_browser_run_restores_env_and_forces_ai_healing_off(client, monkeypatch):
+    import os
+
+    import services.execution_service as es
+    from services.results import ExecutionResult
+    seen = {}
+
+    def execute(self, cases, **kw):
+        seen.update(kw, heal=os.environ.get("QAX_AI_HEAL"), base=os.environ.get("APP_BASE_URL"),
+                    proj=os.environ.get("DEFAULT_PROJECT"))
+        return ExecutionResult(mode="ui", raw={"total": 1, "passed": 1, "results": []})
+    monkeypatch.setattr(es.ExecutionService, "execute", execute)
+    monkeypatch.setenv("QAX_AI_HEAL", "true")
+    monkeypatch.setenv("APP_BASE_URL", "http://before")
+    r = client.post("/api/execute", json={
+        "tests": [{"title": "t", "manual_steps": [{"action": "open /"}]}], "url": "http://app.local",
+        "engine": "ui", "project": "uidemo/../x", "read_only": False, "authorized": True})
+    assert r.status_code == 200
+    assert seen["mode"] == "ui" and seen["heal"] == "false" and seen["base"] == "http://app.local"
+    assert seen["proj"] == "uidemox"                                  # path characters stripped
+    assert os.environ["QAX_AI_HEAL"] == "true" and os.environ["APP_BASE_URL"] == "http://before"
+
+
+def test_ai_healing_is_off_unless_opted_in(monkeypatch):
+    from execution.test_executor import ai_assist_enabled
+    monkeypatch.delenv("QAX_AI_HEAL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert ai_assist_enabled() is False
+    monkeypatch.setenv("QAX_AI_HEAL", "true")
+    assert ai_assist_enabled() is True

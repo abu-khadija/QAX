@@ -4,8 +4,32 @@
     {
       "name": "qax-web",
       "runtimeExecutable": "./.venv-exec/bin/python",
-      "runtimeArgs": ["-m", "web.server"],
+      "runtimeArgs": [
+        "-m",
+        "web.server"
+      ],
       "port": 8900
+    },
+    {
+      "name": "ui-demo-app",
+      "runtimeExecutable": "./.venv-exec/bin/python",
+      "runtimeArgs": [
+        "evals/targets/ui_demo_app.py",
+        "--port",
+        "8911"
+      ],
+      "port": 8911
+    },
+    {
+      "name": "qax-web-8901",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "QAX_WEB_PORT=8901",
+        "./.venv-exec/bin/python",
+        "-m",
+        "web.server"
+      ],
+      "port": 8901
     }
   ]
 }

@@ -317,6 +317,8 @@ class QAXPipeline:
                   target base URL, export target, whether writes are live, and
                   missing prerequisites. Never raises.
         """
+        import os
+
         cases = list(test_cases or [])
         api_ready = sum(1 for tc in cases if tc.get("api_steps"))
         ui_ready = sum(1 for tc in cases if tc.get("automation_steps")
@@ -345,6 +347,9 @@ class QAXPipeline:
         if self.exec_mode in ("ui", "both"):
             writes.append("auto-file a Jira bug per UI failure when AUTO_BUG_REPORT=true"
                           + ("" if live else " (dry run — drafted only)"))
+            if os.getenv("QAX_AI_HEAL", "false").strip().lower() == "true":
+                writes.append("AI healing ON: page HTML / screenshots of failing steps are "
+                              "sent to the AI provider")
         return {
             "cases": len(cases), "api_executable": api_ready, "ui_executable": ui_ready,
             "exec_mode": self.exec_mode, "base_url": self.base_url or None,

@@ -254,7 +254,9 @@ class ActionMapper:
                 import anthropic as _anthropic
                 _api_key = os.getenv("ANTHROPIC_API_KEY", "")
                 _model = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
-                if _api_key:
+                # A screenshot of the app goes to the AI provider: opt-in only.
+                _opted_in = os.getenv("QAX_AI_HEAL", "false").strip().lower() == "true"
+                if _api_key and _opted_in:
                     screenshot_bytes = await playwright_page.screenshot()
                     screenshot_b64 = base64.b64encode(screenshot_bytes).decode()
                     client = _anthropic.Anthropic(api_key=_api_key)
@@ -740,7 +742,7 @@ class ActionMapper:
                 check = await self._check_automation_assertion(
                     page, assertion_type, assertion_val, base_result["selector_used"]
                 )
-                if check["status"] == "FAIL":
+                if check["status"] != "PASS":      # FAIL, or a check that never ran
                     base_result.update(check)
 
         except Exception as e:  # noqa: BLE001
@@ -784,7 +786,8 @@ class ActionMapper:
         try:
             if assertion_type == "url":
                 if not assertion_value:
-                    return {"status": "PASS", "actual_result": f"URL is: {page.url}"}
+                    return {"status": "SKIP",
+                            "actual_result": f"URL assertion not evaluated — no expected value (URL is {page.url})"}
                 if assertion_value.lower() in page.url.lower():
                     return {"status": "PASS", "actual_result": f"URL contains '{assertion_value}'"}
                 return {
@@ -800,8 +803,8 @@ class ActionMapper:
             # instead of emitting a false "element not found" failure.
             if not selector or "TODO" in selector:
                 return {
-                    "status": "PASS",
-                    "actual_result": f"Assertion '{assertion_type}' skipped — no resolvable selector",
+                    "status": "SKIP",
+                    "actual_result": f"Assertion '{assertion_type}' not evaluated — no resolvable selector",
                 }
 
             element = await page.query_selector(selector)
@@ -823,7 +826,10 @@ class ActionMapper:
 
             if assertion_type == "text":
                 actual = await element.inner_text()
-                if not assertion_value or assertion_value.lower() in actual.lower():
+                if not assertion_value:
+                    return {"status": "SKIP",
+                            "actual_result": f"Text assertion not evaluated — no expected value (text: '{actual[:80]}')"}
+                if assertion_value.lower() in actual.lower():
                     return {"status": "PASS", "actual_result": f"Text OK: '{actual[:80]}'"}
                 return {
                     "status": "FAIL",
@@ -831,13 +837,16 @@ class ActionMapper:
                     "error": "Text assertion failed",
                 }
 
-            return {"status": "PASS", "actual_result": f"Assertion '{assertion_type}' noted"}
+            return {"status": "SKIP",
+                    "actual_result": f"Assertion type '{assertion_type}' not supported — not evaluated"}
 
         except Exception as e:  # noqa: BLE001
-            # Never let an assertion crash the step — note it and move on.
+            # Never let an assertion crash the step — but an assertion that could not
+            # run proved nothing, so it is an ERROR, never a PASS.
             return {
-                "status": "PASS",
-                "actual_result": f"Assertion '{assertion_type}' could not be evaluated ({str(e)[:80]})",
+                "status": "ERROR",
+                "actual_result": f"Assertion '{assertion_type}' could not be evaluated",
+                "error": str(e)[:200],
             }
 
     async def _run_assertion(
@@ -907,12 +916,12 @@ class ActionMapper:
                         "error": "Visibility assertion failed",
                     }
 
-            # Can't determine assertion — pass with note
+            # Can't determine the assertion — it was not checked, so it is not a pass
             return {
-                "status": "PASS",
+                "status": "SKIP",
                 "actual_result": (
-                    f"Assertion skipped (selector not found for '{element_name}'). "
-                    "Marked PASS pending selector configuration."
+                    f"Assertion not evaluated (no selector for '{element_name}'). "
+                    "Add it to the project's selectors.json."
                 ),
             }
 

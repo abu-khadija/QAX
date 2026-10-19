@@ -1,0 +1,18 @@
+{
+  "_meta": {"auto_discovered": false, "manual_overrides": []},
+  "_comment": "Selectors for evals/targets/ui_demo_app.py — the browser-engine demo app.",
+  "login": {
+    "username": "#username",
+    "password": "#password",
+    "login_button": "#login-btn",
+    "error_message": "#error"
+  },
+  "dashboard": {
+    "welcome_heading": "#welcome",
+    "note_input": "#note-input",
+    "add_note_button": "#add-note-btn",
+    "note_count": "#note-count",
+    "notes_list": "#notes",
+    "logout_link": "#logout-link"
+  }
+}

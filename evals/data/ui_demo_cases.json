@@ -1,0 +1,226 @@
+{
+  "_comment": "Browser-engine positive control for evals/targets/ui_demo_app.py. expected_outcome is the truth for each case.",
+  "test_cases": [
+    {
+      "test_case_id": "TC-UI-001",
+      "title": "Valid login opens the dashboard",
+      "module": "Notes",
+      "test_type": "functional",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "demo",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "demo123",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "welcome_heading",
+          "assertion_type": "text",
+          "assertion_value": "Welcome, demo",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/dashboard",
+          "step_number": 6
+        }
+      ]
+    },
+    {
+      "test_case_id": "TC-UI-002",
+      "title": "Wrong password shows an error and stays on login",
+      "module": "Notes",
+      "test_type": "functional",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "demo",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "wrong",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "error_message",
+          "assertion_type": "text",
+          "assertion_value": "Invalid username or password",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "TC-UI-003",
+      "title": "Adding a note lists it",
+      "module": "Notes",
+      "test_type": "functional",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "demo",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "demo123",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "note_input",
+          "value": "buy milk",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_note_button",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "notes_list",
+          "assertion_type": "text",
+          "assertion_value": "buy milk",
+          "step_number": 7
+        }
+      ]
+    },
+    {
+      "test_case_id": "TC-UI-004",
+      "title": "An empty note is rejected with a message",
+      "module": "Notes",
+      "test_type": "functional",
+      "priority": "high",
+      "expected_outcome": "FAIL (planted bug)",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "demo",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "demo123",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "note_input",
+          "value": "",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_note_button",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "error_message",
+          "assertion_type": "text",
+          "assertion_value": "Note cannot be empty",
+          "step_number": 7
+        }
+      ]
+    },
+    {
+      "test_case_id": "TC-UI-005",
+      "title": "A step QAX cannot run is not counted as a pass",
+      "module": "Notes",
+      "test_type": "functional",
+      "priority": "high",
+      "expected_outcome": "SKIP",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "demo",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "demo123",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "hover",
+          "selector_key": "logout_link",
+          "step_number": 5
+        }
+      ]
+    }
+  ]
+}
