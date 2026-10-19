@@ -163,10 +163,18 @@ def page_template(url: str) -> str:
     /bookmarks/2/edit?return_url=… and /bookmarks/1/edit are the same page
     (/bookmarks/{id}/edit), and ?page=1 / ?details=2 views do not use up the budget.
     """
-    path = urlparse(url).path.rstrip("/") or "/"
-    parts = [("{id}" if re.fullmatch(r"\d+|[0-9a-f]{8,}(-[0-9a-f]{4,})*", seg, re.I) else seg)
-             for seg in path.split("/")]
-    return "/".join(parts) or "/"
+    u = urlparse(url)
+
+    def _tpl(path: str) -> str:
+        path = path.rstrip("/") or "/"
+        parts = [("{id}" if re.fullmatch(r"\d+|[0-9a-f]{8,}(-[0-9a-f]{4,})*|[a-z0-9]{15}", seg, re.I)
+                  and re.search(r"\d", seg) else seg) for seg in path.split("/")]
+        return "/".join(parts) or "/"
+    out = _tpl(u.path)
+    # Single-page apps route in the fragment: /_/#/collections is its own page.
+    if u.fragment.startswith("/"):
+        out += "#" + _tpl(u.fragment.split("?")[0])
+    return out
 
 
 def is_risky_link(href: str, text: str = "") -> bool:
@@ -176,6 +184,10 @@ def is_risky_link(href: str, text: str = "") -> bool:
     p = urlparse(href or "")
     parts = [seg for seg in p.path.split("/") if seg]
     parts += [v for kv in p.query.split("&") for v in kv.split("=")[1:] if v]
+    if p.fragment.startswith("/"):                       # SPA route: #/settings/export-collections
+        frag = urlparse(p.fragment)
+        parts += [seg for seg in frag.path.split("/") if seg]
+        parts += [v for kv in frag.query.split("&") for v in kv.split("=")[1:] if v]
     return any(RISKY_VERB.match(seg) for seg in parts)
 
 
@@ -231,11 +243,13 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                         if await page.query_selector("input[type='password']"):
                             # record the login page itself — test cases log in through it
                             login_url = page.url
+                            l_el, l_hidden = await label_page(page)            # raises if broken
+                            lu = urlparse(login_url)
                             result.pages.append({
                                 "path": page_template(login_url),
-                                "example": urlparse(login_url).path,
+                                "example": lu.path + (("#" + lu.fragment) if lu.fragment.startswith("/") else ""),
                                 "title": await page.title(),
-                                "elements": await label_elements_deterministic(page),  # raises if broken
+                                "elements": l_el, "hidden": l_hidden,
                                 "forms": await page.evaluate(_FORMS_JS)})
                         await DOMAnalyzer().login_if_needed(page)
                         result.login_ok = not await page.query_selector("input[type='password']")
@@ -276,6 +290,7 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                     seen.add(landed)
                     try:
                         elements, hidden = await label_page(page)
+                        elements, hidden = await _stable_labels(page, elements, hidden)
                     except RuntimeError as exc:
                         result.error = str(exc)            # a broken reader is an error, not "0 elements"
                         break
@@ -284,7 +299,9 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                     except Exception:  # noqa: BLE001
                         forms = []
                     p_url = urlparse(page.url)
-                    result.pages.append({"path": landed, "example": p_url.path + (("?" + p_url.query) if p_url.query else ""),
+                    example = p_url.path + (("?" + p_url.query) if p_url.query else "") \
+                        + (("#" + p_url.fragment) if p_url.fragment.startswith("/") else "")
+                    result.pages.append({"path": landed, "example": example,
                                          "title": await page.title(), "elements": elements,
                                          "hidden": hidden, "forms": forms})
                     try:
@@ -293,8 +310,10 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                         links = []
                     for ln in links:
                         href = ln.get("href", "")
-                        if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
+                        if not href or href.startswith(("mailto:", "javascript:", "tel:")):
                             continue
+                        if href.startswith("#") and not href.startswith("#/"):
+                            continue                               # an anchor, not an SPA route
                         nxt = urljoin(page.url, href)
                         if urlparse(nxt).netloc != origin.netloc:
                             continue
@@ -311,6 +330,77 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
         logger.error("QAX map failed: %s", exc)
         result.error = str(exc)[:300]
     return result
+
+
+async def _stable_labels(page, elements: dict, hidden: list) -> "tuple[dict, list]":
+    """
+    Reload the page and keep only selectors that still match exactly one element.
+    Frameworks generate ids per render (Svelte: #accent_xleodvxk — found on PocketBase);
+    such an id is unique now but gone after a reload, so every test using it would fail.
+    Those ids are avoided and the page is named again with stable selectors. Never raises
+    for a reload problem (the first reading is kept).
+    """
+    from core.dom_analyzer import _settle, _wait_dom_stable, label_page
+    try:
+        await page.reload(wait_until="load")
+        await _settle(page)
+        await _wait_dom_stable(page)
+    except Exception:  # noqa: BLE001
+        return elements, hidden
+    unstable = []
+    for sel in elements.values():
+        if not sel.startswith("#"):
+            continue
+        try:
+            if await page.locator(sel).count() != 1:
+                unstable.append(sel)
+        except Exception:  # noqa: BLE001
+            unstable.append(sel)
+    if not unstable:
+        return await _drop_ambiguous(page, elements, hidden)
+    ids = []
+    for sel in unstable:
+        raw = sel[1:].split(" ")[0]
+        ids.append(re.sub(r"\\(.)", r"\1", raw))       # undo CSS.escape (meta\.appName → meta.appName)
+    # also avoid the CURRENT render's version of the same generated ids: same prefix, new suffix
+    prefixes = {re.sub(r"[_-]?[a-z0-9]{6,}$", "", i, flags=re.I) for i in ids}
+    current = await page.evaluate("() => [...document.querySelectorAll('[id]')].map(e => e.id)")
+    ids += [i for i in current if any(i.startswith(pf) and i != pf for pf in prefixes if pf)]
+    elements, hidden = await label_page(page, avoid_ids=ids)
+    return await _drop_ambiguous(page, elements, hidden)
+
+
+async def _drop_ambiguous(page, elements: dict, hidden: list) -> "tuple[dict, list]":
+    """
+    Last check, with Playwright itself: a selector that does not match exactly one
+    element is dropped — a missing name gives a clear ERROR, a wrong one clicks something
+    else. Never raises.
+    """
+    import asyncio
+
+    async def _counts() -> dict:
+        out = {}
+        for k, sel in elements.items():
+            try:
+                out[k] = await page.locator(sel).count()
+            except Exception:  # noqa: BLE001
+                out[k] = -1                                   # invalid selector
+        return out
+    # An SPA renders parts of the page after its own API calls (PocketBase's settings
+    # form): give missing elements a few short chances to appear before dropping them.
+    counts = await _counts()
+    for _ in range(8):
+        if not any(n == 0 for n in counts.values()):
+            break
+        await asyncio.sleep(0.5)
+        counts = await _counts()
+    keep = {}
+    for k, sel in elements.items():
+        if counts.get(k) == 1:
+            keep[k] = sel
+        else:
+            logger.info("QAX map: dropped %s (%s) — %s element(s) after a reload", k, sel, counts.get(k))
+    return keep, [h for h in hidden if h in keep]
 
 
 def check_cases(cases: list, app_map: AppMap | None) -> int:

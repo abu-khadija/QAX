@@ -14,6 +14,9 @@ Every scan written with `--out` records the exact version and commit that produc
   report per run, and the data-changing requests a browser run sent ("not undone").
 - `discover` names page elements without AI (`--ai` lets Claude do it); built-in `page` key for text anywhere on the
   page; `{{env:QAX_VAR_*}}` values for secrets in case files, masked in results and reports.
+- `map`: read a running app from its URL (pages, SPA routes, elements, selectors checked to match one element and
+  to survive a reload; risky links never followed); generation is grounded in it (web: *Read the app*).
+- Assertion types `value`, `contains`, `enabled`, `disabled`, `checked`, `not_visible`; `{{unique}}` per case.
 
 ### Changed
 - External writes need an explicit opt-in: `pipeline --live`; `execute` files auto-bugs only with `--upload`;
@@ -27,6 +30,10 @@ Every scan written with `--out` records the exact version and commit that produc
 - Browser runs on real apps (linkding): no more false FAILs from checking too early (assertions retried up to
   `QAX_ASSERT_TIMEOUT_MS`) or from cases sharing one browser session (a fresh one per case).
 - Xray results are attributed to the Jira keys the export created, never to local ids.
+- Browser engine on real apps (Healthchecks, PocketBase): names resolved per page and exactly (no fuzzy match onto
+  another — possibly destructive — element); no page reload mid-test; app rate limiting is ERROR, not FAIL;
+  clicking a disabled element fails at once with the reason.
+- An API case whose steps checked nothing (no expected status/body) is SKIP, not PASS.
 
 - A reachability check before every scan: an address QAX cannot reach is an error with the reason (refused, DNS, timeout,
   certificate) instead of a clean-looking "0 findings" scan. `--insecure` (web: a checkbox) for a self-signed certificate.

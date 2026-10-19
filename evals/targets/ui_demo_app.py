@@ -12,7 +12,8 @@ It also reproduces three behaviours of real apps that once broke QAX (linkding):
   * /login sends a signed-in user to the dashboard (cases must not share a session);
   * /live keeps a request open forever (the page never becomes "network idle");
   * /delayed shows its confirmation a moment AFTER the click (async UI updates);
-  * /busy (HTTP 429) and /busy-text (200 + "Too many attempts") — the app rate-limits.
+  * /busy (HTTP 429) and /busy-text (200 + "Too many attempts") — the app rate-limits;
+  * /spa — a single-page app (hash routes, late rendering, per-render ids; PocketBase).
 
 Credentials are fixed demo values (user `demo`, password `demo123`) — this app holds no
 real data and listens on 127.0.0.1 only. Selectors: config/projects/uidemo/selectors.json.
@@ -129,6 +130,37 @@ def delayed():
     return _page("Delayed", """<button id="save-btn" onclick="setTimeout(()=>{
   document.getElementById('status').innerText='Saved!'}, 800)">Save</button>
 <p id="status"></p>""")
+
+
+_SPA = """<!doctype html><html><head><meta charset="utf-8"><title>SPA</title></head><body>
+<nav><a href="#/home">Home</a> <a href="#/settings">Settings</a> <a href="#/export-data">Export</a></nav>
+<div id="view"></div>
+<script>
+function rnd(){ return Math.random().toString(36).slice(2, 10) + '1'; }   // per-render ids
+function render(){
+  const r = location.hash || '#/home', v = document.getElementById('view');
+  v.innerHTML = '';
+  setTimeout(() => {                                // rendered after an async "API call"
+    if (r === '#/settings') {
+      const id = 'name_' + rnd();
+      v.innerHTML = '<h2>Rate limits</h2><label for="' + id + '">App name</label>'
+        + '<input id="' + id + '" name="appname" value="' + (localStorage.appname || 'Demo') + '">'
+        + '<button class="save" disabled><span>Save changes</span></button><p class="msg"></p>';
+      const i = v.querySelector('input'), b = v.querySelector('button');
+      i.oninput = () => { b.disabled = (i.value === (localStorage.appname || 'Demo')); };  // only a change enables Save
+      b.onclick = () => { localStorage.appname = i.value; v.querySelector('.msg').innerText = 'Saved'; b.disabled = true; };
+    } else { v.innerHTML = '<h2>Home</h2>'; }
+  }, 400);
+}
+window.onhashchange = render; render();
+</script></body></html>"""
+
+
+@app.get("/spa")
+def spa():
+    """A single-page app: hash routes, a form rendered late, ids that change per render,
+    a button whose text is in a child and that is disabled until a change (PocketBase)."""
+    return _SPA
 
 
 @app.get("/busy")

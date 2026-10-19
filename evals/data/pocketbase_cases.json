@@ -1,0 +1,281 @@
+{
+  "_comment": "Functional QA on a real SPA: PocketBase v0.40.5 (MIT) dashboard, run locally. Selector keys come from `main.py map` (no hand-written selectors). Credentials: QAX_VAR_PB_USER / QAX_VAR_PB_PASSWORD.",
+  "test_cases": [
+    {
+      "test_case_id": "PB-001",
+      "title": "Valid login opens the collections",
+      "module": "Dashboard",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/_/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_PB_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_PB_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "#/collections",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "PB-002",
+      "title": "Wrong password shows an error",
+      "module": "Dashboard",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/_/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_PB_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "not-the-password",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "Invalid login credentials",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "PB-003",
+      "title": "Renaming the application is saved and survives a reload",
+      "module": "Dashboard",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/_/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_PB_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_PB_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/_/#/settings",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "application_name",
+          "value": "QAX App {{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_changes_button",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/_/#/logs",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/_/#/settings",
+          "step_number": 9
+        },
+        {
+          "step_number": 10,
+          "playwright_action": "assert",
+          "selector_key": "application_name",
+          "assertion_type": "value",
+          "assertion_value": "QAX App {{unique}}"
+        }
+      ]
+    },
+    {
+      "test_case_id": "PB-004",
+      "title": "The logs page opens",
+      "module": "Dashboard",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/_/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_PB_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_PB_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "logs_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "#/logs",
+          "step_number": 6
+        }
+      ]
+    },
+    {
+      "test_case_id": "PB-005",
+      "title": "The superusers collection lists the signed-in admin",
+      "module": "Dashboard",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/_/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_PB_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_PB_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "qax_example_invalid_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "manage_superusers_link",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax@example.invalid",
+          "step_number": 7
+        }
+      ]
+    },
+    {
+      "test_case_id": "PB-006",
+      "title": "Logout returns to the login form",
+      "module": "Dashboard",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/_/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_PB_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_PB_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "qax_example_invalid_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "logout_button",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "#/login",
+          "step_number": 7
+        }
+      ]
+    }
+  ]
+}

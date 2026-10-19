@@ -151,6 +151,12 @@ class TestExecutor:
 
         tc_id = test_case.get("test_case_id", "UNKNOWN")
         title = test_case.get("title", "Untitled")
+        if getattr(self, "action_mapper", None) is not None:
+            import uuid as _uuid
+            try:
+                self.action_mapper.case_vars = {"unique": _uuid.uuid4().hex[:8]}
+            except AttributeError:   # a mapper without per-case variables
+                pass
 
         # ── Guard: execution not available ─────────────────────────────────
         if not _EXECUTION_AVAILABLE or not self.action_mapper:
@@ -327,8 +333,11 @@ class TestExecutor:
     # Public: execute_batch
     # ─────────────────────────────────────────────────────────────────────────
 
-    _THROTTLE_TEXT = re.compile(r"(too many (attempts|requests|login)|rate.?limit|try (again )?later|"
-                                r"slow down|temporarily (locked|blocked))", re.I)
+    # Unambiguous phrases only: a bare "rate limit" also titles settings pages
+    # (PocketBase's "Rate limits" section) and is not a signal (found 2026-10-19).
+    _THROTTLE_TEXT = re.compile(r"(too many (attempts|requests|login attempts)|try (again )?later|"
+                                r"please try later|slow down|rate limit (exceeded|reached)|"
+                                r"temporarily (locked|blocked))", re.I)
 
     async def _mark_if_throttled(self, result: dict, runner) -> None:
         """

@@ -70,6 +70,14 @@ STOP_WORDS = {
 _ENV_REF = re.compile(r"^\{\{\s*env:(QAX_VAR_[A-Z0-9_]+)\s*\}\}$")
 
 
+def render_case_vars(value, case_vars: "dict | None") -> str:
+    """Replace {{unique}} (and any other per-case variable) in a step value/assertion."""
+    out = str(value if value is not None else "")
+    for k, v in (case_vars or {}).items():
+        out = out.replace("{{" + k + "}}", str(v))
+    return out
+
+
 def resolve_step_value(value: str) -> "tuple[str, str]":
     """
     Resolve a step value of the form {{env:QAX_VAR_NAME}} from the environment, so
@@ -130,6 +138,9 @@ class ActionMapper:
         """
         self.project = project or os.getenv("DEFAULT_PROJECT", "example")
         self.selectors: dict = {}
+        # Per-case variables ({{unique}}): a fresh value per test case so a case can be
+        # run again (a saved value that did not change left PocketBase's Save disabled).
+        self.case_vars: dict = {}
         # key → [(section, selector), …] in file order: one name can mean different
         # elements on different pages ("email" on /login vs on /settings).
         self._candidates: dict = {}
@@ -748,9 +759,9 @@ class ActionMapper:
         step_num       = step.get("step_number", 0)
         action         = (step.get("playwright_action") or "").strip().lower()
         selector_key   = step.get("selector_key") or ""
-        value          = step.get("value") or ""
+        value          = render_case_vars(step.get("value") or "", self.case_vars)
         assertion_type = (step.get("assertion_type") or "").strip().lower()
-        assertion_val  = step.get("assertion_value") or ""
+        assertion_val  = render_case_vars(step.get("assertion_value") or "", self.case_vars)
 
         base_result = {
             "step_number": step_num,
@@ -800,6 +811,12 @@ class ActionMapper:
             elif action in ("click", "press", "tap", "submit"):
                 selector = await _resolve_selector()
                 base_result["selector_used"] = selector
+                target = await page.query_selector(selector)
+                if target is not None and await target.is_visible() and await target.is_disabled():
+                    # the app does not allow the action now — say so instead of a 15 s timeout
+                    base_result.update({"status": "FAIL", "actual_result": f"The element is disabled: {selector}",
+                                        "error": "Cannot click a disabled element"})
+                    return base_result
                 await page.click(selector, timeout=15_000)
                 await _settle_after_action(page)
                 base_result.update({
@@ -985,6 +1002,8 @@ class ActionMapper:
 
             element = await page.query_selector(selector)
             if not element:
+                if assertion_type == "not_visible":
+                    return {"status": "PASS", "actual_result": f"Element absent: {selector}"}
                 return {
                     "status": "FAIL",
                     "actual_result": f"Element not found for assertion: {selector}",
@@ -1000,7 +1019,35 @@ class ActionMapper:
                     "error": "Visibility assertion failed",
                 }
 
-            if assertion_type == "text":
+            if assertion_type in ("value", "contains") and await element.evaluate(
+                    "e => 'value' in e && ['INPUT','TEXTAREA','SELECT'].includes(e.tagName)"):
+                # a form field: its text is its VALUE (inner text of an input is empty)
+                if not assertion_value:
+                    return {"status": "SKIP", "actual_result": "Value assertion not evaluated — no expected value"}
+                actual = await element.input_value()
+                ok = (assertion_value == actual) if assertion_type == "value" \
+                    else (assertion_value.lower() in actual.lower())
+                if ok:
+                    return {"status": "PASS", "actual_result": f"Value OK: '{actual[:80]}'"}
+                return {"status": "FAIL", "actual_result": f"Value mismatch. Expected "
+                        f"{'exactly ' if assertion_type == 'value' else ''}'{assertion_value}', got '{actual[:80]}'",
+                        "error": "Value assertion failed"}
+
+            if assertion_type in ("enabled", "disabled", "checked"):
+                state = {"enabled": element.is_enabled, "disabled": element.is_disabled,
+                         "checked": element.is_checked}[assertion_type]
+                if await state():
+                    return {"status": "PASS", "actual_result": f"Element is {assertion_type}: {selector}"}
+                return {"status": "FAIL", "actual_result": f"Element is not {assertion_type}: {selector}",
+                        "error": f"{assertion_type} assertion failed"}
+
+            if assertion_type == "not_visible":
+                if not await element.is_visible():
+                    return {"status": "PASS", "actual_result": f"Element not visible: {selector}"}
+                return {"status": "FAIL", "actual_result": f"Element is visible: {selector}",
+                        "error": "not_visible assertion failed"}
+
+            if assertion_type in ("text", "contains"):
                 actual = await element.inner_text()
                 if not assertion_value:
                     return {"status": "SKIP",

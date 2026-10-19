@@ -103,13 +103,23 @@ python main.py execute --file output/pipeline/<run>/test_cases.json --project <y
 * The web UI (`python -m web.server` → `/app`, **Functional QA**) does the same: generate from a story
   or load a cases JSON, review, **Preview run**, then **Run tests** with the HTTP or Browser engine —
   or push the cases to Jira/Xray without running them.
-* Selectors: `python main.py discover --url … --page … --project <yours>` names the elements of a page
+* **Read the app first:** `python main.py map --url http://localhost:8000 --project <yours> --authorized
+  [--user-env QAX_VAR_USER --password-env QAX_VAR_PASSWORD]` walks the app in a browser (same-origin links
+  only; never logout/delete/create-style links; never submits a form; SPA `#/routes` included), names every
+  element with a selector checked to match exactly one element (and to survive a reload), and saves
+  `config/projects/<yours>/app_map.json` + `selectors.json`. Generation for that project then uses the real
+  pages and elements, and flags generated steps on elements that are not on the map (web: *Read the app*).
+* Selectors for one page: `python main.py discover --url … --page … --project <yours>` names the elements of a page
   without AI (`--ai` lets Claude name them). To check a text anywhere on the page, use the built-in
   key `page` (e.g. an error message that only appears after a click).
 * Secrets in cases: `"value": "{{env:QAX_VAR_PASSWORD}}"` types `$QAX_VAR_PASSWORD`; typed secrets and
   password fields are shown as `••••` in results and reports.
 * Try it with no API key: `python evals/targets/ui_demo_app.py --port 8911`, then run
   `evals/data/ui_demo_cases.json` with `--project uidemo` — 3 PASS, 1 FAIL (a planted bug), 1 SKIP.
+* Assertions: `url`, `text`, `visible`, `value`, `contains`, `enabled`, `disabled`, `checked`, `not_visible`;
+  `{{unique}}` in a value or assertion gives each run its own value (repeatable cases). A failure while the
+  app rate-limits QAX (HTTP 429 / "too many attempts") is ERROR, not FAIL.
+* Evidence: three real apps (linkding, Healthchecks, PocketBase) — `strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md`.
 * Xray has **not** been exercised against a real Xray instance yet.
 
 ```bash

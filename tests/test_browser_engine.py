@@ -357,3 +357,43 @@ def test_map_marks_elements_hidden_until_a_menu_is_opened(ui_app):
     delayed = next(p for p in m.pages if p["path"] == "/delayed")
     assert "save_button" in delayed["elements"] and delayed["hidden"] == []
     assert "hidden until" not in m.as_context() or True       # context renders without error
+
+
+# ── Single-page apps (PocketBase dashboard, 2026-10-19) ───────────────────────
+
+
+def test_map_reads_spa_routes_waits_for_late_forms_and_avoids_per_render_ids(ui_app):
+    from core.app_mapper import map_app
+    m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", start_paths=["/spa"]))
+    pages = {p["path"]: p for p in m.pages}
+    assert "/spa#/settings" in pages and "/spa#/home" in pages          # hash routes are pages
+    assert "#/export-data" in m.skipped_links                           # risky verb in the route
+    el = pages["/spa#/settings"]["elements"]
+    assert el.get("app_name") == "input[name='appname']"               # not #name_<random>
+    assert el.get("save_changes_button") == "button:has-text('Save changes')"  # text in a child
+
+
+def _spa_case(cid, value, expect):
+    return {"test_case_id": cid, "title": cid, "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/spa#/settings"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "input[name='appname']",
+         "value": value},
+        {"step_number": 3, "playwright_action": "click", "selector_key": "button:has-text('Save changes')"},
+        {"step_number": 4, "playwright_action": "navigate", "value": "/spa#/home"},
+        {"step_number": 5, "playwright_action": "navigate", "value": "/spa#/settings"},
+        {"step_number": 6, "playwright_action": "assert", "selector_key": "input[name='appname']",
+         "assertion_type": "value", "assertion_value": expect}]}
+
+
+def test_value_assertions_unique_values_and_disabled_buttons(ui_app, monkeypatch):
+    monkeypatch.setenv("QAX_ASSERT_TIMEOUT_MS", "1500")
+    batch = _run([_spa_case("saved", "App {{unique}}", "App {{unique}}"),       # repeatable
+                  _spa_case("wrong", "App {{unique}}", "Something else"),        # real mismatch
+                  _spa_case("same", "Demo", "Demo")])                            # no change → disabled
+    got = {r["test_case_id"]: r for r in batch["results"]}
+    assert got["saved"]["status"] == "PASS"
+    assert got["wrong"]["status"] == "FAIL"                       # "Rate limits" heading ≠ throttled
+    assert not got["wrong"].get("throttled")
+    same = got["same"]
+    assert same["status"] == "FAIL" and "disabled" in same["steps"][2]["actual_result"]
+    assert same["duration_seconds"] < 12                          # no 15 s click timeout
