@@ -397,3 +397,53 @@ def test_value_assertions_unique_values_and_disabled_buttons(ui_app, monkeypatch
     same = got["same"]
     assert same["status"] == "FAIL" and "disabled" in same["steps"][2]["actual_result"]
     assert same["duration_seconds"] < 12                          # no 15 s click timeout
+
+
+# ── Map hardening (2026-10-19, second round) ─────────────────────────────────
+
+
+def test_map_opens_menus_and_records_what_they_reveal_without_submitting_forms(ui_app):
+    import urllib.request
+    from core.app_mapper import map_app
+    m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", start_paths=["/menu-page"]))
+    page = next(p for p in m.pages if p["path"] == "/menu-page")
+    assert page["opened_by"].get("profile_link") == "account_button"          # click Account first
+    posts = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{ui_app}/_posts").read())["posts"]
+    assert posts == [] and not [w for w in m.writes if w["path"] == "/add-user"]   # typeless button untouched
+
+
+def test_a_page_with_password_fields_is_not_taken_for_a_login_page(ui_app):
+    """Django's "add user" page: auto-login filled it with the operator's credentials and submitted it."""
+    import urllib.request
+
+    from core.dom_analyzer import DOMAnalyzer
+    from playwright.async_api import async_playwright
+    import os
+    os.environ["APP_USERNAME"], os.environ["APP_PASSWORD"] = "demo", "demo123"
+
+    async def go():
+        async with async_playwright() as p:
+            b = await p.chromium.launch(headless=True)
+            page = await b.new_page()
+            await page.goto(f"http://127.0.0.1:{ui_app}/add-user")
+            done = await DOMAnalyzer().login_if_needed(page)
+            await page.goto(f"http://127.0.0.1:{ui_app}/login")
+            real = await DOMAnalyzer().login_if_needed(page)
+            await b.close()
+            return done, real
+    try:
+        done, real = asyncio.run(go())
+    finally:
+        os.environ.pop("APP_USERNAME", None); os.environ.pop("APP_PASSWORD", None)
+    posts = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{ui_app}/_posts").read())["posts"]
+    assert done is False and posts == []                  # nothing submitted on "add user"
+    assert real is True                                   # the real login form still works
+
+
+def test_explore_actions_follows_risky_links_only_when_asked(ui_app):
+    from core.app_mapper import map_app
+    safe = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", username="demo", password="demo123"))
+    assert any("logout" in h for h in safe.skipped_links) and not safe.explored_actions
+    bold = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", username="demo", password="demo123",
+                               explore_actions=True))
+    assert any("logout" in a for a in bold.explored_actions)

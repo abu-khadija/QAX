@@ -946,8 +946,12 @@ def run_execute_command() -> None:
         help="Project name for selectors (e.g. example, example2, example3). "
              "Default: read from DEFAULT_PROJECT in .env."
     )
+    _add_seeing_flags(parser)
 
     args = parser.parse_args(sys.argv[2:])
+    _apply_seeing_flags(args)
+    if args.watch:
+        args.headless = "false"
     if args.ai_heal:
         os.environ["QAX_AI_HEAL"] = "true"
     if args.insecure:
@@ -1045,6 +1049,9 @@ def run_execute_command() -> None:
     # ── Console summary ────────────────────────────────────────────────────
     reporter.generate_console_summary(batch_results)
     _print_writes_sent(batch_results)
+    traces = [r.get("trace") for r in (batch_results.get("results") or []) if r.get("trace")]
+    if traces:
+        print(f"  Traces ({len(traces)}): open one with  playwright show-trace {traces[0]}")
     if batch_results.get("throttled"):
         print(f"  ⚠️  {batch_results['throttled']} case(s) hit the app's rate limit — reported as ERROR, "
               "not FAIL. Wait and re-run, or raise the limit on staging.")
@@ -1106,6 +1113,29 @@ def run_execute_command() -> None:
     # ── Exit code ──────────────────────────────────────────────────────────
     if batch_results.get("failed", 0) > 0 or batch_results.get("errors", 0) > 0:
         sys.exit(1)
+
+
+def _add_seeing_flags(parser) -> None:
+    """--watch / --trace / --screenshots for the browser engine (execute, pipeline)."""
+    parser.add_argument("--watch", action="store_true", default=False,
+                        help="Open a visible, slowed-down browser so you can watch every step "
+                             "(also takes a screenshot after every step).")
+    parser.add_argument("--trace", action="store_true", default=False,
+                        help="Record a Playwright trace per case (actions, network, DOM): "
+                             "open with `playwright show-trace <file>`.")
+    parser.add_argument("--screenshots", choices=["failures", "all"], default="failures",
+                        help="Screenshot after every step (all) or only at a failure (default).")
+
+
+def _apply_seeing_flags(args) -> None:
+    """Turn the seeing flags into the settings the browser runner reads."""
+    if getattr(args, "watch", False):
+        os.environ["QAX_SLOW_MO_MS"] = os.getenv("QAX_SLOW_MO_MS") or "400"
+        os.environ["QAX_STEP_SCREENSHOTS"] = "true"
+    if getattr(args, "screenshots", "failures") == "all":
+        os.environ["QAX_STEP_SCREENSHOTS"] = "true"
+    if getattr(args, "trace", False):
+        os.environ["QAX_TRACE"] = "true"
 
 
 def _print_writes_sent(batch: dict) -> None:
@@ -1897,6 +1927,7 @@ def run_pipeline_command() -> None:
         "--insecure", action="store_true", default=False,
         help="Do not verify the target's TLS certificate (self-signed staging only).",
     )
+    _add_seeing_flags(parser)
     parser.add_argument(
         "--base-url", default=None,
         help="The running app to execute against (default: APP_BASE_URL from .env).",
@@ -1922,6 +1953,9 @@ def run_pipeline_command() -> None:
     args = parser.parse_args(sys.argv[2:])
     # External writes need BOTH the operator's --live and an .env that allows them.
     args.dry_run = not args.live or os.getenv("DRY_RUN", "true").lower() == "true"
+    _apply_seeing_flags(args)
+    if args.watch:
+        args.headed = True
     if args.ai_heal:
         os.environ["QAX_AI_HEAL"] = "true"
     if args.insecure:
@@ -2178,6 +2212,11 @@ def run_map_command() -> None:
     parser.add_argument("--insecure", action="store_true",
                         help="Do not verify the TLS certificate (self-signed staging only).")
     parser.add_argument("--headed", action="store_true", help="Show the browser.")
+    parser.add_argument("--explore-actions", action="store_true",
+                        help="ALSO follow create/edit/delete/logout-style links (a disposable staging app "
+                             "only: following them CHANGES DATA). Every write is listed.")
+    parser.add_argument("--no-menus", action="store_true",
+                        help="Do not open menus/dialogs to record what they reveal.")
     args = parser.parse_args(sys.argv[2:])
 
     if not args.authorized:
@@ -2196,7 +2235,8 @@ def run_map_command() -> None:
     print(f"\n  QAX — reading {args.url} (max {args.max_pages} pages, GET links only)…")
     app_map = asyncio.run(map_app(args.url, start_paths=args.start, max_pages=args.max_pages,
                                   username=user, password=password, headless=not args.headed,
-                                  insecure=args.insecure))
+                                  insecure=args.insecure, explore_actions=args.explore_actions,
+                                  open_menus=not args.no_menus))
     if app_map.error:
         print(f"\n  ✗ {app_map.error}\n")
         sys.exit(1)
@@ -2209,7 +2249,16 @@ def run_map_command() -> None:
     for p in app_map.pages[:30]:
         print(f"    {p['path']:<40} {len(p.get('elements') or {}):>3} element(s)")
     if app_map.skipped_links:
-        print(f"  Not followed (would log out / change data): {', '.join(app_map.skipped_links[:8])}")
+        print(f"  Not followed (would log out / change data): {', '.join(app_map.skipped_links[:8])}"
+              "  — add --explore-actions on a disposable staging app to map them too")
+    if app_map.explored_actions:
+        print(f"  Action links followed (--explore-actions): {', '.join(app_map.explored_actions[:10])}")
+    n_open = sum(len(p.get("opened_by") or {}) for p in app_map.pages)
+    if n_open:
+        print(f"  Revealed by opening menus/dialogs: {n_open} element(s)")
+    if app_map.writes:
+        print(f"  ⚠️  Writes sent while mapping: {len(app_map.writes)} — "
+              + ", ".join(sorted({w['method'] + ' ' + w['path'] for w in app_map.writes})[:8]))
     print(f"  Saved: {path}")
     print(f"         {path.parent / 'selectors.json'}")
     print(f"  Next:  python main.py pipeline --input story --source \"…\" --project {args.project} "

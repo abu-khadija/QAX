@@ -1,0 +1,240 @@
+{
+  "base_url": "http://127.0.0.1:9094",
+  "login_ok": true,
+  "pages": [
+    {
+      "path": "/auth/login",
+      "example": "/auth/login",
+      "title": "Sign In - Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "login_link": "a[href='/auth/login']",
+        "username": "#username",
+        "password": "#password",
+        "remember_me": "#remember_me",
+        "sign_in_button": "#submit",
+        "click_to_register_link": "a[href='/auth/register']",
+        "click_to_reset_it_link": "a[href='/auth/reset_password_request']"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "username",
+            "password",
+            "remember_me",
+            "submit"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/",
+      "example": "/",
+      "title": "Home - Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "q": "#q",
+        "messages_link": "a[href='/messages']",
+        "profile_link": "a[href='/user/qaxtester']",
+        "logout_link": "a[href='/auth/logout']",
+        "say_something": "#post",
+        "submit_button": "#submit",
+        "newer_posts_link": "a:has-text('\u2190 Newer posts')",
+        "older_posts_link": "a:has-text('Older posts \u2192')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/search",
+          "fields": [
+            "q"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "post",
+            "submit"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/user/qaxtester",
+      "example": "/user/qaxtester",
+      "title": "Welcome to Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "q": "#q",
+        "messages_link": "a[href='/messages']",
+        "profile_link": "a[href='/user/qaxtester']",
+        "logout_link": "a[href='/auth/logout']",
+        "edit_your_profile_link": "a[href='/edit_profile']",
+        "export_your_posts_link": "a[href='/export_posts']",
+        "newer_posts_link": "a:has-text('\u2190 Newer posts')",
+        "older_posts_link": "a:has-text('Older posts \u2192')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/search",
+          "fields": [
+            "q"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/index",
+      "example": "/index",
+      "title": "Home - Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "q": "#q",
+        "messages_link": "a[href='/messages']",
+        "profile_link": "a[href='/user/qaxtester']",
+        "logout_link": "a[href='/auth/logout']",
+        "say_something": "#post",
+        "submit_button": "#submit",
+        "newer_posts_link": "a:has-text('\u2190 Newer posts')",
+        "older_posts_link": "a:has-text('Older posts \u2192')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/search",
+          "fields": [
+            "q"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "post",
+            "submit"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/explore",
+      "example": "/explore",
+      "title": "Explore - Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "q": "#q",
+        "messages_link": "a[href='/messages']",
+        "profile_link": "a[href='/user/qaxtester']",
+        "logout_link": "a[href='/auth/logout']",
+        "newer_posts_link": "a:has-text('\u2190 Newer posts')",
+        "older_posts_link": "a:has-text('Older posts \u2192')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/search",
+          "fields": [
+            "q"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/messages",
+      "example": "/messages",
+      "title": "Welcome to Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "q": "#q",
+        "messages_link": "a[href='/messages']",
+        "profile_link": "a[href='/user/qaxtester']",
+        "logout_link": "a[href='/auth/logout']",
+        "newer_messages_link": "a:has-text('\u2190 Newer messages')",
+        "older_messages_link": "a:has-text('Older messages \u2192')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/search",
+          "fields": [
+            "q"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/edit_profile",
+      "example": "/edit_profile",
+      "title": "Edit Profile - Microblog",
+      "elements": {
+        "microblog_link": "a:has-text('Microblog')",
+        "home_link": "a:has-text('Home')",
+        "explore_link": "a[href='/explore']",
+        "q": "#q",
+        "messages_link": "a[href='/messages']",
+        "profile_link": "a[href='/user/qaxtester']",
+        "logout_link": "a[href='/auth/logout']",
+        "username": "#username",
+        "about_me": "#about_me",
+        "submit_button": "#submit"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/search",
+          "fields": [
+            "q"
+          ]
+        },
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "username",
+            "about_me",
+            "submit"
+          ]
+        }
+      ]
+    }
+  ],
+  "skipped_links": [],
+  "explored_actions": [
+    "/export_posts",
+    "/auth/logout"
+  ],
+  "writes": [
+    {
+      "method": "POST",
+      "path": "/auth/login"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/login"
+    }
+  ],
+  "error": null
+}

@@ -667,3 +667,19 @@ def test_pipeline_plan_says_when_there_is_no_app_map(tmp_path):
     p.app_map = _a_map()
     plan = p.plan([])
     assert plan["app_map_pages"] == 2 and not any("no app map" in m for m in plan["missing"])
+
+
+def test_artifact_route_serves_only_run_screenshots_and_traces(client, tmp_path):
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    shots = root / "output" / "screenshots" / "steps"
+    shots.mkdir(parents=True, exist_ok=True)
+    ok = shots / "qax_test_artifact.png"
+    ok.write_bytes(b"\x89PNG\r\n\x1a\n")
+    try:
+        assert client.get("/api/artifact?path=output/screenshots/steps/qax_test_artifact.png").status_code == 200
+        for bad in ("output/screenshots/../../.env", ".env", "/etc/passwd", "README.md",
+                    "output/screenshots/steps/../../../main.py"):
+            assert client.get("/api/artifact", query_string={"path": bad}).status_code == 404, bad
+    finally:
+        ok.unlink()

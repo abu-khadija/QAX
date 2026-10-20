@@ -67,6 +67,8 @@ class AppMap:
     login_ok: bool | None = None
     pages: list = field(default_factory=list)      # [{path, title, elements: {key: selector}, forms}]
     skipped_links: list = field(default_factory=list)
+    explored_actions: list = field(default_factory=list)   # risky links followed (--explore-actions)
+    writes: list = field(default_factory=list)             # data-changing requests sent while mapping
     error: str | None = None
 
     @property
@@ -96,11 +98,17 @@ class AppMap:
                  "element KEYS below (left column). Use selector_key \"page\" to check a text anywhere on",
                  "the page (e.g. an error that appears after a click). Do not invent pages or elements."]
         for p in self.pages[:max_pages]:
-            lines.append(f"\nPage {p.get('path')}" + (f" — {p['title']}" if p.get("title") else ""))
+            tag = "  [action page — opening it changes data or the session]" if p.get("action") else ""
+            lines.append(f"\nPage {p.get('path')}" + (f" — {p['title']}" if p.get("title") else "") + tag)
             hidden = set(p.get("hidden") or [])
+            opened_by = p.get("opened_by") or {}
             for k, sel in list((p.get("elements") or {}).items())[:max_elements]:
-                lines.append(f"  - {k}: {sel}" + ("   (hidden until its menu/dialog is opened — "
-                                                   "click the control that opens it first)" if k in hidden else ""))
+                note = ""
+                if k in opened_by:
+                    note = f"   (appears after clicking {opened_by[k]} — click it first)"
+                elif k in hidden:
+                    note = "   (hidden until its menu/dialog is opened — click the control that opens it first)"
+                lines.append(f"  - {k}: {sel}{note}")
             for f in p.get("forms") or []:
                 if f.get("fields"):
                     lines.append(f"  form {f.get('method')} {f.get('action') or p.get('path')}: "
@@ -117,7 +125,31 @@ class AppMap:
         d = d or {}
         return cls(base_url=d.get("base_url", ""), login_ok=d.get("login_ok"),
                    pages=list(d.get("pages") or []), skipped_links=list(d.get("skipped_links") or []),
-                   error=d.get("error"))
+                   explored_actions=list(d.get("explored_actions") or []),
+                   writes=list(d.get("writes") or []), error=d.get("error"))
+
+
+_READ_RPC = re.compile(r"^(get|list|batch_?get|batchget|search|find|query|count|read|fetch|check|"
+                       r"validate|preview|refresh|lookup|describe|stat|head)", re.I)
+
+
+def is_write_request(method: str, url: str, post_data: str | None = None) -> bool:
+    """
+    True when a request can change data. Not every POST does: RPC/gRPC-web apps read with
+    POST (Memos: POST /memos.api.v1.AttachmentService/ListAttachments — found 2026-10-20)
+    and GraphQL reads are POSTed queries. A POST whose RPC method name starts with a read
+    verb, or a GraphQL body that is a `query` (no `mutation`), is a read.
+    """
+    m = (method or "GET").upper()
+    if m in ("GET", "HEAD", "OPTIONS"):
+        return False
+    last = urlparse(url or "").path.rstrip("/").rsplit("/", 1)[-1]
+    if m == "POST" and (_READ_RPC.match(last) or re.search(r"(^|[-_])refresh$|^realtime$|^subscribe", last, re.I)):
+        return False                       # a read, a session refresh, a live-updates subscription
+    body = (post_data or "")[:2000]
+    if m == "POST" and urlparse(url or "").path.rstrip("/").endswith("graphql") and body:
+        return bool(re.search(r"\bmutation\b", body))
+    return True
 
 
 def map_path(project: str) -> Path:
@@ -193,7 +225,8 @@ def is_risky_link(href: str, text: str = "") -> bool:
 
 async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: int = 20,
                   username: str = "", password: str = "", headless: bool = True,
-                  insecure: bool = False) -> AppMap:
+                  insecure: bool = False, explore_actions: bool = False,
+                  open_menus: bool = True) -> AppMap:
     """
     Walk the running app and return its map (see module docstring). Never raises.
 
@@ -205,8 +238,16 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
             them from environment variables).
         headless (bool): Run without a window.
         insecure (bool): Accept an unverified TLS certificate (staging only).
+        explore_actions (bool): ALSO follow the risky links (create/edit/delete/logout…)
+            — for a disposable staging app: pages behind them are mapped too (marked
+            "action"), the session is re-opened after a logout, and every data-changing
+            request is recorded in `writes`. Off by default: reading must not change data.
+        open_menus (bool): Click controls that open a menu or dialog (aria-haspopup,
+            aria-expanded, data-(bs-)toggle, <summary>) and record what they reveal
+            ("opened_by"), so generation knows "click the account menu, then Log out".
     """
-    from core.dom_analyzer import DOMAnalyzer, _goto_settled, label_elements_deterministic, label_page
+    from core.dom_analyzer import (DOMAnalyzer, _goto_settled, _wait_dom_stable,
+                                   label_elements_deterministic, label_page)
 
     base_url = base_url.rstrip("/")
     origin = urlparse(base_url)
@@ -224,7 +265,35 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless)
             context = await browser.new_context(ignore_https_errors=insecure)
+
+            def _on_request(req):
+                try:
+                    if is_write_request(req.method, req.url, req.post_data):
+                        result.writes.append({"method": req.method.upper(), "path": urlparse(req.url).path})
+                except Exception:  # noqa: BLE001
+                    pass
+            context.on("request", _on_request)
             page = await context.new_page()
+
+            async def _relogin() -> None:
+                """After a logout (explore mode) open a session again."""
+                if not (username and password):
+                    return
+                saved = {k: os.environ.get(k) for k in ("APP_USERNAME", "APP_PASSWORD")}
+                os.environ["APP_USERNAME"], os.environ["APP_PASSWORD"] = username, password
+                try:
+                    # never fill a form on the current page (it may be "add user"): start over
+                    await _goto_settled(page, base_url + "/")
+                    await DOMAnalyzer().login_if_needed(page)
+                except Exception:  # noqa: BLE001
+                    pass
+                finally:
+                    for k, v in saved.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
+
             try:
                 if username and password:
                     saved = {k: os.environ.get(k) for k in ("APP_USERNAME", "APP_PASSWORD")}
@@ -232,13 +301,26 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                     try:
                         await _goto_settled(page, base_url + "/")
                         if not await page.query_selector("input[type='password']"):
-                            # the home page is public: open the usual login path
-                            for path in ("/login/", "/login", "/accounts/login/", "/signin"):
+                            # the home page is public: follow ITS login link (Flaskr: /auth/login),
+                            # then the usual paths
+                            candidates = []
+                            try:
+                                candidates = await page.evaluate(_LOGIN_LINKS_JS)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            candidates += [base_url + p for p in ("/login/", "/login", "/accounts/login/",
+                                                                  "/auth/login", "/users/sign_in", "/signin",
+                                                                  "/user/login")]
+                            for cand in candidates:
+                                if urlparse(cand).netloc != origin.netloc:
+                                    continue
                                 try:
-                                    await _goto_settled(page, base_url + path)
+                                    resp = await page.goto(cand, wait_until="load")
+                                    await _wait_dom_stable(page, max_ms=3_000)
                                 except Exception:  # noqa: BLE001
                                     continue
-                                if await page.query_selector("input[type='password']"):
+                                if (resp is None or resp.status < 400) and \
+                                        await page.query_selector("input[type='password']"):
                                     break
                         if await page.query_selector("input[type='password']"):
                             # record the login page itself — test cases log in through it
@@ -251,8 +333,15 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                                 "title": await page.title(),
                                 "elements": l_el, "hidden": l_hidden,
                                 "forms": await page.evaluate(_FORMS_JS)})
-                        await DOMAnalyzer().login_if_needed(page)
-                        result.login_ok = not await page.query_selector("input[type='password']")
+                        # logged in only if a login really happened and the form is gone — not
+                        # merely "no password field here" (a 404 page has none: found on Flaskr)
+                        result.login_ok = bool(await DOMAnalyzer().login_if_needed(page)) and \
+                            not await page.query_selector("input[type='password']")
+                        # SPA: the login form and the signed-in home share one URL (Beszel "/"):
+                        # keep the login page under its own name so the home page is still read
+                        if result.login_ok and result.pages and \
+                                result.pages[-1]["path"] == page_template(page.url):
+                            result.pages[-1]["path"] += " [login]"
                     finally:
                         for k, v in saved.items():
                             if v is None:
@@ -260,18 +349,29 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                             else:
                                 os.environ[k] = v
                 queue = [base_url + "/"] + [urljoin(base_url + "/", s.lstrip("/")) for s in (start_paths or [])]
-                if username and page.url and urlparse(page.url).netloc == origin.netloc:
+                if result.login_ok and page.url and urlparse(page.url).netloc == origin.netloc:
                     queue.insert(0, page.url)                      # where the login landed
+                queue += await _sitemap_urls(page, base_url)       # routes the app lists itself
+                action_queue: list = []                            # risky links, explore mode only
                 seen: set = {p["path"] for p in result.pages}
                 per_parent: dict = {}
 
                 def _parent(k: str) -> str:
                     return k.rsplit("/", 1)[0] or "/"
 
-                while queue and len(result.pages) < max_pages:
-                    # least-visited parent first (stable: earlier links win ties)
-                    i = min(range(len(queue)), key=lambda j: per_parent.get(_parent(_norm(queue[j])), 0))
-                    url = queue.pop(i)
+                while (queue or action_queue) and len(result.pages) < max_pages:
+                    is_action = not queue
+                    if is_action:
+                        # explore mode: risky links last, logout-style ones at the very end
+                        action_queue.sort(key=lambda u: 1 if RISKY_LINK.search(u) and
+                                          re.search(r"log-?out|sign-?out", u, re.I) else 0)
+                        url = action_queue.pop(0)
+                        result.explored_actions.append(urlparse(url).path + (("#" + urlparse(url).fragment)
+                                                                            if urlparse(url).fragment else ""))
+                    else:
+                        # least-visited parent first (stable: earlier links win ties)
+                        i = min(range(len(queue)), key=lambda j: per_parent.get(_parent(_norm(queue[j])), 0))
+                        url = queue.pop(i)
                     key = _norm(url)
                     if key in seen or urlparse(url).netloc != origin.netloc:
                         continue
@@ -280,11 +380,20 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                     per_parent[_parent(key)] = per_parent.get(_parent(key), 0) + 1
                     seen.add(key)
                     try:
-                        await _goto_settled(page, url)
+                        resp = await page.goto(url, wait_until="load", timeout=30_000)
+                        from core.dom_analyzer import _settle
+                        await _settle(page)
+                        await _wait_dom_stable(page)
                     except Exception as exc:  # noqa: BLE001
                         logger.info("QAX map: could not open %s: %s", url, exc)
                         continue
+                    if resp is not None and resp.status >= 400:
+                        logger.info("QAX map: %s answered %s — not a page of the app", url, resp.status)
+                        continue
                     landed = _norm(page.url)
+                    if is_action and username and re.search(r"log-?out|sign-?out", url, re.I):
+                        await _relogin()                           # the action ended the session
+                        continue
                     if landed != key and landed in seen:
                         continue                                   # a redirect to a page we have
                     seen.add(landed)
@@ -301,9 +410,18 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                     p_url = urlparse(page.url)
                     example = p_url.path + (("?" + p_url.query) if p_url.query else "") \
                         + (("#" + p_url.fragment) if p_url.fragment.startswith("/") else "")
-                    result.pages.append({"path": landed, "example": example,
-                                         "title": await page.title(), "elements": elements,
-                                         "hidden": hidden, "forms": forms})
+                    opened_by: dict = {}
+                    if open_menus and not is_action:
+                        elements, hidden, opened_by = await _open_menus(page, elements, hidden,
+                                                                         allow_risky=explore_actions)
+                    entry = {"path": landed, "example": example,
+                             "title": await page.title(), "elements": elements,
+                             "hidden": hidden, "forms": forms}
+                    if opened_by:
+                        entry["opened_by"] = opened_by
+                    if is_action:
+                        entry["action"] = True
+                    result.pages.append(entry)
                     try:
                         links = await page.evaluate(_LINKS_JS)
                     except Exception:  # noqa: BLE001
@@ -318,7 +436,10 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                         if urlparse(nxt).netloc != origin.netloc:
                             continue
                         if is_risky_link(href, ln.get("text", "")):
-                            if href not in result.skipped_links:
+                            if explore_actions:
+                                if _norm(nxt) not in seen and nxt not in action_queue:
+                                    action_queue.append(nxt)
+                            elif href not in result.skipped_links:
                                 result.skipped_links.append(href)
                             continue
                         if _norm(nxt) not in seen:
@@ -330,6 +451,96 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
         logger.error("QAX map failed: %s", exc)
         result.error = str(exc)[:300]
     return result
+
+
+async def _sitemap_urls(page, base_url: str, limit: int = 50) -> list:
+    """Same-origin URLs from /sitemap.xml, if the app has one. Never raises."""
+    try:
+        resp = await page.request.get(base_url + "/sitemap.xml", timeout=5_000)
+        if not resp.ok:
+            return []
+        locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", await resp.text())
+        host = urlparse(base_url).netloc
+        return [u for u in locs if urlparse(u).netloc == host][:limit]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+_LOGIN_LINKS_JS = r"""() => [...document.querySelectorAll('a[href]')]
+  .filter(a => /\blog\s?-?in\b|\bsign\s?-?in\b/i.test((a.innerText || '') + ' ' + a.getAttribute('href')))
+  .map(a => a.href)"""
+
+
+_OPENERS_JS = r"""() => [...document.querySelectorAll(
+  "[aria-haspopup]:not([aria-haspopup='false']), [aria-expanded='false'], [data-bs-toggle], [data-toggle], summary")]
+  .filter(e => e.offsetWidth || e.offsetHeight)
+  // e.type is what the browser does: a <button> with no type inside a form is "submit" and
+  // would SEND the form — never click those while reading (found on Django admin, linkding)
+  .filter(e => !((e.tagName === 'BUTTON' || e.tagName === 'INPUT') && e.form && (e.type || '').toLowerCase() !== 'button'))
+  .map(e => ({text: (e.innerText || e.getAttribute('aria-label') || '').trim().slice(0, 40),
+              type: (e.type || e.getAttribute('type') || '').toLowerCase(), tag: e.tagName.toLowerCase()}))"""
+
+
+async def _open_menus(page, elements: dict, hidden: list, allow_risky: bool = False,
+                      max_openers: int = 8) -> "tuple[dict, list, dict]":
+    """
+    Click the controls that open a menu or dialog and record what each one reveals, so a
+    generated test knows the step it needs first (Healthchecks: "Log Out" lives in the
+    account menu; PocketBase: "Logout" in the user menu). Elements that only exist once the
+    dialog is open are added. A control whose text looks risky (delete/logout…) is not
+    clicked unless allow_risky. The page is restored (Escape, then reload if needed).
+    Returns (elements, hidden, opened_by {revealed_key: opener_key}). Never raises.
+    """
+    from core.dom_analyzer import _settle, _wait_dom_stable, label_page
+    opened_by: dict = {}
+    try:
+        openers = await page.evaluate(_OPENERS_JS)
+    except Exception:  # noqa: BLE001
+        return elements, hidden, opened_by
+    start_url = page.url
+    by_sel = {v: k for k, v in elements.items()}
+    for op in openers[:max_openers]:
+        text = op.get("text") or ""
+        if op.get("type") == "submit" or (not allow_risky and is_risky_link("", text)):
+            continue
+        opener_key = None
+        for k, sel in elements.items():           # find the opener's own key by its text
+            if text and text.lower() in k.replace("_", " ") or (text and f"'{text}'" in sel):
+                opener_key = k
+                break
+        if not opener_key or opener_key in hidden:
+            continue
+        try:
+            await page.click(elements[opener_key], timeout=3_000)
+            await page.wait_for_timeout(400)
+            await _wait_dom_stable(page, max_ms=2_000)
+            if page.url != start_url:
+                # it navigated (a route change), it did not open a menu — attribute nothing
+                await page.goto(start_url, wait_until="load")
+                await _settle(page)
+                continue
+            now, now_hidden = await label_page(page)
+            for k, sel in now.items():
+                if k == opener_key or k in now_hidden:
+                    continue
+                if k not in elements and sel not in by_sel:
+                    elements[k] = sel                  # exists only while the dialog is open
+                    hidden.append(k)
+                    opened_by[k] = opener_key
+                elif k in hidden and k not in opened_by:
+                    opened_by[k] = opener_key          # was hidden, this control shows it
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(200)
+            if page.url != start_url:
+                await page.goto(start_url, wait_until="load")
+                await _settle(page)
+        except Exception:  # noqa: BLE001
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:  # noqa: BLE001
+                pass
+            continue
+    return elements, hidden, opened_by
 
 
 async def _stable_labels(page, elements: dict, hidden: list) -> "tuple[dict, list]":

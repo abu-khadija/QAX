@@ -474,16 +474,21 @@ def map_app_route():
         max_pages = max(1, min(int(data.get("max_pages") or 20), 60))
     except (TypeError, ValueError):
         max_pages = 20
+    def _on(v) -> bool:
+        return str(v).lower() in ("1", "true", "yes", "on")
     result = asyncio.run(map_app(url, max_pages=max_pages,
                                  username=str(data.get("username", "")),
                                  password=str(data.get("password", "")),
-                                 insecure=str(data.get("insecure", "")).lower() in ("1", "true", "yes", "on")))
+                                 insecure=_on(data.get("insecure", "")),
+                                 explore_actions=_on(data.get("explore_actions", ""))))
     if result.error:
         return jsonify({"error": result.error}), 502
     save_map(result, project)
     return jsonify({"project": project, "pages": [
         {"path": p["path"], "elements": len(p.get("elements") or {})} for p in result.pages],
-        "login_ok": result.login_ok, "skipped_links": result.skipped_links})
+        "login_ok": result.login_ok, "skipped_links": result.skipped_links,
+        "explored_actions": result.explored_actions, "writes": len(result.writes),
+        "revealed": sum(len(p.get("opened_by") or {}) for p in result.pages)})
 
 
 def _ai_error_message(err) -> str:
@@ -585,8 +590,9 @@ def execute_tests():
     try:
         from services.execution_service import ExecutionService
         if engine == "ui":
-            res = _run_browser(cases, url, project,
-                               insecure=str(data.get("insecure", "")).lower() in ("1", "true", "yes", "on"))
+            on = lambda v: str(v).lower() in ("1", "true", "yes", "on")  # noqa: E731
+            res = _run_browser(cases, url, project, insecure=on(data.get("insecure", "")),
+                               watch=on(data.get("watch", "")), trace=on(data.get("trace", "")))
         else:
             token = str(data.get("token", "")).strip()
             res = ExecutionService().execute(cases, mode="api", base_url=url,
@@ -605,14 +611,16 @@ def execute_tests():
 _BROWSER_LOCK = __import__("threading").Lock()
 
 
-def _run_browser(cases: list, url: str, project: str, insecure: bool = False):
+def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
+                 watch: bool = False, trace: bool = False):
     """
     One browser run at a time: the UI engine reads the target and the selector project
     from the process environment, so they are set — and restored — under a lock.
     AI healing is forced off for web runs.
     """
     from services.execution_service import ExecutionService
-    keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT", "QAX_INSECURE")
+    keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT", "QAX_INSECURE",
+            "QAX_SLOW_MO_MS", "QAX_STEP_SCREENSHOTS", "QAX_TRACE")
     with _BROWSER_LOCK:
         saved = {k: os.environ.get(k) for k in keys}
         try:
@@ -620,15 +628,41 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False):
             os.environ["QAX_AI_HEAL"] = "false"
             os.environ["AUTO_BUG_REPORT"] = "false"
             os.environ["QAX_INSECURE"] = "true" if insecure else "false"
+            # every step is photographed in the web UI (the results show them); watch = a visible,
+            # slowed-down browser on this machine; trace = a Playwright trace per case
+            os.environ["QAX_STEP_SCREENSHOTS"] = "true"
+            os.environ["QAX_SLOW_MO_MS"] = "400" if watch else "0"
+            os.environ["QAX_TRACE"] = "true" if trace else "false"
             if project:
                 os.environ["DEFAULT_PROJECT"] = project
-            return ExecutionService().execute(cases, mode="ui", headless=True)
+            return ExecutionService().execute(cases, mode="ui", headless=not watch)
         finally:
             for k, v in saved.items():
                 if v is None:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+
+@app.get("/api/artifact")
+def artifact():
+    """
+    A screenshot or trace a run saved under output/ (the web UI shows step screenshots).
+    Only files inside output/screenshots and output/traces are served.
+    """
+    from pathlib import Path
+
+    from flask import send_file
+    root = Path(__file__).resolve().parent.parent / "output"
+    raw = str(request.args.get("path", ""))
+    try:
+        target = (Path(raw) if Path(raw).is_absolute() else (root.parent / raw)).resolve()
+        allowed = [(root / "screenshots").resolve(), (root / "traces").resolve()]
+        if not any(target.is_relative_to(a) for a in allowed) or not target.is_file():
+            return jsonify({"error": "not found"}), 404
+        return send_file(target)
+    except Exception:  # noqa: BLE001
+        return jsonify({"error": "not found"}), 404
 
 
 @app.get("/api/config")

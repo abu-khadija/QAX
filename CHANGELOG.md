@@ -17,6 +17,9 @@ Every scan written with `--out` records the exact version and commit that produc
 - `map`: read a running app from its URL (pages, SPA routes, elements, selectors checked to match one element and
   to survive a reload; risky links never followed); generation is grounded in it (web: *Read the app*).
 - Assertion types `value`, `contains`, `enabled`, `disabled`, `checked`, `not_visible`; `{{unique}}` per case.
+- Seeing the run: `--screenshots all`, `--trace`, `--watch` (CLI) / step screenshots, *Watch it run*, trace (web).
+- `map --explore-actions`; menus/dialogs opened and recorded; sitemap.xml; the app's own login link; ARIA widgets,
+  rich editors (CodeMirror/ProseMirror/Quill) and RPC/GraphQL reads understood.
 
 ### Changed
 - External writes need an explicit opt-in: `pipeline --live`; `execute` files auto-bugs only with `--upload`;
@@ -34,6 +37,10 @@ Every scan written with `--out` records the exact version and commit that produc
   another — possibly destructive — element); no page reload mid-test; app rate limiting is ERROR, not FAIL;
   clicking a disabled element fails at once with the reason.
 - An API case whose steps checked nothing (no expected status/body) is SKIP, not PASS.
+- Map/browser safety: never fill the operator's credentials into a non-login form with password fields (Django
+  "add user"); never click a control that would submit a form while reading; framework-generated ids (React
+  useId, Base UI, Radix…) never used as selectors; wait for the page to stop changing (elements + URL) before
+  acting — an edit was once saved onto another row of a re-rendering list (Beszel).
 
 - A reachability check before every scan: an address QAX cannot reach is an error with the reason (refused, DNS, timeout,
   certificate) instead of a clean-looking "0 findings" scan. `--insecure` (web: a checkbox) for a self-signed certificate.

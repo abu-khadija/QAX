@@ -1,0 +1,78 @@
+{
+  "base_url": "http://127.0.0.1:9093",
+  "login_ok": true,
+  "pages": [
+    {
+      "path": "/auth/login",
+      "example": "/auth/login",
+      "title": "Log In - Flaskr",
+      "elements": {
+        "flaskr_link": "a[href='/']",
+        "register_link": "a[href='/auth/register']",
+        "log_in_link": "a[href='/auth/login']",
+        "username": "#username",
+        "password": "#password",
+        "log_in_button": "input[type='submit'][value='Log In']"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "username",
+            "password"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/",
+      "example": "/",
+      "title": "Posts - Flaskr",
+      "elements": {
+        "flaskr_link": "a[href='/']",
+        "log_out_link": "a[href='/auth/logout']",
+        "new_link": "a[href='/create']"
+      },
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/create",
+      "example": "/create",
+      "title": "New Post - Flaskr",
+      "elements": {
+        "flaskr_link": "a[href='/']",
+        "log_out_link": "a[href='/auth/logout']",
+        "title": "#title",
+        "body": "#body",
+        "save_button": "input[type='submit'][value='Save']"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "title",
+            "body"
+          ]
+        }
+      ],
+      "action": true
+    }
+  ],
+  "skipped_links": [],
+  "explored_actions": [
+    "/create",
+    "/auth/logout"
+  ],
+  "writes": [
+    {
+      "method": "POST",
+      "path": "/auth/login"
+    }
+  ],
+  "error": null
+}

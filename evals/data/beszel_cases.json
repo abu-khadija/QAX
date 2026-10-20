@@ -1,0 +1,443 @@
+{
+  "_comment": "Functional QA on a real SPA: Beszel hub v0.21.0 (MIT, React + Radix, PocketBase backend; its own UI), run locally. Selector keys from `main.py map --explore-actions`; dialog/menu items named live (exact names); row actions scoped with a Playwright selector. Includes create / edit / pause / delete (confirm) / logout. Credentials: QAX_VAR_BZ_USER / QAX_VAR_BZ_PASSWORD.",
+  "test_cases": [
+    {
+      "test_case_id": "BZ-001",
+      "title": "Valid login opens the systems dashboard",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_BZ_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "add_system_button",
+          "assertion_type": "visible",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "BZ-002",
+      "title": "Wrong password shows an error",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "not-the-password",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "Login attempt failed",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "BZ-003",
+      "title": "Adding a system lists it",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_BZ_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "name",
+          "value": "qax-add-{{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "host_ip",
+          "value": "127.0.0.1",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button_2",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax-add-{{unique}}",
+          "step_number": 9
+        }
+      ]
+    },
+    {
+      "test_case_id": "BZ-004",
+      "title": "Editing a system renames it",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_BZ_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "name",
+          "value": "qax-edit-{{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "host_ip",
+          "value": "127.0.0.1",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button_2",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax-edit-{{unique}}",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-edit-{{unique}}') >> button:has-text('Open menu')",
+          "step_number": 10
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "edit_menu_item",
+          "step_number": 11
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "name",
+          "value": "qax-renamed-{{unique}}",
+          "step_number": 12
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "form:has(#name) button:not([type])",
+          "step_number": 13
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax-renamed-{{unique}}",
+          "step_number": 14
+        },
+        {
+          "step_number": 15,
+          "playwright_action": "assert",
+          "selector_key": "text=qax-edit-{{unique}}",
+          "assertion_type": "not_visible"
+        }
+      ]
+    },
+    {
+      "test_case_id": "BZ-005",
+      "title": "Pausing a system offers Resume",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_BZ_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "name",
+          "value": "qax-pause-{{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "host_ip",
+          "value": "127.0.0.1",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button_2",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax-pause-{{unique}}",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')",
+          "step_number": 10
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "pause_menu_item",
+          "step_number": 11
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')",
+          "step_number": 12
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "xpath=//*[@role='menuitem'][normalize-space(.)='Resume']",
+          "assertion_type": "visible",
+          "step_number": 13
+        }
+      ]
+    },
+    {
+      "test_case_id": "BZ-006",
+      "title": "Deleting a system removes it (menu \u2192 Delete \u2192 Continue)",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_BZ_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "name",
+          "value": "qax-del-{{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "host_ip",
+          "value": "127.0.0.1",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "add_system_button_2",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "qax-del-{{unique}}",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-del-{{unique}}') >> button:has-text('Open menu')",
+          "step_number": 10
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "delete_menu_item",
+          "step_number": 11
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "continue_button",
+          "step_number": 12
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "text=qax-del-{{unique}}",
+          "assertion_type": "not_visible",
+          "step_number": 13
+        }
+      ]
+    },
+    {
+      "test_case_id": "BZ-007",
+      "title": "Log out from the user menu",
+      "module": "Systems",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "email",
+          "value": "{{env:QAX_VAR_BZ_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_BZ_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "sign_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "user_actions_button",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_out_menu_item",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "sign_in_button",
+          "assertion_type": "visible",
+          "step_number": 7
+        }
+      ]
+    }
+  ]
+}

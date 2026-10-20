@@ -132,6 +132,41 @@ def delayed():
 <p id="status"></p>""")
 
 
+_POSTS: list = []          # every POST the app received outside /login and /notes (tests read it)
+
+
+@app.get("/menu-page")
+def menu_page():
+    """A menu opened by a button, and a typeless button inside a form (it would SUBMIT it)."""
+    return _page("Menu", """<button id="menu-btn" type="button" aria-haspopup="true"
+  onclick="document.getElementById('m').hidden = !document.getElementById('m').hidden">Account</button>
+<div id="m" hidden><a id="profile-link" href="/profile">Profile</a></div>
+<form method="post" action="/add-user"><button aria-expanded="false">Details</button></form>""")
+
+
+@app.get("/profile")
+def profile():
+    """A page reachable only from the menu."""
+    return _page("Profile", "<h1>Profile</h1>")
+
+
+@app.route("/add-user", methods=["GET", "POST"])
+def add_user():
+    """Password fields that are NOT a login form (Django admin's "add user")."""
+    if request.method == "POST":
+        _POSTS.append(dict(request.form))
+        return _page("Added", "<p>User added</p>")
+    return _page("Add user", """<h1>Add user</h1><form method="post" action="/add-user">
+<input name="username" type="text"><input name="password1" type="password">
+<input name="password2" type="password"><button type="submit">Save</button></form>""")
+
+
+@app.get("/_posts")
+def posts():
+    """Test helper: the POSTs /add-user received."""
+    return {"posts": _POSTS}
+
+
 _SPA = """<!doctype html><html><head><meta charset="utf-8"><title>SPA</title></head><body>
 <nav><a href="#/home">Home</a> <a href="#/settings">Settings</a> <a href="#/export-data">Export</a></nav>
 <div id="view"></div>

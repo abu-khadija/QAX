@@ -1,0 +1,26 @@
+{
+  "_meta": {
+    "auto_discovered": true,
+    "manual_overrides": []
+  },
+  "auth_login": {
+    "flaskr_link": "a[href='/']",
+    "register_link": "a[href='/auth/register']",
+    "log_in_link": "a[href='/auth/login']",
+    "username": "#username",
+    "password": "#password",
+    "log_in_button": "input[type='submit'][value='Log In']"
+  },
+  "home": {
+    "flaskr_link": "a[href='/']",
+    "log_out_link": "a[href='/auth/logout']",
+    "new_link": "a[href='/create']"
+  },
+  "create": {
+    "flaskr_link": "a[href='/']",
+    "log_out_link": "a[href='/auth/logout']",
+    "title": "#title",
+    "body": "#body",
+    "save_button": "input[type='submit'][value='Save']"
+  }
+}

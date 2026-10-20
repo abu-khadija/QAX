@@ -200,10 +200,21 @@ class TestExecutor:
         healed_count = 0
         first_failure_step = None  # capture details for bug report
 
+        step_shots = os.getenv("QAX_STEP_SCREENSHOTS", "false").strip().lower() == "true"
         for i, step in enumerate(steps, start=1):
             step["step_number"] = i  # Ensure step_number is set
             step_result = await self._execute_step(step, page, runner, tc_id)
             step_results.append(step_result)
+            # `--screenshots all` / `--watch`: what the browser showed after EVERY step —
+            # the run can be followed (and reviewed) step by step, not only at a failure.
+            if step_shots and not step_result.get("screenshot") and hasattr(runner, "take_screenshot"):
+                try:
+                    shot = await runner.take_screenshot(f"{str(tc_id).replace('/', '_')}_step{i}",
+                                                        folder="output/screenshots/steps")
+                    if shot:
+                        step_result["screenshot"] = shot
+                except Exception:  # noqa: BLE001
+                    pass
 
             # ── Handle failure ──────────────────────────────────────────
             if step_result["status"] == "FAIL":
@@ -427,8 +438,18 @@ class TestExecutor:
                 runner.take_writes()                       # start this case's ledger empty
             if hasattr(runner, "take_throttled"):
                 runner.take_throttled()
+            if hasattr(runner, "take_dialogs"):
+                runner.take_dialogs()
             result = await self.execute_test_case(tc, runner)
+            if hasattr(runner, "take_dialogs"):
+                dialogs = runner.take_dialogs()
+                if dialogs:
+                    result["dialogs"] = dialogs            # e.g. "Are you sure?" — accepted
             await self._mark_if_throttled(result, runner)
+            if hasattr(runner, "stop_trace"):
+                trace = await runner.stop_trace(str(tc.get("test_case_id", "case")))
+                if trace:
+                    result["trace"] = trace
             # What this case sent that can change data on the target (form posts, deletes…).
             # QAX does not undo data created through the UI — it says what it sent.
             result["writes"] = runner.take_writes() if hasattr(runner, "take_writes") else []

@@ -107,6 +107,11 @@ async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
         await page.wait_for_load_state("networkidle", timeout=idle_ms)
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from core.dom_analyzer import _wait_dom_stable
+        await _wait_dom_stable(page, max_ms=3_000, quiet_polls=2)   # incl. a late SPA redirect
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class _UnresolvedSelector(Exception):
@@ -301,7 +306,7 @@ class ActionMapper:
         # (e.g. "#id_url", "[data-testid='save']") instead of a key name.
         raw = (element_name or "").strip()
         is_key = raw in self.selectors or raw.lower() in self._candidates
-        if raw and not is_key and re.match(r"^([#.\[]|[a-z]+[#.\[:])", raw):
+        if raw and not is_key and re.match(r"^([#.\[]|[a-z]+[#.\[:]|(xpath|text|css|role|internal:[a-z-]+)=)", raw):
             return raw, "Level 0 (selector given)"
 
         # ── Level 0: a name used on several pages → the one on THIS page ───
@@ -758,7 +763,7 @@ class ActionMapper:
 
         step_num       = step.get("step_number", 0)
         action         = (step.get("playwright_action") or "").strip().lower()
-        selector_key   = step.get("selector_key") or ""
+        selector_key   = render_case_vars(step.get("selector_key") or "", self.case_vars)
         value          = render_case_vars(step.get("value") or "", self.case_vars)
         assertion_type = (step.get("assertion_type") or "").strip().lower()
         assertion_val  = render_case_vars(step.get("assertion_value") or "", self.case_vars)
@@ -789,6 +794,15 @@ class ActionMapper:
 
         async def _resolve_selector() -> str:
             """Resolve selector_key → CSS via override, then the 3-level fallback."""
+            # Do not act while the page is re-rendering: a list that re-sorts after a
+            # create reuses its row elements for OTHER records, and a click located a
+            # moment earlier lands on the wrong row (found on Beszel: an "edit" saved onto
+            # another system). Wait until the element count is stable (bounded).
+            try:
+                from core.dom_analyzer import _wait_dom_stable
+                await _wait_dom_stable(page, max_ms=2_000, quiet_polls=2)
+            except Exception:  # noqa: BLE001
+                pass
             if selector_override:
                 return selector_override
             selector, level = await self.find_selector_with_fallback(selector_key, page, exact=True)

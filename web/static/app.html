@@ -161,6 +161,10 @@
   .tc .vd.SKIP,.tc .vd.ERROR,.tc .vd.NOTRUN{color:var(--p2);border-color:var(--p2)}
   .tc .ev{margin-top:8px;font:12px/1.45 ui-monospace,Menlo,monospace;color:var(--muted);white-space:pre-wrap;word-break:break-word}
   #execpanel{margin-top:16px}
+  .shots{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .shots a{position:relative;display:block;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .shots img{width:120px;height:75px;object-fit:cover;object-position:top;display:block}
+  .shots span{position:absolute;left:4px;top:3px;font-size:10px;background:#000a;color:#fff;border-radius:4px;padding:0 4px}
   .steps4{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
   .steps4 span{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--card2)}
   .steps4 b{color:var(--accent);margin-right:4px}
@@ -279,6 +283,9 @@
           <input id="mapuser" autocomplete="off" spellcheck="false"></div>
         <div class="field"><label for="mappass">Login password (optional — used for this read only, never stored)</label>
           <input id="mappass" type="password" autocomplete="new-password"></div>
+        <label class="consent" for="mapexplore"><input type="checkbox" id="mapexplore">
+          <span><b>Also follow create / edit / delete / logout links</b> (a disposable staging app only —
+            this CHANGES DATA; every write is listed).</span></label>
         <label class="consent" for="mapauth"><input type="checkbox" id="mapauth">
           <span><b>I own this app or am authorized to test it.</b></span></label>
         <div class="row" style="margin-top:10px;justify-content:flex-end">
@@ -356,6 +363,11 @@
         <input id="exproj" placeholder="config/projects/&lt;name&gt;/selectors.json" autocomplete="off" spellcheck="false"></div>
       <div class="field"><label for="extoken">Bearer token (optional)</label>
         <input id="extoken" placeholder="for apps behind auth" autocomplete="off" spellcheck="false"></div>
+      <label class="consent" for="exwatch"><input type="checkbox" id="exwatch">
+        <span><b>Watch it run.</b> Opens a visible browser on this machine and slows it down so you can follow every
+          step (browser engine).</span></label>
+      <label class="consent" for="extrace"><input type="checkbox" id="extrace">
+        <span><b>Record a Playwright trace</b> per case (actions, network, page snapshots).</span></label>
       <label class="consent" for="exinsecure"><input type="checkbox" id="exinsecure">
         <span><b>Allow a self-signed certificate (staging only).</b> The browser will not verify this app's TLS certificate.</span></label>
       <label class="consent" for="exro"><input type="checkbox" id="exro" checked>
@@ -494,6 +506,10 @@ function renderTests(cases){
       +stepsH
       +(exp?'<div class="exp"><div class="k">Expected</div>'+esc(exp)+'</div>':'')
       +(v&&v.evidence?'<div class="ev">'+esc(v.evidence)+'</div>':'')
+      +(v&&v.shots&&v.shots.length?'<div class="shots">'+v.shots.map(s=>'<a href="/api/artifact?path='+encodeURIComponent(s.p)
+          +'" target="_blank" title="step '+s.n+' · '+esc(s.st)+'"><img loading="lazy" src="/api/artifact?path='+encodeURIComponent(s.p)
+          +'" alt="step '+s.n+'"><span>'+s.n+'</span></a>').join('')+'</div>':'')
+      +(v&&v.trace?'<div class="hint">Trace: <code>playwright show-trace '+esc(v.trace)+'</code></div>':'')
       +'</div>';
   }).join('');
   $('execpanel').style.display='block';
@@ -534,14 +550,18 @@ async function readApp(){
   const btn=$('mapgo'); btn.disabled=true; out.innerHTML='<div class="hk">Reading the app…</div>';
   try{
     const r=await api('/api/map',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({url,project,username:$('mapuser').value,password:$('mappass').value,authorized:true})});
+      body:JSON.stringify({url,project,username:$('mapuser').value,password:$('mappass').value,authorized:true,
+        explore_actions:$('mapexplore').checked})});
     const d=await r.json();
     if(d.error){ out.innerHTML='<div class="hk">⚠️ '+esc(d.error)+'</div>'; return; }
     const n=(d.pages||[]).reduce((a,p)=>a+p.elements,0);
     out.innerHTML='<div class="hk"><b>'+(d.pages||[]).length+'</b> page(s), <b>'+n+'</b> element(s) read'
       +(d.login_ok?' · logged in':(d.login_ok===false?' · ⚠️ login did not succeed — public pages only':''))
       +'<br>'+(d.pages||[]).slice(0,12).map(p=>esc(p.path)+' ('+p.elements+')').join(' · ')
-      +((d.skipped_links||[]).length?'<br>Not followed (would log out / change data): '+d.skipped_links.slice(0,6).map(esc).join(', '):'')
+      +(d.revealed?'<br>Revealed by opening menus/dialogs: '+d.revealed+' element(s)':'')
+      +((d.skipped_links||[]).length?'<br>Not followed (would log out / change data): '+d.skipped_links.slice(0,6).map(esc).join(', ')+' — tick "Also follow…" to map them':'')
+      +((d.explored_actions||[]).length?'<br>Action links followed: '+d.explored_actions.slice(0,6).map(esc).join(', '):'')
+      +(d.writes?'<br>⚠️ '+d.writes+' write request(s) were sent while reading':'')
       +'<br>Generation now uses these pages. Run the tests with project <code>'+esc(d.project)+'</code>.</div>';
     $('exurl').value=$('exurl').value||url; $('exproj').value=d.project;
   }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
@@ -556,6 +576,7 @@ async function runTests(preview){
     const r=await api('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tests:window._lastTests,url,preview,read_only:$('exro').checked,
         engine:$('exengine').value,project:$('exproj').value.trim(),insecure:$('exinsecure').checked,
+        watch:$('exwatch').checked,trace:$('extrace').checked,
         authorized:$('exauth').checked,token:$('extoken').value.trim()})});
     const d=await r.json(); const p=d.plan||{};
     let h='';
@@ -575,7 +596,8 @@ async function runTests(preview){
                  +(s.response_code!=null?(' → '+s.response_code):'')+' '+(s.status||'')
                  +(s.actual_result?(' — '+s.actual_result):'')+(s.error?(' — '+s.error):'')).join('\n')
                  +(x.screenshot?('\nscreenshot: '+x.screenshot):'');
-               tc._verdict={status:x.status,label:x.status==='PASS'?'PASS · executed':x.status, evidence:ev}; }
+               const shots=(x.steps||[]).filter(s=>s.screenshot).map(s=>({n:s.step_number,p:s.screenshot,st:s.status}));
+               tc._verdict={status:x.status,label:x.status==='PASS'?'PASS · executed':x.status, evidence:ev, shots, trace:x.trace||''}; }
         else if(notRun[tc.test_case_id]) tc._verdict={status:'NOTRUN',label:'not run',evidence:notRun[tc.test_case_id]};
       });
       renderTests(window._lastTests);

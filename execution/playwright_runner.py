@@ -24,6 +24,7 @@ until Playwright adds Python 3.14 support.
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -138,8 +139,14 @@ class PlaywrightRunner:
                 )
                 browser_launcher = self._playwright.chromium
 
+            # Watch mode (`--watch`): a visible browser, slowed down so a person can follow it.
+            try:
+                slow_mo = max(0, int(os.getenv("QAX_SLOW_MO_MS", "0") or 0))
+            except ValueError:
+                slow_mo = 0
             self.browser = await browser_launcher.launch(
                 headless=headless,
+                slow_mo=slow_mo,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],  # Required for Linux/CI
             )
 
@@ -173,7 +180,8 @@ class PlaywrightRunner:
 
         def _on_request(req):
             try:
-                if req.method.upper() not in ("GET", "HEAD", "OPTIONS"):
+                from core.app_mapper import is_write_request
+                if is_write_request(req.method, req.url, req.post_data):
                     from urllib.parse import urlparse
                     u = urlparse(req.url)
                     self._writes.append({"method": req.method.upper(),
@@ -190,7 +198,54 @@ class PlaywrightRunner:
             except Exception:  # noqa: BLE001
                 pass
         self.context.on("response", _on_response)
+        # Playwright trace (`--trace`): every action, network call and DOM snapshot of the
+        # case, viewable with `playwright show-trace <file>`.
+        self._tracing = os.getenv("QAX_TRACE", "false").strip().lower() == "true"
+        if self._tracing:
+            try:
+                await self.context.tracing.start(screenshots=True, snapshots=True)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("trace start failed: %s", e)
+                self._tracing = False
         self.page = await self.context.new_page()
+        # Browser dialogs (confirm/alert/prompt): Playwright DISMISSES them by default, so a
+        # "Delete → Are you sure?" did nothing and a delete test failed for the wrong reason
+        # (found on Flaskr). Accept by default (QAX_DIALOGS=dismiss to refuse) and record them.
+        self._dialogs = []
+
+        async def _on_dialog(dialog):
+            try:
+                self._dialogs.append({"type": dialog.type, "message": dialog.message[:200]})
+                if os.getenv("QAX_DIALOGS", "accept").strip().lower() == "dismiss":
+                    await dialog.dismiss()
+                else:
+                    await dialog.accept()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            self.page.on("dialog", _on_dialog)
+        except Exception as e:  # noqa: BLE001 — never crash on a page without events
+            logger.debug("dialog handler not attached: %s", e)
+
+    async def stop_trace(self, name: str, folder: str = "output/traces") -> str:
+        """Save the current context's trace as <folder>/<name>_<ts>.zip ("" when not tracing)."""
+        if not getattr(self, "_tracing", False) or not self.context:
+            return ""
+        try:
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            path = str(Path(folder) / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}_{ts}.zip")
+            await self.context.tracing.stop(path=path)
+            self._tracing = False
+            return path
+        except Exception as e:  # noqa: BLE001
+            logger.debug("trace stop failed: %s", e)
+            return ""
+
+    def take_dialogs(self) -> list:
+        """Return and clear the browser dialogs (confirm/alert) seen since the last call."""
+        out, self._dialogs = list(getattr(self, "_dialogs", []) or []), []
+        return out
 
     def take_throttled(self) -> int:
         """Return and clear how many HTTP 429 answers the app sent since the last call."""

@@ -1,0 +1,392 @@
+{
+  "_comment": "Functional QA on a real app: Flaskr (Flask's official tutorial, BSD-3) @ pallets/flask d086db8, run locally. Selector keys from `main.py map --explore-actions`; the edit page is named live (exact names). Includes create / edit / delete (confirm dialog) / logout. Credentials: QAX_VAR_FL_USER / QAX_VAR_FL_PASSWORD.",
+  "test_cases": [
+    {
+      "test_case_id": "FL-001",
+      "title": "A new user can register and is sent to log in",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/register",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "qax_{{unique}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "pw-{{unique}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "register_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/auth/login",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "FL-002",
+      "title": "Wrong password shows an error",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_FL_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "not-the-password",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "Incorrect password.",
+          "step_number": 5
+        }
+      ]
+    },
+    {
+      "test_case_id": "FL-003",
+      "title": "Creating a post lists it",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_FL_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_FL_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "new_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "QAX post {{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "body",
+          "value": "Written by QAX",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "QAX post {{unique}}",
+          "step_number": 9
+        }
+      ]
+    },
+    {
+      "test_case_id": "FL-004",
+      "title": "A post without a title is refused (the browser blocks the empty required field)",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_FL_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_FL_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "new_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "body",
+          "value": "Written by QAX",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 8
+        },
+        {
+          "step_number": 9,
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/create"
+        }
+      ]
+    },
+    {
+      "test_case_id": "FL-005",
+      "title": "Editing a post changes its title",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_FL_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_FL_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "new_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "Edit me {{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "body",
+          "value": "Written by QAX",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "article:has-text('Edit me {{unique}}') >> a:has-text('Edit')",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "Edited {{unique}}",
+          "step_number": 10
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 11
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "Edited {{unique}}",
+          "step_number": 12
+        },
+        {
+          "step_number": 13,
+          "playwright_action": "assert",
+          "selector_key": "text=Edit me {{unique}}",
+          "assertion_type": "not_visible"
+        }
+      ]
+    },
+    {
+      "test_case_id": "FL-006",
+      "title": "Deleting a post removes it (confirm dialog accepted)",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_FL_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_FL_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "new_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "Delete me {{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "body",
+          "value": "Written by QAX",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "article:has-text('Delete me {{unique}}') >> a:has-text('Edit')",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "delete_button",
+          "step_number": 10
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "article:has-text('Delete me {{unique}}')",
+          "assertion_type": "not_visible",
+          "step_number": 11
+        }
+      ]
+    },
+    {
+      "test_case_id": "FL-007",
+      "title": "Log out ends the session",
+      "module": "Blog",
+      "priority": "high",
+      "expected_outcome": "PASS",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/auth/login",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_FL_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_FL_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_in_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "log_out_link",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "log_in_link",
+          "assertion_type": "visible",
+          "step_number": 6
+        }
+      ]
+    }
+  ]
+}

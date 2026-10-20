@@ -109,6 +109,13 @@ python main.py execute --file output/pipeline/<run>/test_cases.json --project <y
   element with a selector checked to match exactly one element (and to survive a reload), and saves
   `config/projects/<yours>/app_map.json` + `selectors.json`. Generation for that project then uses the real
   pages and elements, and flags generated steps on elements that are not on the map (web: *Read the app*).
+* `map --explore-actions` (a disposable staging app only) also follows create / edit / delete / logout links,
+  logs in again after a logout and lists every write; without it, `map` opens menus and dialogs (and records
+  "appears after clicking X") but never follows a link that changes data or submits a form.
+* **See what it does:** `--screenshots all` (a screenshot after every step — shown in the web results),
+  `--trace` (a Playwright trace per case: `playwright show-trace <file>`), `--watch` (a visible, slowed-down
+  browser you can follow; web: *Watch it run*). Browser dialogs (`confirm()`) are accepted and recorded
+  (`QAX_DIALOGS=dismiss` to refuse).
 * Selectors for one page: `python main.py discover --url … --page … --project <yours>` names the elements of a page
   without AI (`--ai` lets Claude name them). To check a text anywhere on the page, use the built-in
   key `page` (e.g. an error message that only appears after a click).
@@ -119,7 +126,8 @@ python main.py execute --file output/pipeline/<run>/test_cases.json --project <y
 * Assertions: `url`, `text`, `visible`, `value`, `contains`, `enabled`, `disabled`, `checked`, `not_visible`;
   `{{unique}}` in a value or assertion gives each run its own value (repeatable cases). A failure while the
   app rate-limits QAX (HTTP 429 / "too many attempts") is ERROR, not FAIL.
-* Evidence: three real apps (linkding, Healthchecks, PocketBase) — `strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md`.
+* Evidence: seven real apps (linkding, Healthchecks, PocketBase, Flaskr, microblog, Memos, Beszel) —
+  `strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md`.
 * Xray has **not** been exercised against a real Xray instance yet.
 
 ```bash
