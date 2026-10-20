@@ -16,7 +16,6 @@ Install Playwright browsers once with:
 import base64
 import logging
 import os
-from pathlib import Path
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -44,10 +43,8 @@ def _load_module_url_map() -> dict:
     project = os.getenv("DEFAULT_PROJECT", "")
     if not project:
         return {}
-    config_path = (
-        Path(__file__).parent.parent
-        / "config" / "projects" / project / "selectors.json"
-    )
+    from core.paths import projects_dir
+    config_path = projects_dir() / project / "selectors.json"
     if not config_path.exists():
         return {}
     try:

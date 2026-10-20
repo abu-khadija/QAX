@@ -34,7 +34,8 @@ def run_checks(root: str | None = None) -> list:
     Returns:
         list[dict]: [{"name", "status": "ok"|"warn"|"fail", "detail", "fix"}].
     """
-    base = Path(root or Path(__file__).resolve().parent.parent)
+    from core.paths import data_root
+    base = Path(root or data_root())
     out = []
 
     def add(name, status, detail, fix=""):

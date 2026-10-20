@@ -356,7 +356,8 @@ class ClaudeHealer:
                 return None
 
             # ── Locate and update selectors.json ───────────────────────────
-            config_dir = Path(__file__).parent.parent / "config"
+            from core.paths import user_config_dir
+            config_dir = user_config_dir()
             selectors_path = (
                 config_dir / "projects" / project / "selectors.json"
             )

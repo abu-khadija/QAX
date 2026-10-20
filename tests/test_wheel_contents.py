@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED = [
     "web/static/app.html", "web/static/app.js", "web/static/app.css", "web/static/index.html",
-    "qax_config/system_prompt.md", "qax_config/xray_schema.json", "qax_config/skills.json",
+    "qax_config/system_prompt.md", "qax_config/xray_schema.json",
     "qax_configs/smoke.json", "qax_configs/regression.json",
     "core/vendor/axe-core/axe.min.js",
     "evals/targets/vuln_jwt_app.py", "evals/truth/golden-jwt.json",
@@ -69,9 +69,13 @@ def test_config_file_prefers_repo_then_installed(tmp_path, monkeypatch):
     installed = tmp_path / "site" / "qax_config"
     installed.mkdir(parents=True)
     (installed / "xray_schema.json").write_text("{}")
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paths, "REPO_ROOT", tmp_path / "no-repo")
     monkeypatch.setattr(paths, "_installed_dir", lambda pkg: installed if pkg == "qax_config" else None)
     assert paths.config_file("xray_schema.json") == installed / "xray_schema.json"
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "xray_schema.json").write_text("{}")   # the user's copy in the run folder wins
+    assert paths.config_file("xray_schema.json") == tmp_path / "config" / "xray_schema.json"
     # neither has it → the repo path, so the caller's "not found" message names it
     assert paths.config_file("nope.md") == tmp_path / "no-repo" / "config" / "nope.md"
 
@@ -88,3 +92,54 @@ def test_configs_template_falls_back_to_shipped_copy(tmp_path, monkeypatch):
     (tmp_path / "configs").mkdir()
     (tmp_path / "configs" / "smoke.json").write_text("{}")
     assert paths.configs_template("configs/smoke.json") == Path("configs/smoke.json")  # the user's copy wins
+
+
+# ── What QAX writes: never site-packages (E15 follow-up) ─────────────────────
+
+def test_checkout_keeps_writing_where_it_always_did():
+    assert paths.is_checkout()
+    assert paths.data_root() == ROOT
+    assert paths.output_dir() == ROOT / "output"
+    assert paths.projects_dir() == ROOT / "config" / "projects"
+
+
+def test_wheel_install_writes_under_the_run_folder(tmp_path, monkeypatch):
+    site = tmp_path / "site-packages"
+    run = tmp_path / "work"
+    run.mkdir()
+    monkeypatch.chdir(run)
+    monkeypatch.setattr(paths, "REPO_ROOT", site)          # no config/system_prompt.md there → wheel layout
+    assert not paths.is_checkout()
+    assert paths.output_dir() == run / "output"
+    assert paths.projects_dir() == run / "config" / "projects"
+
+
+def test_editable_config_file_copies_the_shipped_prompt_once(tmp_path, monkeypatch):
+    shipped = tmp_path / "site-packages" / "qax_config"
+    shipped.mkdir(parents=True)
+    (shipped / "system_prompt.md").write_text("shipped")
+    run = tmp_path / "work"
+    run.mkdir()
+    monkeypatch.chdir(run)
+    monkeypatch.setattr(paths, "REPO_ROOT", tmp_path / "site-packages")
+    monkeypatch.setattr(paths, "_installed_dir", lambda pkg: shipped if pkg == "qax_config" else None)
+    target = paths.editable_config_file("system_prompt.md")
+    assert target == run / "config" / "system_prompt.md" and target.read_text() == "shipped"
+    target.write_text("edited")
+    assert paths.editable_config_file("system_prompt.md").read_text() == "edited"   # not re-copied
+    assert paths.config_file("system_prompt.md") == target                           # and it is what is read
+    assert (shipped / "system_prompt.md").read_text() == "shipped"                   # package untouched
+
+
+def test_no_module_builds_output_or_config_paths_from_its_install_location():
+    """Writes must go through core.paths; `Path(__file__)…/"output"|"config"` lands in site-packages."""
+    import re
+    pat = re.compile(r"Path\(__file__\)[^\n]*/\s*[\"'](output|config)[\"']")
+    hits = []
+    for top in ("core", "services", "execution", "web", "cli"):
+        for f in (ROOT / top).rglob("*.py"):
+            if f.name != "paths.py" and pat.search(f.read_text(encoding="utf-8")):
+                hits.append(str(f.relative_to(ROOT)))
+    if pat.search((ROOT / "main.py").read_text(encoding="utf-8")):
+        hits.append("main.py")
+    assert not hits, f"use core.paths instead: {hits}"

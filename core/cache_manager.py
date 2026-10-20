@@ -20,7 +20,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Default cache directory ────────────────────────────────────────────────────
-DEFAULT_CACHE_DIR = Path(__file__).parent.parent / "output" / "cache"
+from core.paths import output_dir  # noqa: E402 — never site-packages on a wheel install
+DEFAULT_CACHE_DIR = output_dir() / "cache"
 
 
 class CacheManager:

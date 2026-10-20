@@ -21,7 +21,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Database location ─────────────────────────────────────────────────────────
-DB_PATH = Path(__file__).parent.parent / "output" / "feedback.db"
+from core.paths import output_dir  # noqa: E402 — never site-packages on a wheel install
+DB_PATH = output_dir() / "feedback.db"
 
 # ── Minimum reviews needed before pattern analysis is meaningful ───────────────
 MIN_REVIEWS_FOR_PATTERNS = 20

@@ -26,7 +26,10 @@ Every scan written with `--out` records the exact version and commit that produc
 - A request that cannot get the browser within `QAX_BROWSER_WAIT` seconds (default 5) gets 409 "busy".
 
 ### Fixed
-- **Wheel install works** (E15): `pip install .` now ships the web UI (`web/static`), `config/` system prompt, schema and skills, the `configs/` run templates and the demo/gate targets, so `qax-web` serves the UI and `qax demo` runs outside a checkout. Per-user `config/projects/*` is never packaged. `core/paths.py` prefers the repo copy.
+- **Wheel install works** (E15): `pip install .` now ships the web UI (`web/static`), `config/` system prompt and schema, the `configs/` run templates and the demo/gate targets, so `qax-web` serves the UI and `qax demo` runs outside a checkout. Per-user `config/projects/*` is never packaged. `core/paths.py` prefers the repo copy.
+- **A wheel install never writes into site-packages**: what QAX writes (`output/` incl. the feedback DB, cache
+  and cloned repos, `config/projects/<name>/`, `config/skills.json`, an optimized system prompt) goes to the
+  folder QAX runs from — where screenshots, reports and web runs already went. A checkout is unchanged.
 
 ### Security
 - Error text shown in the web UI and MCP is cleaned (no internal paths, credentials in URLs, tokens); the full

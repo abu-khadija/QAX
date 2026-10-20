@@ -19,7 +19,8 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # ── Path constants ────────────────────────────────────────────────────────────
-CONFIG_DIR = Path(__file__).parent.parent / "config"
+from core.paths import user_config_dir  # noqa: E402 — projects/<name>/context.md: checkout or cwd (wheel)
+CONFIG_DIR = user_config_dir()
 from core.paths import config_file  # noqa: E402 — repo config/ or the installed qax_config copy
 SYSTEM_PROMPT_PATH = config_file("system_prompt.md")
 

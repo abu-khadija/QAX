@@ -51,7 +51,8 @@ INTERACTIVE_SELECTOR = (
 MAX_ELEMENTS = 80
 
 # ── Config dir for saving selectors ───────────────────────────────────────────
-CONFIG_DIR = Path(__file__).parent.parent / "config"
+from core.paths import user_config_dir  # noqa: E402 — never site-packages on a wheel install
+CONFIG_DIR = user_config_dir()
 
 
 

@@ -40,7 +40,8 @@ except ImportError:
 def _resolve_selectors_path(project: str | None = None) -> Path:
     """Return the selectors.json path for the given project (or env default)."""
     resolved = project or os.getenv("DEFAULT_PROJECT", "example")
-    config_dir = Path(__file__).parent.parent / "config"
+    from core.paths import user_config_dir
+    config_dir = user_config_dir()
     new_path = config_dir / "projects" / resolved / "selectors.json"
     if new_path.exists():
         return new_path

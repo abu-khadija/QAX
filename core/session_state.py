@@ -19,7 +19,8 @@ import re
 import time
 from pathlib import Path
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "config" / "projects"
+from core.paths import projects_dir  # noqa: E402 — the checkout, or the folder QAX runs from (wheel)
+CONFIG_DIR = projects_dir()
 
 
 def _safe(project: str) -> str:

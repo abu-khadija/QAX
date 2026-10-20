@@ -796,8 +796,8 @@ Examples:
 
         if answer == "y":
             try:
-                from core.paths import config_file
-                prompt_path = config_file("system_prompt.md")
+                from core.paths import editable_config_file
+                prompt_path = editable_config_file("system_prompt.md")  # never site-packages
                 timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 appendix = (
                     f"\n\n---\n## Auto-Optimization Suggestions ({timestamp})\n\n"
@@ -1147,7 +1147,8 @@ Examples:
         logger.error("Project name cannot be empty.")
         sys.exit(1)
 
-    projects_root = Path(__file__).parent / "config" / "projects"
+    from core.paths import projects_dir
+    projects_root = projects_dir()
     project_dir = projects_root / project_name
 
     if project_dir.exists():
@@ -1458,9 +1459,8 @@ Examples:
                 saver.save_selectors(page_name, selectors, project=args.project)
                 saved_count += len(selectors)
 
-        selectors_path = (
-            Path(__file__).parent / "config" / "projects" / args.project / "selectors.json"
-        )
+        from core.paths import projects_dir
+        selectors_path = projects_dir() / args.project / "selectors.json"
         print(f"\n  ✓ Saved {saved_count} selector(s) to:")
         print(f"    {selectors_path}\n")
     except Exception as e:

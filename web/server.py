@@ -799,7 +799,8 @@ def artifact():
     from pathlib import Path
 
     from flask import send_file
-    root = Path(__file__).resolve().parent.parent / "output"
+    from core.paths import output_dir
+    root = output_dir()
     raw = str(request.args.get("path", ""))
     try:
         target = (Path(raw) if Path(raw).is_absolute() else (root.parent / raw)).resolve()

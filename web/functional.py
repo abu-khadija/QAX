@@ -55,7 +55,8 @@ def _repo_source(repo: str) -> "tuple[str, str]":
     if "@" in u.netloc:
         return "", "Remove the credentials from the repository URL (they would end up in logs)."
     slug = _re.sub(r"[^A-Za-z0-9_.-]+", "_", (u.netloc + u.path).strip("/"))[:80] or "repo"
-    dest = Path(__file__).resolve().parent.parent / "output" / "repos" / slug
+    from core.paths import output_dir
+    dest = output_dir() / "repos" / slug
     if dest.is_dir():
         return str(dest), ""
     try:

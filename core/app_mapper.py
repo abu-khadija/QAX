@@ -29,7 +29,8 @@ from urllib.parse import urljoin, urlparse
 
 logger = logging.getLogger(__name__)
 
-CONFIG_DIR = Path(__file__).parent.parent / "config" / "projects"
+from core.paths import projects_dir  # noqa: E402 — the checkout, or the folder QAX runs from (wheel)
+CONFIG_DIR = projects_dir()
 
 #: Links never followed while mapping: they log out or change data on a GET.
 RISKY_LINK = re.compile(r"(log-?out|sign-?out|log_out|sign_out|delete|remove|destroy|"
