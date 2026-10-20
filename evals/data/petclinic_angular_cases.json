@@ -1,0 +1,372 @@
+{
+ "_comment": "Hand-written cases for Spring PetClinic Angular (Angular 22 SPA, Apache-2.0) over spring-petclinic-rest (Java), selectors from `main.py map`; raw selectors only for rows created by the case. expected_outcome is the truth.",
+ "test_cases": [
+  {
+   "test_case_id": "TC-NG-001",
+   "title": "Find owners by last name lists the matching owner",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Davis"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "find_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Betty Davis"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Harold Davis"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-002",
+   "title": "An owner's page shows their pets",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "george_franklin_link"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Leo"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/petclinic/owners/"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-003",
+   "title": "Adding an owner lists the owner",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners/add"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Qax{{unique_letters}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "1 Test St"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "Cairo"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "0123456789"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/petclinic/owners"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Qax{{unique_letters}}"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-004",
+   "title": "A telephone with letters is refused before saving",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners/add"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Bad"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "x"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "y"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "12ab"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Phone number only accepts digits"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "add_owner_button",
+     "assertion_type": "disabled"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-005",
+   "title": "A name with digits is refused before saving",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners/add"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa1"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "must consist of letters only"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "add_owner_button",
+     "assertion_type": "disabled"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-006",
+   "title": "Adding a vet lists the vet",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/vets/add"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#firstName",
+     "value": "Vet"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#lastName",
+     "value": "Qax{{unique_letters}}"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('Save Vet')"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/petclinic/vets"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Vet Qax{{unique_letters}}"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-007",
+   "title": "Deleting a vet removes them from the list",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/vets/add"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#firstName",
+     "value": "Vet"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#lastName",
+     "value": "Qax{{unique_letters}}"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('Save Vet')"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "xpath=//tr[*[normalize-space(.)='Vet Qax{{unique_letters}}']]//button[normalize-space(.)='Delete Vet']"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "xpath=//tr[*[normalize-space(.)='Vet Qax{{unique_letters}}']]",
+     "assertion_type": "not_visible"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-008",
+   "title": "The specialties page lists radiology",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/specialties"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "radiology"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-NC1",
+   "title": "NEGATIVE CONTROL: wrong owner after search",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Davis"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "find_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "George Franklin Davis"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-NG-NC2",
+   "title": "NEGATIVE CONTROL: invalid phone claimed valid",
+   "module": "PetClinic",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/petclinic/owners/add"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Bad"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "x"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "y"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "12ab"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "add_owner_button",
+     "assertion_type": "enabled"
+    }
+   ]
+  }
+ ]
+}

@@ -13,6 +13,7 @@ Skipped (and says why) when Playwright or its Chromium is not installed.
 import asyncio
 import json
 import socket
+import sys
 import threading
 from pathlib import Path
 
@@ -761,3 +762,103 @@ def test_cleanup_steps_undo_what_a_case_created_and_visual_checks_find_a_changed
     assert v["status"] == "PASS" and v["visual"]["status"] in ("changed", "dimension_mismatch")
     if v["visual"]["status"] == "changed":
         assert v["visual"]["diff"].endswith(".diff.png")
+
+
+def _browser_installed(name: str) -> bool:
+    import os as _os
+    from pathlib import Path as _P
+    cache = _P(_os.getenv("PLAYWRIGHT_BROWSERS_PATH") or (_P.home() / ("Library/Caches/ms-playwright" if sys.platform == "darwin" else ".cache/ms-playwright")))
+    return cache.is_dir() and any(p.name.startswith(name) for p in cache.iterdir())
+
+
+@pytest.mark.parametrize("browser", ["firefox", "webkit"])
+def test_the_same_cases_give_the_same_verdicts_in_firefox_and_webkit(ui_app, monkeypatch, browser):
+    """Cross-browser: the demo cases in Firefox and WebKit (Safari's engine) — the planted bug
+    FAILS, the rest PASS, the unrunnable step is not a pass; plus a web component and an iframe."""
+    if not _browser_installed(browser):
+        pytest.skip(f"{browser} not installed (python -m playwright install {browser})")
+    monkeypatch.setenv("QAX_BROWSER", browser)
+    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    extra = [{"test_case_id": "SH", "title": "shadow", "automation_steps": [
+                 {"playwright_action": "navigate", "value": "/shadow"},
+                 {"playwright_action": "fill", "selector_key": "#who", "value": "Sara"},
+                 {"playwright_action": "click", "selector_key": "#greet"},
+                 {"playwright_action": "assert", "selector_key": "#hello", "assertion_type": "text", "assertion_value": "Hello, Sara"}]},
+             {"test_case_id": "IF", "title": "iframe", "automation_steps": [
+                 {"playwright_action": "navigate", "value": "/frames"},
+                 {"playwright_action": "fill", "selector_key": "iframe#pay-frame >>> #card", "value": "4242"},
+                 {"playwright_action": "click", "selector_key": "#pay"},
+                 {"playwright_action": "assert", "selector_key": "#paid", "assertion_type": "text", "assertion_value": "Paid with 4242"}]}]
+    by = {r["test_case_id"]: r["status"] for r in _run(cases + extra)["results"]}
+    assert by == {"TC-UI-001": "PASS", "TC-UI-002": "PASS", "TC-UI-003": "PASS", "TC-UI-004": "FAIL",
+                  "TC-UI-005": by["TC-UI-005"], "SH": "PASS", "IF": "PASS"}, by
+    assert by["TC-UI-005"] != "PASS"
+
+
+def test_row_buttons_are_tied_to_their_row_and_numeric_ids_are_not_trusted(ui_app):
+    """Found on PetClinic Angular: 'Delete' in row 3 was selected by its position and inputs by
+    id='0','1' (row indexes) — a row added or deleted above sends the click to another record."""
+    from playwright.async_api import async_playwright
+
+    from core.dom_analyzer import label_page
+
+    async def read():
+        async with async_playwright() as p:
+            b = await p.chromium.launch()
+            pg = await b.new_page()
+            await pg.goto(f"http://127.0.0.1:{ui_app}/team")
+            els, _ = await label_page(pg)
+            await b.close()
+            return els
+    els = asyncio.run(read())
+    assert "grace_hopper" in els.get("edit_grace_hopper_button", "").lower().replace(" ", "_") or \
+        "Grace Hopper" in els.get("edit_grace_hopper_button", ""), els
+    assert not any(v in ("#\\30 ", "#\\31 ", "#0", "#1") for v in els.values()), els
+    case = {"test_case_id": "ROW", "title": "delete a row above, then edit by name", "automation_steps": [
+        {"playwright_action": "navigate", "value": "/team"},
+        {"playwright_action": "click", "selector_key": els["delete_ada_lovelace_button"]},
+        {"playwright_action": "click", "selector_key": els["edit_grace_hopper_button"]},
+        {"playwright_action": "assert", "selector_key": "#out", "assertion_type": "text", "assertion_value": "Edit Grace Hopper"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result"), s.get("error")) for s in r["steps"]]
+
+
+def test_page_text_checks_see_what_is_shown_in_form_fields(ui_app):
+    """PetClinic Angular shows its specialties inside inputs: innerText misses them. A text check
+    counts visible field values (never a password); a value not on screen still fails."""
+    case = {"test_case_id": "FV", "title": "field values are page text", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "#username", "value": "zed-visible"},
+        {"step_number": 3, "playwright_action": "fill", "selector_key": "#password", "value": "pw-hidden"},
+        {"step_number": 4, "playwright_action": "assert", "selector_key": "page", "assertion_type": "contains", "assertion_value": "zed-visible"}]}
+    secret = {"test_case_id": "PW", "title": "a password is never page text", "automation_steps": case["automation_steps"][:3] + [
+        {"step_number": 4, "playwright_action": "assert", "selector_key": "page", "assertion_type": "contains", "assertion_value": "pw-hidden"}]}
+    r = {x["test_case_id"]: x["status"] for x in _run([case, secret])["results"]}
+    assert r == {"FV": "PASS", "PW": "FAIL"}, r
+
+
+def test_card_buttons_are_tied_to_their_product_and_count_links_get_a_real_name(ui_app):
+    """Found on eShopOnWeb: '[ ADD TO BASKET ]' on every product card was selected by position, and
+    the basket link (text: the item count '0') was named '0_link'."""
+    from playwright.async_api import async_playwright
+
+    from core.dom_analyzer import label_page
+
+    async def read():
+        async with async_playwright() as p:
+            b = await p.chromium.launch()
+            pg = await b.new_page()
+            await pg.goto(f"http://127.0.0.1:{ui_app}/shop")
+            els, _ = await label_page(pg)
+            await b.close()
+            return els
+    els = asyncio.run(read())
+    assert "basket_page_link" in els and "0_link" not in els, els
+    key = next(k for k in els if "bot_shirt" in k)
+    assert "nth-of-type" not in els[key], els
+    case = {"test_case_id": "CARD", "title": "add the right product", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/shop"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": els[key]},
+        {"step_number": 3, "playwright_action": "assert", "selector_key": "#out", "assertion_type": "text", "assertion_value": "Added Bot Shirt"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result"), s.get("error")) for s in r["steps"]]

@@ -263,6 +263,26 @@ customElements.define('qax-greeter', class extends HTMLElement {
 </script>""")
 
 
+@app.get("/team")
+def team():
+    """A table with Edit/Delete on every row and Angular-style numeric ids (row indexes)."""
+    rows = "".join(f"<tr><td>{n}</td><td><input id='{i}' value='{n}'></td><td><button onclick=\"document.getElementById('out').textContent='Edit {n}'\">Edit</button>"
+                   f" <button onclick=\"this.closest('tr').remove()\">Delete</button></td></tr>"
+                   for i, n in enumerate(["Ada Lovelace", "Alan Turing", "Grace Hopper"]))
+    return _page("Team", f"<h1>Team</h1><table id='team'>{rows}</table><p id='out'></p>")
+
+
+@app.get("/shop")
+def shop():
+    """Product cards, each with the same '[ ADD TO BASKET ]' submit button, and a basket link
+    whose text is only the item count."""
+    cards = "".join(f"<div class='card'><img src='/x.png' alt='{n}'><div><span>{n}</span> <span>$1{i}.00</span></div>"
+                    f"<form onsubmit=\"document.getElementById('out').textContent='Added {n}';return false\">"
+                    f"<input type='submit' value='[ ADD TO BASKET ]'></form></div>"
+                    for i, n in enumerate(["Bot Mug", "Bot Shirt", "Bot Cap"]))
+    return _page("Shop", f"<a href='/basket-page'>0</a><div class='grid'>{cards}</div><p id='out'></p>")
+
+
 @app.get("/boom")
 def boom():
     """A server error the page calls in the background."""

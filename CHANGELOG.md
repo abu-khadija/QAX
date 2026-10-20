@@ -63,6 +63,12 @@ Every scan written with `--out` records the exact version and commit that produc
   `/files` serves images only, and the server will not listen beyond loopback without a token.
 
 ### Fixed
+- Reading an app: a crash when a form contains `<input name="id">` (DOM clobbering, eShopOnWeb); buttons
+  repeated on every table row / product card are tied to their row's title instead of their position
+  (PetClinic Angular, eShopOnWeb); numeric row-index ids are not trusted; image buttons without text are read;
+  a link whose text is a count is named after its address.
+- Text checks include the values of visible form fields (never passwords); `{{unique_letters}}`, `{{unique_digits}}`.
+- The Docker image runs Python 3.12 (the Playwright 1.44 base image shipped 3.10).
 - A failure after a step that could not run (ERROR) is no longer reported as an app bug (a real failure
   after a SKIP still is).
 - A FAIL that followed a step that could not run was reported as an app bug; the case is now ERROR with the reason.

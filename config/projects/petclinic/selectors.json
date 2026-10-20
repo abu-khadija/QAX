@@ -1,0 +1,40 @@
+{
+  "_meta": {
+    "auto_discovered": true,
+    "manual_overrides": []
+  },
+  "home": {
+    "home_link": "a:has-text('Home')",
+    "find_owners_link": "a[href='/owners/find']",
+    "veterinarians_link": "a[href='/vets.html']",
+    "error_link": "a[href='/oups']"
+  },
+  "owners_find": {
+    "home_link": "a:has-text('Home')",
+    "find_owners_link": "a[href='/owners/find']",
+    "veterinarians_link": "a[href='/vets.html']",
+    "error_link": "a[href='/oups']",
+    "lastname": "#lastName",
+    "find_owner_button": "button:has-text('Find Owner')",
+    "add_owner_link": "a[href='/owners/new']"
+  },
+  "vets_html": {
+    "home_link": "a:has-text('Home')",
+    "find_owners_link": "a[href='/owners/find']",
+    "veterinarians_link": "a[href='/vets.html']",
+    "error_link": "a[href='/oups']",
+    "2_link": "a:has-text('2')"
+  },
+  "owners_new": {
+    "home_link": "a:has-text('Home')",
+    "find_owners_link": "a[href='/owners/find']",
+    "veterinarians_link": "a[href='/vets.html']",
+    "error_link": "a[href='/oups']",
+    "first_name": "#firstName",
+    "last_name": "#lastName",
+    "address": "#address",
+    "city": "#city",
+    "telephone": "#telephone",
+    "add_owner_button": "button:has-text('Add Owner')"
+  }
+}

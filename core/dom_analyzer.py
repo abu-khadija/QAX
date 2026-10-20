@@ -131,9 +131,14 @@ _ELEMENTS_JS = r"""(avoid) => {
   // ids a framework generates (React useId ":r52:" / "_r_3u_", Base UI, Radix, MUI…) are stable
   // across a reload but SHIFT when the page changes (a new memo → every id moves): never select
   // by them (found on Memos, 2026-10-20). Mirrors _looks_generated() in Python.
-  const generated = (id) => /:r[0-9a-z]*:|(^|[-_])_?r_[0-9a-z]+_|(^|[-_])(radix|headlessui|base-ui|react-aria|mui|downshift)[-_]/i.test(id || '')
+  // a purely numeric id is a row index (Angular's id="0", "1" … on a list): it moves when a row is
+  // added or deleted (found on PetClinic Angular, 2026-10-20)
+  const generated = (id) => (id = typeof id === 'string' ? id : '', /^\d+$/.test(id)) || /:r[0-9a-z]*:|(^|[-_])_?r_[0-9a-z]+_|(^|[-_])(radix|headlessui|base-ui|react-aria|mui|downshift)[-_]/i.test(id || '')
     || (id || '').split(/[_\-.:]/).some(c => c.length >= 6 && /\d/.test(c) && /[a-z]/i.test(c));
   const okId = (id) => id && !avoid.has(id) && !generated(id);
+  // the id ATTRIBUTE: form.id is the <input name="id"> inside a form, not a string (DOM
+  // clobbering — found on eShopOnWeb, where it crashed the reader)
+  const idOf = (el) => (el && el.getAttribute && el.getAttribute('id')) || '';
   // For each interactive element, pick a selector that matches EXACTLY ONE element on the
   // page (checked here, in the browser): a[href='#'] or button:has-text('Save') can match
   // several elements and a click would hit the wrong one (found on Healthchecks).
@@ -154,7 +159,7 @@ _ELEMENTS_JS = r"""(avoid) => {
       const inner = [];
       let m = el;
       while (m && m.nodeType === 1) {
-        if (okId(m.id) && one('#' + CSS.escape(m.id))) { inner.unshift('#' + CSS.escape(m.id)); break; }
+        if (okId(idOf(m)) && one('#' + CSS.escape(idOf(m)))) { inner.unshift('#' + CSS.escape(idOf(m))); break; }
         let i = 1, s = m;
         while ((s = s.previousElementSibling)) if (s.tagName === m.tagName) i++;
         inner.unshift(m.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
@@ -163,7 +168,7 @@ _ELEMENTS_JS = r"""(avoid) => {
       return cssPath(root.host) + ' >> ' + inner.join(' > ');
     }
     while (n && n.nodeType === 1 && n !== document.body) {
-      if (okId(n.id) && one('#' + CSS.escape(n.id))) { parts.unshift('#' + CSS.escape(n.id)); break; }
+      if (okId(idOf(n)) && one('#' + CSS.escape(idOf(n)))) { parts.unshift('#' + CSS.escape(idOf(n))); break; }
       let i = 1, s = n;
       while ((s = s.previousElementSibling)) if (s.tagName === n.tagName) i++;
       parts.unshift(n.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
@@ -180,13 +185,13 @@ _ELEMENTS_JS = r"""(avoid) => {
     if (e.type === 'hidden' || st.display === 'none' || st.visibility === 'hidden') continue;
     const inShadow = e.getRootNode() !== document;
     let label = '';
-    if (e.id) { const l = e.getRootNode().querySelector(`label[for="${CSS.escape(e.id)}"]`); if (l) label = l.innerText; }
+    if (idOf(e)) { const l = e.getRootNode().querySelector(`label[for="${CSS.escape(idOf(e))}"]`); if (l) label = l.innerText; }
     if (!label && e.closest('label')) label = e.closest('label').innerText;
     const tag = e.tagName.toLowerCase(), name = e.getAttribute('name') || '', href = e.getAttribute('href') || '';
     const testid = e.getAttribute('data-testid') || '', aria = e.getAttribute('aria-label') || '';
     const value = (tag === 'input' ? (e.getAttribute('value') || '') : '');
     const cands = [];
-    if (okId(e.id)) cands.push('#' + CSS.escape(e.id));
+    if (okId(idOf(e))) cands.push('#' + CSS.escape(idOf(e)));
     if (testid) cands.push(`[data-testid='${q(testid)}']`);
     // value is DATA for a text field (it changes when the user saves) — use it only to tell
     // apart radio/checkbox options and submit-style buttons (found on the SPA demo)
@@ -206,6 +211,10 @@ _ELEMENTS_JS = r"""(avoid) => {
     if (tag === 'a' && href && href !== '#' && !href.startsWith('javascript:') && !/\/(\d+|[0-9a-f]{8,}(-[0-9a-f]{4,})*)(\/|$)/i.test(href))
       cands.push(`a[href='${q(href)}']`);
     if (tag === 'input' && value && valueIsId) cands.push(`input[type='${q(typ || 'submit')}'][value='${q(value)}']`);
+    // an image button with no text (eShopOnWeb's filter arrow): by its alt, else its image
+    const src = typ === 'image' ? (e.getAttribute('src') || '') : '';
+    if (typ === 'image' && e.getAttribute('alt')) cands.push(`input[type='image'][alt='${q(e.getAttribute('alt'))}']`);
+    if (src) cands.push(`input[type='image'][src='${q(src)}']`);
     let sel = cands.find(one) || '';
     // textContent (what :text-is matches), not innerText — CSS text-transform shows
     // "Checks" as "CHECKS" (found on Healthchecks); multi-line labels are skipped.
@@ -232,20 +241,53 @@ _ELEMENTS_JS = r"""(avoid) => {
         if (exact.length === 1) sel = `xpath=//${tag}[normalize-space(.)='${text}']`;
       }
     }
+    let rowName = '';
+    const btnText = text || ((tag === 'input' && valueIsId) ? value : '');
+    if (!sel && btnText && btnText.length <= 40 && !btnText.includes("'") && !inShadow
+        && (tag === 'button' || tag === 'a' || role === 'button' || (tag === 'input' && valueIsId))) {
+      // A button repeated on every row / card ("Edit", "Delete", "Add to basket"): anchor it on its
+      // row's or card's own title, not its position — a row added or deleted above it would send the
+      // click to ANOTHER record (found on PetClinic Angular: "Delete Vet" in row 3; eShopOnWeb:
+      // "[ ADD TO BASKET ]" on the 7th product card).
+      const target = tag === 'input' ? `input[@value='${btnText}']`
+        : `${tag === 'a' ? 'a' : (role === 'button' && tag !== 'button' ? '*[@role="button"]' : 'button')}[normalize-space(.)='${btnText}']`;
+      const ownText = (x) => [...x.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+      let anc = e.closest('tr') || e.parentElement;
+      for (let depth = 0; anc && anc !== document.body && depth < 7 && !sel; depth++, anc = anc.parentElement) {
+        const tnode = [...anc.querySelectorAll('*')].filter(x => !x.contains(e) && !e.contains(x))
+          .find(x => { const t = ownText(x); return t && t.length >= 2 && t.length <= 50 && !t.includes("'") && t !== btnText; });
+        if (!tnode) continue;
+        const title = ownText(tnode);
+        const atag = anc.tagName.toLowerCase();
+        // from the title up to THIS container (the k-th <atag> above it), then down to the button —
+        // an outer container that holds every card would match all of them
+        let k = 0;
+        for (let x = tnode.parentElement; x && x !== anc.parentElement; x = x.parentElement) if (x.tagName === anc.tagName) k++;
+        const xp = `//*[normalize-space(text())='${title}']/ancestor::${atag}[${k}]//${target}`;
+        try {
+          if (document.evaluate(xp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null).snapshotLength === 1) {
+            sel = 'xpath=' + xp; rowName = title;
+          }
+        } catch (err) {}
+      }
+    }
     if (!sel && e.form && e.type === 'submit') {
       // a form's submit button, anchored on its own form: "Add system" in the dialog has the same
       // text as the button that opens the dialog (found on Beszel)
       for (const f of e.form.elements) {
-        if (!okId(f.id) || f === e) continue;
+        if (!okId(idOf(f)) || f === e) continue;
         const tsel = e.getAttribute('type') ? `[type='${q(e.getAttribute('type'))}']` : ':not([type])';
-        const c = `form:has(#${CSS.escape(f.id)}) ${tag}${tsel}`;
+        const c = `form:has(#${CSS.escape(idOf(f))}) ${tag}${tsel}`;
         if (one(c)) { sel = c; break; }
       }
     }
     if (!sel) sel = cssPath(e);
-    out.push({tag, id: e.id || '', name, type: (e.getAttribute('type') || '').toLowerCase(), testid, aria,
+    out.push({tag, id: idOf(e), name, type: (e.getAttribute('type') || '').toLowerCase(), testid, aria,
       role: e.getAttribute('role') || '',
-      ph: e.getAttribute('placeholder') || '', value, text: (e.innerText || '').trim().slice(0, 40), href,
+      ph: e.getAttribute('placeholder') || '', value, href,
+      // a row-anchored button is named after its row: edit_vet_james_carter_button
+      text: rowName ? btnText.slice(0, 40) : (e.innerText || '').trim().slice(0, 40), row: rowName,
+      alt: e.getAttribute('alt') || '', src,
       label: (label || '').trim().slice(0, 40), sel,
       // visible now? (an element in a closed menu/modal is in the DOM but needs a click first)
       vis: (typeof e.checkVisibility === 'function') ? e.checkVisibility() : !!(e.offsetWidth || e.offsetHeight)});
@@ -268,6 +310,8 @@ def _looks_generated(ident: str) -> bool:
     # React useId / UI-library ids: ":r52:", "base-ui-:r3:", "radix-:R1:", "mui-12", "headlessui-menu-button-:r1:"
     if re.search(r":r[0-9a-z]*:|(^|[-_])_?r_[0-9a-z]+_|(^|[-_])(radix|headlessui|base-ui|react-aria|mui|downshift)[-_]",
                  ident, re.I):
+        return True
+    if ident.isdigit():                       # a row index (Angular id="0", "1" …)
         return True
     return any(len(c) >= 6 and re.search(r"\d", c) and re.search(r"[a-z]", c, re.I)
                for c in re.split(r"[_\-.:]", ident))
@@ -293,7 +337,7 @@ def label_elements(elements: list) -> dict:
         try:
             tag, typ = e.get("tag", ""), e.get("type", "")
             role = e.get("role", "")
-            is_button = tag == "button" or typ in ("submit", "button", "reset") or role == "button"
+            is_button = tag == "button" or typ in ("submit", "button", "reset", "image") or role == "button"
             if role in ("menuitem", "menuitemcheckbox", "menuitemradio", "option", "tab") and tag != "a":
                 is_button = False
             is_link = tag == "a"
@@ -303,7 +347,16 @@ def label_elements(elements: list) -> dict:
                     or e.get("aria") or e.get("ph") or e.get("text") or e.get("value") or e.get("testid"))
             if is_button or is_link:
                 base = e.get("text") or e.get("value") or e.get("aria") or base
+            if typ == "image" and not base:
+                base = e.get("alt") or re.sub(r"\.\w+$", "", str(e.get("src") or "").rsplit("/", 1)[-1])
+            if is_link and re.fullmatch(r"[\d\s]*", str(base or "")) and e.get("href"):
+                # a link whose text is a number (the basket's item count) is named after where it goes
+                seg = [x for x in re.split(r"[/?#]", e["href"]) if x and not x.isdigit()]
+                base = e.get("aria") or (seg[-1] if seg else base)
             key = _slug(base)
+            if e.get("row"):
+                # a button tied to its row / card: "Edit Vet" + "James Carter" → edit_vet_james_carter
+                key = "_".join(x for x in (_slug(base).split("_")[:3] + _slug(e["row"]).split("_")[:3]) if x)
             if not key:
                 continue
             if role in ("menuitem", "menuitemcheckbox", "menuitemradio") and not key.endswith("item"):

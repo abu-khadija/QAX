@@ -100,3 +100,36 @@ Not covered by an automated regression: the re-render race (timing-dependent; a 
 
 n = 7 apps, 45 hand-written cases by the QAX author: this shows the engine and the mapper work across
 three kinds of UI; it is not an accuracy or coverage claim.
+
+## 2026-10-20 — Java and Angular, other browsers, packaging (founder approved the downloads)
+
+| App | Version | UI | Map | Cases | Result | Negative controls | Persistence checked |
+|---|---|---|---|---|---|---|---|
+| Spring PetClinic (Apache-2.0) | main @ 500158f, Java 25 | Spring Boot + Thymeleaf, server-rendered | 4 pages · 26 elements (`/oups` 500 noted, not a page) | 7 | **7/7 PASS** first run | 2/2 FAIL | owners created, city edited, pet added (seen in the app's search) |
+| eShopOnWeb (MIT) | 4da8212, .NET 8 app on the .NET 10 runtime, in-memory DB | ASP.NET Core Razor Pages + MVC, Identity login, anti-forgery tokens | 8 pages · 85 elements, logged in as the seeded demo user | 8 | **8/8 PASS** (incl. login → basket → checkout → My orders) | 2/2 FAIL | the order appears in My orders; the seeded password never in the report |
+| Spring PetClinic Angular (Apache-2.0) + spring-petclinic-rest | 7c9f1ab + afc8fc1 | Angular 22 SPA (signals, OnPush) over a Java REST API | 9 pages · 166 elements (+36 from menus) | 8 | **8/8 PASS** | 2/2 FAIL | REST API: owners created; vets created and the deleted ones gone (8 = 6 + 2) |
+
+Cases: `evals/data/petclinic_cases.json`, `evals/data/petclinic_angular_cases.json`, `evals/data/eshop_cases.json` (hand-written; selectors
+from `map`, raw selectors only for rows a case creates). **Corpus now 10 apps: 68/68 PASS, 20/20 negative
+controls FAIL.** Still n = 10, local, hand-written cases.
+
+What the new apps broke in QAX (fixed, each with a regression test on the demo app):
+
+| Found on | Symptom | Fix |
+|---|---|---|
+| PetClinic Angular | "Edit"/"Delete" on every table row selected by position (`tr:nth-of-type(3)`) — a row added or deleted above sends the click to another record | a row button is anchored on its row's own text (`//tr[*='James Carter']//button[='Edit Vet']`) and named after it (`edit_vet_james_carter_button`) |
+| PetClinic Angular | `id="0"`, `id="1"` (row indexes) used as stable selectors and names | purely numeric ids are treated as generated |
+| PetClinic Angular | names must be letters only; `{{unique}}` has digits | `{{unique_letters}}`, `{{unique_digits}}` |
+| eShopOnWeb | the page reader crashed: `form.id` is the `<input name="id">` inside the form, not a string (DOM clobbering) | ids are read as attributes everywhere |
+| eShopOnWeb | "[ ADD TO BASKET ]" on every product card selected by position; the basket link named `0_link` (its text is the item count) | the row rule generalised to any repeated card (`add_to_basket_roslyn_red_sheet_button`); a number-only link is named after its address (`basket_link`) |
+| eShopOnWeb | the filter's image button (no text, no alt) was not read at all | image buttons are named by alt, else by their image (`arrow_right_button`) |
+| PetClinic Angular | a page that shows its data in form fields ("radiology" in an input) failed a `page` text check | text checks include the values of visible fields (what the user sees) |
+
+Other runs this day:
+- **Firefox and WebKit** (Playwright 1.44 builds, installed with the founder's OK): the demo cases, a web
+  component and an iframe give the same verdicts as Chromium (`test_the_same_cases_give_the_same_verdicts_in_firefox_and_webkit`).
+- **`pip install -e .`** in a clean Python 3.12 venv: `qax --version`, `qax doctor` and `qax-web` work from any folder.
+- **Docker** (colima): the image built and served the UI; the cross-site gate answered 403 — and the run exposed
+  that the Playwright 1.44 base image ships **Python 3.10** (QAX needs 3.11+). The Dockerfile now uses
+  python:3.12-slim with Chromium installed into it: rebuilt, `doctor` reports Python 3.12, and the demo cases run
+  in a real browser INSIDE the container (mobile device) with the true verdicts. `docker compose config` validates.

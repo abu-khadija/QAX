@@ -1,10 +1,15 @@
-# QAX in a container: the web UI + CLI with Chromium ready (Playwright 1.44 image).
+# QAX in a container: the web UI + CLI on Python 3.12 with Chromium ready.
 # Build and run:  docker compose up --build   →  http://localhost:8900
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+# (The Playwright 1.44 base image ships Python 3.10; QAX needs 3.11+, so the browser is
+#  installed into a Python 3.12 image instead.)
+FROM python:3.12-slim-bookworm
 
 WORKDIR /qax
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+ && python -m playwright install --with-deps chromium \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
 COPY . .
 
 # Listen inside the container; docker-compose publishes the port on the host's loopback only.

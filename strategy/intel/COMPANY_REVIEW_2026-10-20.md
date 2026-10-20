@@ -68,12 +68,12 @@ Status: ✅ done · 🟡 partly / bounded · ⏳ open. Competitors are now check
 | A2 | Legal | LICENSE decision | H | ⏳ |
 | A3 | Legal | Authorization / acceptable-use terms (draft for counsel) | E→H | 🟡 — Draft for counsel: `strategy/legal/AUTHORIZED_USE_DRAFT.md` (not in force) |
 | A4 | Finance | Anthropic credit; then live generation on the 7 apps, case quality measured | H→E | ⏳ |
-| A5 | Eng | Docker image + one-command install + doctor check | E | 🟡 — `make install` / `make doctor` / `main.py doctor` done and tested; Dockerfile + compose written but **not built** (no Docker on this machine) |
+| A5 | Eng | Docker image + one-command install + doctor check | E | ✅ — `make install` / `doctor`; Docker image built (colima) and run: Python 3.12, a real browser run inside the container; compose validated |
 | A6 | Eng | iframes in runs and in app reading | E | ✅ — Reader lists iframe elements as `iframe#x >>> #el`; runner enters the frame (real-browser test) |
 | A7 | Eng | Xray against a real instance | H | ⏳ |
 | A8 | Security | Security review of the web UI itself (token, CORS, artifact paths, repo input) | E | ✅ — Fixed a real CSRF/DNS-rebinding hole (local API accepted cross-site text/plain); Origin/Sec-Fetch-Site/Host checks, JSON-only writes, security headers, `/files` images only, safe git clone, refuses 0.0.0.0 without a token |
 | A9 | Security | External pentest before hosted mode | H | ⏳ |
-| A10 | QA | More stacks (Java, .NET, Angular) in the functional corpus | E | 🟡 — 7 apps across Django, Flask, Svelte, React ×2, Go backends; Java/.NET/Angular need JDK 17+/.NET SDK downloads — awaiting the founder's OK to download |
+| A10 | QA | More stacks (Java, .NET, Angular) in the functional corpus | E | ✅ — 10 apps: + Spring PetClinic (Java/Thymeleaf), PetClinic Angular 22 over a Java REST API, eShopOnWeb (.NET) — 68/68 PASS, 20/20 negative controls FAIL; 6 reader defects found and fixed |
 | A11 | UX | Unaided Quickstart by a new user | H | ⏳ |
 | A12 | UX | Run history for functional QA | E | ✅ — Per-project run history: newly failing / fixed / flaky shown in the report |
 | A13 | DevRel | Landing page states measured numbers only (audit) | E | ✅ — Landing numbers match the evidence; functional evidence added; Xray marked untested |
@@ -107,11 +107,17 @@ Status: ✅ done · 🟡 partly / bounded · ⏳ open. Competitors are now check
 | B2 | Shadow DOM (web components) read and used | ✅ real-browser test |
 | B3 | SSO / 2FA: log in by hand once, runs reuse the session (`login`, UI button) | ✅ real-browser test; session file owner-only, git-ignored, never served |
 | B4 | Functional E2E in CI: `execute --yes --junit`, GitHub + GitLab jobs | ✅ CLI tested; the workflow files are validated YAML, **not run on a real CI** (no pushable repo) |
-| B5 | Devices (mobile/iPhone/tablet), browser choice, parallel workers | ✅ mobile + parallel tested; Firefox/WebKit wired but **not installed here** (a ~200 MB download needs the founder's OK) |
+| B5 | Devices (mobile/iPhone/tablet), browser choice, parallel workers | ✅ mobile + parallel tested; Firefox and WebKit installed (founder's OK) and give the same verdicts |
 | B6 | Test-data cleanup (`cleanup_steps`) | ✅ tested: nothing left on the demo app |
 | B7 | Visual regression for functional runs (no new dependency) | ✅ tested |
 | B8 | Second AI provider | ✅ see R1 |
-| B9 | Packaging (`pyproject.toml`, `qax` / `qax-web`) | ✅ metadata tested; `pip install -e .` not run here (setuptools absent offline) |
+| B9 | Packaging (`pyproject.toml`, `qax` / `qax-web`) | ✅ `pip install -e .` in a clean venv: `qax` and `qax-web` work from any folder |
 | B10 | Code split: main.py 2,700 → ~2,000 lines (cli/), web UI → app.html + app.js + app.css, functional routes → web/functional.py | ✅ |
 | B11 | Competitors checked against sources | ✅ COMPETITORS_2026-10-20.md — positioning proposal for the founder |
 | B12 | Mobile-friendliness observation (no viewport meta) | ✅ |
+
+### Founder decisions, 2026-10-20
+- Downloads approved and done: Firefox/WebKit, colima + Docker CLI + compose, JDK (Java 25 used; 17 failed in a network outage),
+  .NET 10 SDK, the Java/Angular/.NET corpus apps.
+- The untracked `config/projects/app14-portal-…` folder was deleted (never committed).
+- Positioning (COMPETITORS §"Updated positioning"): explained, awaiting the founder's choice.

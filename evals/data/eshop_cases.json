@@ -1,0 +1,377 @@
+{
+ "_comment": "Hand-written cases for eShopOnWeb (ASP.NET Core Razor Pages/MVC, .NET 8 on the .NET 10 runtime, MIT), in-memory database, seeded demo user via QAX_VAR_ESHOP_USER / QAX_VAR_ESHOP_PASS (never in this file). Selectors from `main.py map`; raw selectors only for the basket and checkout pages, which need items first. expected_outcome is the truth.",
+ "test_cases": [
+  {
+   "test_case_id": "TC-ES-001",
+   "title": "The catalog lists products with prices",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": ".NET Bot Black Sweatshirt"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "19.50"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-002",
+   "title": "Filtering by brand .NET shows only .NET products",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "select",
+     "selector_key": "all_net_azure_other_select",
+     "value": ".NET"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "arrow_right_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": ".NET Bot Black Sweatshirt"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button",
+     "assertion_type": "not_visible"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-003",
+   "title": "Adding a product puts it in the basket with its price",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "Roslyn Red Sheet"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "$ 8.50"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-004",
+   "title": "Changing the quantity updates the total",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "input[name='Items[0].Quantity']",
+     "value": "3"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('[ UPDATE ]')"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "$ 25.50"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-005",
+   "title": "Quantity 0 empties the basket",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "input[name='Items[0].Quantity']",
+     "value": "0"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('[ UPDATE ]')"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "Basket is empty."
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-006",
+   "title": "Checking out needs a login",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "a:has-text('[ CHECKOUT ]')"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Identity/Account/Login"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-007",
+   "title": "A wrong password is refused",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/Identity/Account/Login"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "email",
+     "value": "{{env:QAX_VAR_ESHOP_USER}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "wrong-{{unique}}"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "log_in_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "Invalid login attempt."
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-008",
+   "title": "A logged-in user can order and sees the order in My orders",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/Identity/Account/Login"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "email",
+     "value": "{{env:QAX_VAR_ESHOP_USER}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_ESHOP_PASS}}"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "log_in_button"
+    },
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "a:has-text('[ CHECKOUT ]')"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "input[value='[ Pay Now ]']"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "Thanks for your Order!"
+    },
+    {
+     "playwright_action": "navigate",
+     "value": "/order/my-orders"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "$ 8.50"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-NC1",
+   "title": "NEGATIVE CONTROL: wrong total after quantity change",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "input[name='Items[0].Quantity']",
+     "value": "3"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('[ UPDATE ]')"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "contains",
+     "assertion_value": "$ 99.99"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-ES-NC2",
+   "title": "NEGATIVE CONTROL: checkout claimed open to guests",
+   "module": "Shop",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_to_basket_roslyn_red_sheet_button"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "a:has-text('[ CHECKOUT ]')"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/Basket/Checkout"
+    }
+   ]
+  }
+ ]
+}

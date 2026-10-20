@@ -149,6 +149,13 @@ async def _click_through_obstacles(page, selector: str) -> str:
             raise first
 
 
+_VISIBLE_FIELD_VALUES_JS = r"""(root) => {
+  const scope = root.matches && root.matches('input, textarea, select') ? [root] : [...root.querySelectorAll('input, textarea, select')];
+  return scope.filter(f => (f.offsetWidth || f.offsetHeight) && !['password', 'hidden', 'checkbox', 'radio', 'submit', 'button'].includes((f.type || '').toLowerCase()))
+    .map(f => f.tagName === 'SELECT' ? (f.selectedOptions[0] || {}).text || '' : f.value).filter(v => v && v.trim()).slice(0, 200);
+}"""
+
+
 class _InFrame:
     """
     A page whose element methods run inside one iframe (click, fill, query_selector,
@@ -1170,6 +1177,15 @@ class ActionMapper:
 
             if assertion_type in ("text", "contains"):
                 actual = await element.inner_text()
+                # What the user SEES includes the values of form fields shown as text (a list of
+                # editable names: found on PetClinic Angular's Specialties page) — innerText
+                # leaves them out. Only visible, non-password fields count.
+                try:
+                    values = await element.evaluate(_VISIBLE_FIELD_VALUES_JS)
+                    if values:
+                        actual = (actual + "\n" + "\n".join(values)).strip()
+                except Exception:  # noqa: BLE001
+                    pass
                 if not assertion_value:
                     return {"status": "SKIP",
                             "actual_result": f"Text assertion not evaluated — no expected value (text: '{actual[:80]}')"}

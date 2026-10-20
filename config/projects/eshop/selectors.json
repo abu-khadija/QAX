@@ -1,0 +1,107 @@
+{
+  "_meta": {
+    "auto_discovered": true,
+    "manual_overrides": []
+  },
+  "identity_account_login": {
+    "login_link": "a[href='/Identity/Account/Login']",
+    "basket_link": "a[href='/Basket']",
+    "email": "#Input_Email",
+    "password": "#Input_Password",
+    "remember_me": "#Input_RememberMe",
+    "log_in_button": "button:has-text('Log in')",
+    "forgot_your_password_link": "a[href='/Identity/Account/ForgotPassword']",
+    "register_as_a_new_link": "a[href='/Identity/Account/Register?returnUrl=%2F']"
+  },
+  "home": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a[href='/manage/my-account']",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']",
+    "all_net_azure_other_select": "#CatalogModel_BrandFilterApplied",
+    "all_mug_sheet_t_select": "#CatalogModel_TypesFilterApplied",
+    "arrow_right_button": "input[type='image'][src='/images/arrow-right.svg']",
+    "previous_link": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > article:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1)",
+    "next_link": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > article:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)",
+    "add_to_basket_roslyn_red_sheet_button": "xpath=//*[normalize-space(text())='Roslyn Red Sheet']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_net_foundation_sweatshirt_button": "xpath=//*[normalize-space(text())='.NET Foundation Sweatshirt']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_prism_white_t_button": "xpath=//*[normalize-space(text())='Prism White T-Shirt']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_net_black_white_button": "xpath=//*[normalize-space(text())='.NET Black & White Mug']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_net_bot_black_button": "xpath=//*[normalize-space(text())='.NET Bot Black Sweatshirt']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_net_blue_sweatshirt_button": "xpath=//*[normalize-space(text())='.NET Blue Sweatshirt']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_roslyn_red_t_button": "xpath=//*[normalize-space(text())='Roslyn Red T-Shirt']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_kudu_purple_sweatshirt_button": "xpath=//*[normalize-space(text())='Kudu Purple Sweatshirt']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_cup_t_white_button": "xpath=//*[normalize-space(text())='Cup<T> White Mug']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "add_to_basket_net_foundation_sheet_button": "xpath=//*[normalize-space(text())='.NET Foundation Sheet']/ancestor::form[1]//input[@value='[ ADD TO BASKET ]']",
+    "previous": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > article:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1)",
+    "next": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > article:nth-of-type(1) > nav:nth-of-type(1) > div:nth-of-type(3) > a:nth-of-type(1)"
+  },
+  "order_my_orders": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a[href='/manage/my-account']",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']"
+  },
+  "manage_my_account": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a:has-text('My account')",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']",
+    "profile_link": "a:has-text('Profile')",
+    "password_link": "a[href='/manage/change-password']",
+    "two_factor_authentication_link": "a[href='/manage/two-factor-authentication']",
+    "username": "#Username",
+    "email": "#Email",
+    "send_verification_email_button": "button:has-text('Send verification email')",
+    "phone_number": "#PhoneNumber",
+    "save_button": "button:has-text('Save')"
+  },
+  "basket": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a[href='/manage/my-account']",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']",
+    "continue_shopping_link": "a:has-text('[ Continue Shopping ]')"
+  },
+  "manage_change_password": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a:has-text('My account')",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']",
+    "profile_link": "a:has-text('Profile')",
+    "password_link": "a[href='/manage/change-password']",
+    "two_factor_authentication_link": "a[href='/manage/two-factor-authentication']",
+    "current_password": "#OldPassword",
+    "new_password": "#NewPassword",
+    "confirm_new_password": "#ConfirmPassword",
+    "update_password_button": "button:has-text('Update password')"
+  },
+  "manage_two_factor_authentication": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a:has-text('My account')",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']",
+    "profile_link": "a:has-text('Profile')",
+    "password_link": "a[href='/manage/change-password']",
+    "two_factor_authentication_link": "a[href='/manage/two-factor-authentication']",
+    "configure_authenticator_app_link": "a[href='/manage/enable-authenticator']",
+    "reset_authenticator_key_link": "a[href='/manage/reset-authenticator-warning']"
+  },
+  "manage_enable_authenticator": {
+    "my_orders_link": "a[href='/order/my-orders']",
+    "my_account_link": "a:has-text('My account')",
+    "log_out_link": "a:has-text('Log Out')",
+    "basket_link": "a[href='/Basket']",
+    "profile_link": "a:has-text('Profile')",
+    "password_link": "a[href='/manage/change-password']",
+    "two_factor_authentication_link": "a[href='/manage/two-factor-authentication']",
+    "windows_phone_link": "a[href='https://go.microsoft.com/fwlink/?Linkid=825071']",
+    "android_link": "a[href='https://go.microsoft.com/fwlink/?Linkid=825072']",
+    "ios_link": "a[href='https://go.microsoft.com/fwlink/?Linkid=825073']",
+    "android_link_2": "a[href='https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&hl=en']",
+    "ios_link_2": "a[href='https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8']",
+    "documentation_link": "a[href='https://go.microsoft.com/fwlink/?Linkid=852423']",
+    "verification_code": "#Code",
+    "verify_button": "button:has-text('Verify')"
+  }
+}

@@ -1,0 +1,386 @@
+{
+  "base_url": "http://127.0.0.1:4210",
+  "login_ok": null,
+  "pages": [
+    {
+      "path": "/petclinic",
+      "example": "/petclinic/",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/welcome",
+      "example": "/petclinic/welcome",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/owners/add",
+      "example": "/petclinic/owners/add",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "first_name": "#firstName",
+        "last_name": "#lastName",
+        "address": "#address",
+        "city": "#city",
+        "telephone": "#telephone",
+        "back_button": "button:has-text('Back')",
+        "add_owner_button": "button:has-text('Add Owner')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "firstName",
+            "lastName",
+            "address",
+            "city",
+            "telephone"
+          ]
+        }
+      ],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/vets/add",
+      "example": "/petclinic/vets/add",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "first_name": "#firstName",
+        "last_name": "#lastName",
+        "specialty_select": "#specialties",
+        "back_button": "button:has-text('Back')",
+        "save_vet_button": "button:has-text('Save Vet')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "firstName",
+            "lastName",
+            "specialties"
+          ]
+        }
+      ],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/owners",
+      "example": "/petclinic/owners",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "last_name": "#lastName",
+        "find_owner_button": "button:has-text('Find Owner')",
+        "george_franklin_link": "a:has-text('George Franklin')",
+        "betty_davis_link": "a:has-text('Betty Davis')",
+        "eduardo_rodriquez_link": "a:has-text('Eduardo Rodriquez')",
+        "harold_davis_link": "a:has-text('Harold Davis')",
+        "peter_mctavish_link": "a:has-text('Peter McTavish')",
+        "jean_coleman_link": "a:has-text('Jean Coleman')",
+        "jeff_black_link": "a:has-text('Jeff Black')",
+        "maria_escobito_link": "a:has-text('Maria Escobito')",
+        "david_schroeder_link": "a:has-text('David Schroeder')",
+        "carlos_estaban_link": "a:has-text('Carlos Estaban')",
+        "add_owner_button": "button:has-text('Add Owner')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "",
+          "fields": [
+            "lastName"
+          ]
+        }
+      ],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/owners/{id}",
+      "example": "/petclinic/owners/1",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "back_button": "button:has-text('Back')",
+        "edit_owner_button": "button:has-text('Edit Owner')",
+        "add_new_pet_button": "button:has-text('Add New Pet')",
+        "edit_pet_button": "button:has-text('Edit Pet')",
+        "delete_pet_button": "button:has-text('Delete Pet')",
+        "add_visit_button": "button:has-text('Add Visit')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/vets",
+      "example": "/petclinic/vets",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "edit_vet_james_carter_button": "xpath=//tr[*[normalize-space(.)='James Carter']]//button[normalize-space(.)='Edit Vet']",
+        "delete_vet_james_carter_button": "xpath=//tr[*[normalize-space(.)='James Carter']]//button[normalize-space(.)='Delete Vet']",
+        "edit_vet_helen_leary_button": "xpath=//tr[*[normalize-space(.)='Helen Leary']]//button[normalize-space(.)='Edit Vet']",
+        "delete_vet_helen_leary_button": "xpath=//tr[*[normalize-space(.)='Helen Leary']]//button[normalize-space(.)='Delete Vet']",
+        "edit_vet_linda_douglas_button": "xpath=//tr[*[normalize-space(.)='Linda Douglas']]//button[normalize-space(.)='Edit Vet']",
+        "delete_vet_linda_douglas_button": "xpath=//tr[*[normalize-space(.)='Linda Douglas']]//button[normalize-space(.)='Delete Vet']",
+        "edit_vet_rafael_ortega_button": "xpath=//tr[*[normalize-space(.)='Rafael Ortega']]//button[normalize-space(.)='Edit Vet']",
+        "delete_vet_rafael_ortega_button": "xpath=//tr[*[normalize-space(.)='Rafael Ortega']]//button[normalize-space(.)='Delete Vet']",
+        "edit_vet_henry_stevens_button": "xpath=//tr[*[normalize-space(.)='Henry Stevens']]//button[normalize-space(.)='Edit Vet']",
+        "delete_vet_henry_stevens_button": "xpath=//tr[*[normalize-space(.)='Henry Stevens']]//button[normalize-space(.)='Delete Vet']",
+        "edit_vet_sharon_jenkins_button": "xpath=//tr[*[normalize-space(.)='Sharon Jenkins']]//button[normalize-space(.)='Edit Vet']",
+        "delete_vet_sharon_jenkins_button": "xpath=//tr[*[normalize-space(.)='Sharon Jenkins']]//button[normalize-space(.)='Delete Vet']",
+        "home_button": "button:has-text('Home')",
+        "add_vet_button": "button:has-text('Add Vet')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/pettypes",
+      "example": "/petclinic/pettypes",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "pettype_name": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "pettype_name_2": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_2": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_2": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "pettype_name_3": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_3": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_3": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "pettype_name_4": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(4) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_4": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(4) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_4": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(4) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "pettype_name_5": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(5) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_5": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(5) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_5": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(5) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "pettype_name_6": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(6) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_6": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(6) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_6": "#pettypes > tbody:nth-of-type(1) > tr:nth-of-type(6) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "home_button": "button:has-text('Home')",
+        "add_button": "button:has-text('Add')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    },
+    {
+      "path": "/petclinic/specialties",
+      "example": "/petclinic/specialties",
+      "title": "SpringPetclinicAngular",
+      "elements": {
+        "spring_petclinic_home_link": "a[aria-label='Spring Petclinic home']",
+        "home_link": "a:has-text('Home')",
+        "owners_button": "button:has-text('Owners')",
+        "search_link": "a[href='/petclinic/owners']",
+        "add_new_link": "a[href='/petclinic/owners/add']",
+        "veterinarians_button": "button:has-text('Veterinarians')",
+        "all_link": "a[href='/petclinic/vets']",
+        "add_new_link_2": "a[href='/petclinic/vets/add']",
+        "pet_types_link": "a[href='/petclinic/pettypes']",
+        "specialties_link": "a[href='/petclinic/specialties']",
+        "spec_name": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "spec_name_2": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_2": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_2": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(2) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "spec_name_3": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(1) > input:nth-of-type(1)",
+        "edit_button_3": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(2) > button:nth-of-type(1)",
+        "delete_button_3": "#specialties > tbody:nth-of-type(1) > tr:nth-of-type(3) > td:nth-of-type(2) > button:nth-of-type(2)",
+        "home_button": "button:has-text('Home')",
+        "add_button": "button:has-text('Add')"
+      },
+      "hidden": [
+        "search_link",
+        "add_new_link",
+        "all_link",
+        "add_new_link_2"
+      ],
+      "forms": [],
+      "opened_by": {
+        "search_link": "owners_button",
+        "add_new_link": "owners_button",
+        "all_link": "veterinarians_button",
+        "add_new_link_2": "veterinarians_button"
+      }
+    }
+  ],
+  "skipped_links": [],
+  "explored_actions": [],
+  "writes": [],
+  "error": null
+}

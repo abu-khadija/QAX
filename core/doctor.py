@@ -43,7 +43,8 @@ def run_checks(root: str | None = None) -> list:
     v = sys.version_info
     add("Python", "ok" if (3, 11) <= v[:2] <= (3, 12) else ("warn" if v[:2] > (3, 12) else "fail"),
         f"{v.major}.{v.minor}.{v.micro}",
-        "" if (3, 11) <= v[:2] <= (3, 12) else "Use Python 3.11 or 3.12 (Playwright 1.44 does not support newer).")
+        "" if (3, 11) <= v[:2] <= (3, 12) else ("Use Python 3.11 or 3.12 (QAX needs 3.11+)." if v[:2] < (3, 11)
+                                                else "Use Python 3.11 or 3.12 (Playwright 1.44 does not support newer)."))
 
     missing = [m for m in ("anthropic", "flask", "requests", "jsonschema", "dotenv", "openpyxl")
                if importlib.util.find_spec(m) is None]

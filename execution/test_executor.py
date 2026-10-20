@@ -154,7 +154,14 @@ class TestExecutor:
         if getattr(self, "action_mapper", None) is not None:
             import uuid as _uuid
             try:
-                self.action_mapper.case_vars = {"unique": _uuid.uuid4().hex[:8]}
+                _u = _uuid.uuid4().hex[:8]
+                # {{unique}}: 8 hex characters; {{unique_letters}}: letters only, for fields that
+                # accept letters only (names — found on PetClinic Angular); {{unique_digits}}: digits
+                self.action_mapper.case_vars = {
+                    "unique": _u,
+                    "unique_letters": "".join("abcdefghijklmnop"[int(c, 16)] for c in _u),
+                    "unique_digits": str(int(_u, 16) % 10**8).zfill(8),
+                }
             except AttributeError:   # a mapper without per-case variables
                 pass
 

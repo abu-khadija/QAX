@@ -1,0 +1,92 @@
+{
+  "base_url": "http://127.0.0.1:8945",
+  "login_ok": null,
+  "pages": [
+    {
+      "path": "/",
+      "example": "/",
+      "title": "PetClinic :: a Spring Framework demonstration",
+      "elements": {
+        "home_link": "a:has-text('Home')",
+        "find_owners_link": "a[href='/owners/find']",
+        "veterinarians_link": "a[href='/vets.html']",
+        "error_link": "a[href='/oups']"
+      },
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/owners/find",
+      "example": "/owners/find",
+      "title": "PetClinic :: a Spring Framework demonstration",
+      "elements": {
+        "home_link": "a:has-text('Home')",
+        "find_owners_link": "a[href='/owners/find']",
+        "veterinarians_link": "a[href='/vets.html']",
+        "error_link": "a[href='/oups']",
+        "lastname": "#lastName",
+        "find_owner_button": "button:has-text('Find Owner')",
+        "add_owner_link": "a[href='/owners/new']"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "GET",
+          "action": "/owners",
+          "fields": [
+            "lastName"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/vets.html",
+      "example": "/vets.html",
+      "title": "PetClinic :: a Spring Framework demonstration",
+      "elements": {
+        "home_link": "a:has-text('Home')",
+        "find_owners_link": "a[href='/owners/find']",
+        "veterinarians_link": "a[href='/vets.html']",
+        "error_link": "a[href='/oups']",
+        "2_link": "a:has-text('2')"
+      },
+      "hidden": [],
+      "forms": []
+    },
+    {
+      "path": "/owners/new",
+      "example": "/owners/new",
+      "title": "PetClinic :: a Spring Framework demonstration",
+      "elements": {
+        "home_link": "a:has-text('Home')",
+        "find_owners_link": "a[href='/owners/find']",
+        "veterinarians_link": "a[href='/vets.html']",
+        "error_link": "a[href='/oups']",
+        "first_name": "#firstName",
+        "last_name": "#lastName",
+        "address": "#address",
+        "city": "#city",
+        "telephone": "#telephone",
+        "add_owner_button": "button:has-text('Add Owner')"
+      },
+      "hidden": [],
+      "forms": [
+        {
+          "method": "POST",
+          "action": "",
+          "fields": [
+            "firstName",
+            "lastName",
+            "address",
+            "city",
+            "telephone"
+          ]
+        }
+      ]
+    }
+  ],
+  "skipped_links": [],
+  "explored_actions": [],
+  "writes": [],
+  "error": null
+}

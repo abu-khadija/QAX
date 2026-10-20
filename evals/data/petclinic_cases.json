@@ -1,0 +1,409 @@
+{
+ "_comment": "Hand-written cases for Spring PetClinic (Java/Spring Boot, Thymeleaf; Apache-2.0), selectors from `main.py map` only (raw selectors only for pages map cannot reach without submitting a form). expected_outcome is the truth.",
+ "test_cases": [
+  {
+   "test_case_id": "TC-PC-001",
+   "title": "Find owners by last name lists the matching owner",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/find"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "lastname",
+     "value": "Davis"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "find_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Betty Davis"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-002",
+   "title": "A last name nobody has says it was not found",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/find"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "lastname",
+     "value": "Zzqx"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "find_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "has not been found"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-003",
+   "title": "Adding an owner opens the owner's page",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/new"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Qax{{unique}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "1 Test St"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "Cairo"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "0123456789"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Qa Qax"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Cairo"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/owners/"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-004",
+   "title": "A non-numeric telephone is rejected",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/new"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Bad{{unique}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "x"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "y"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "abc"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Telephone must be a 10-digit number"
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/owners/new"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-005",
+   "title": "Editing an owner's city is saved",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/new"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Qax{{unique}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "1 Test St"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "Cairo"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "0123456789"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_owner_button"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "a:has-text('Edit Owner')"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#city",
+     "value": "Giza"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('Update Owner')"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Giza"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-006",
+   "title": "Adding a pet to a new owner lists the pet",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/new"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Qax{{unique}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "1 Test St"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "Cairo"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "0123456789"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_owner_button"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "a:has-text('Add New Pet')"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#name",
+     "value": "Rex{{unique}}"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#birthDate",
+     "value": "2020-01-01"
+    },
+    {
+     "playwright_action": "select",
+     "selector_key": "#type",
+     "value": "dog"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "button:has-text('Add Pet')"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Rex"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-007",
+   "title": "The veterinarians page lists the vets",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/vets.html"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "James Carter"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-NC1",
+   "title": "NEGATIVE CONTROL: wrong expected owner",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/find"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "lastname",
+     "value": "Davis"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "find_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Nobody Davidson"
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-PC-NC2",
+   "title": "NEGATIVE CONTROL: wrong validation message",
+   "module": "Owners",
+   "test_type": "functional",
+   "priority": "high",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/owners/new"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "first_name",
+     "value": "Qa"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "last_name",
+     "value": "Bad"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "address",
+     "value": "x"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "city",
+     "value": "y"
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "telephone",
+     "value": "abc"
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "add_owner_button"
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Telephone saved successfully"
+    }
+   ]
+  }
+ ]
+}
