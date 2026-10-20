@@ -167,6 +167,39 @@ def posts():
     return {"posts": _POSTS}
 
 
+@app.get("/obstacles")
+def obstacles():
+    """What stops a naive runner: a cookie banner, an overlay over the button, a button far
+    below the fold, a link that opens a new tab, a JavaScript error and a failing API call."""
+    return _page("Obstacles", """
+<div id="cookie-banner" style="position:fixed;bottom:0;left:0;right:0;background:#eee;padding:8px;z-index:10">
+  We use cookies. <button id="accept-all">Accept all</button> <button id="reject-all"
+  onclick="document.getElementById('cookie-banner').remove()">Reject all</button></div>
+<div id="overlay" style="position:fixed;inset:0;background:#0003;z-index:5"></div>
+<script>
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { const o = document.getElementById('overlay'); if (o) o.remove(); } });
+setTimeout(() => { throw new Error('demo uncaught error'); }, 10);
+fetch('/boom');
+</script>
+<button id="covered-btn" onclick="document.getElementById('out').innerText='Covered clicked'">Covered</button>
+<p id="out"></p>
+<div style="height:3000px"></div>
+<button id="far-btn" onclick="document.getElementById('out').innerText='Far clicked'">Far</button>
+<a id="newtab-link" href="/newtab" target="_blank">Open help</a>""")
+
+
+@app.get("/newtab")
+def newtab():
+    """The page a target=_blank link opens."""
+    return _page("Help", "<h1 id='help-title'>Help centre</h1>")
+
+
+@app.get("/boom")
+def boom():
+    """A server error the page calls in the background."""
+    return {"error": "boom"}, 500
+
+
 _SPA = """<!doctype html><html><head><meta charset="utf-8"><title>SPA</title></head><body>
 <nav><a href="#/home">Home</a> <a href="#/settings">Settings</a> <a href="#/export-data">Export</a></nav>
 <div id="view"></div>

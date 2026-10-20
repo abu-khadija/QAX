@@ -208,6 +208,51 @@ class PlaywrightRunner:
                 logger.debug("trace start failed: %s", e)
                 self._tracing = False
         self.page = await self.context.new_page()
+        # What went wrong IN the page while a case ran — JavaScript exceptions, console
+        # errors, server errors and failed requests. Reported as observed problems even
+        # when every assertion passed: a QA engineer would notice them too.
+        self._page_errors = []
+        self._latest_page = None
+        origin_host = None
+
+        def _note(kind, text):
+            if len(self._page_errors) < 50:
+                self._page_errors.append({"kind": kind, "text": str(text)[:300]})
+
+        def _watch(pg):
+            try:
+                pg.on("pageerror", lambda exc: _note("javascript exception", exc))
+                pg.on("console", lambda m: _note("console error", m.text) if m.type == "error" else None)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _on_resp(resp):
+            try:
+                if resp.status >= 500:
+                    from urllib.parse import urlparse as _u
+                    _note(f"HTTP {resp.status}", f"{resp.request.method} {_u(resp.url).path}")
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _on_failed(req):
+            try:
+                if req.resource_type in ("document", "xhr", "fetch"):
+                    from urllib.parse import urlparse as _u
+                    _note("request failed", f"{req.method} {_u(req.url).path} ({req.failure or ''})")
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _on_new_page(pg):
+            # a click that opens a NEW TAB: later steps continue there
+            self._latest_page = pg
+            _watch(pg)
+        try:
+            self.context.on("response", _on_resp)
+            self.context.on("requestfailed", _on_failed)
+            self.context.on("page", _on_new_page)
+            _watch(self.page)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("page watchers not attached: %s", e)
         # Browser dialogs (confirm/alert/prompt): Playwright DISMISSES them by default, so a
         # "Delete → Are you sure?" did nothing and a delete test failed for the wrong reason
         # (found on Flaskr). Accept by default (QAX_DIALOGS=dismiss to refuse) and record them.
@@ -241,6 +286,11 @@ class PlaywrightRunner:
         except Exception as e:  # noqa: BLE001
             logger.debug("trace stop failed: %s", e)
             return ""
+
+    def take_page_errors(self) -> list:
+        """Return and clear the page problems (JS exceptions, console errors, 5xx, failed requests)."""
+        out, self._page_errors = list(getattr(self, "_page_errors", []) or []), []
+        return out
 
     def take_dialogs(self) -> list:
         """Return and clear the browser dialogs (confirm/alert) seen since the last call."""
@@ -405,8 +455,15 @@ class PlaywrightRunner:
         Return the active Playwright Page object.
 
         Returns:
-            Page | None: The current Playwright page, or None if not set up.
+            Page | None: The newest open page (a tab a click opened), else the
+                         main page; None if not set up.
         """
+        latest = getattr(self, "_latest_page", None)
+        try:
+            if latest is not None and not latest.is_closed():
+                return latest
+        except Exception:  # noqa: BLE001
+            pass
         return self.page
 
     def is_ready(self) -> bool:

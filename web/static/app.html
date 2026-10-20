@@ -33,6 +33,9 @@
   .consent{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:13px;color:var(--muted);cursor:pointer}
   .consent input{width:16px;height:16px;margin:2px 0 0;accent-color:var(--accent);flex:0 0 auto;padding:0}
   .consent b{color:var(--txt);font-weight:600}
+  .bugrow{display:flex;gap:10px;align-items:flex-start;margin:6px 0;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13px;font-weight:400;color:var(--txt)}
+  .bugrow input{width:16px;height:16px;margin:2px 0 0;flex:0 0 auto;padding:0;accent-color:var(--accent)}
+  .bugrow span{flex:1;text-align:left}
   a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
 
   .hero{padding:34px 0 10px}
@@ -183,8 +186,9 @@
   <section class="hero">
     <h1>Generate the tests.<br><span class="grad">Prove the bugs. Ship to Jira.</span></h1>
     <p>One platform for software quality: QAX <b>scans your running app</b> and proves the security
-       bugs others miss, <b>generates functional test cases</b> from your stories or code and
-       <b>runs them</b> in a real browser or over HTTP, and pushes the results into <b>Jira / Xray</b>.</p>
+       bugs others miss, and <b>tests it end to end</b>: from its URL, repository and user stories it
+       writes test cases traced to the acceptance criteria, <b>runs them</b> in a real browser and files
+       the bugs it finds in <b>Jira</b> — cases export or go to <b>Xray</b> too.</p>
   </section>
 
   <div class="modes">
@@ -193,9 +197,9 @@
       <div class="md">Point at a running app → confirmed vulnerabilities, with evidence and fixes.</div>
     </button>
     <button class="mode" id="mode-func" onclick="setMode('func')">
-      <div class="mt">▶️ Functional QA</div>
-      <div class="md">Generate test cases from a story or code (or load your own) → <b>run them</b> in a
-        real browser or over HTTP → PASS / FAIL with evidence → Jira / Xray.</div>
+      <div class="mt">▶️ Functional QA (E2E)</div>
+      <div class="md">Give it your app's URL, repo and user stories → it understands them, writes the test
+        cases, <b>runs them end to end</b>, reports what it found and files the bugs to Jira.</div>
     </button>
   </div>
 
@@ -263,56 +267,42 @@
 
   <div class="panel" id="panel-func" style="display:none">
     <div class="steps4">
-      <span><b>1</b> Bring test cases</span><span><b>2</b> Review</span>
-      <span><b>3</b> Run · browser or HTTP</span><span><b>4</b> Results → Jira / Xray</span>
+      <span><b>1</b> Inputs</span><span><b>2</b> Understand</span><span><b>3</b> Test cases · review · export</span>
+      <span><b>4</b> Run end to end</span><span><b>5</b> Report · bugs → Jira</span>
     </div>
-    <div class="srcs" role="tablist" aria-label="Where the test cases come from">
-      <button id="src-gen-btn" class="active" role="tab" onclick="setSource('gen')">Generate from a story or code</button>
-      <button id="src-file-btn" role="tab" onclick="setSource('file')">Load a test-cases file</button>
+    <div class="hint" style="margin:0 0 12px">Give QAX any of these — the more it has, the better it tests. Nothing is
+      sent to Jira until you choose to.</div>
+    <div class="field"><label for="mapurl">App URL (the running app to read and test)</label>
+      <input id="mapurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false" oninput="fqProject()"></div>
+    <div class="field"><label for="fqrepo">Source repository (optional — a local folder or an https Git URL)</label>
+      <input id="fqrepo" placeholder="https://github.com/org/app  or  /path/to/app" autocomplete="off" spellcheck="false"></div>
+    <div class="field">
+      <label for="story">User story / acceptance criteria (optional — one criterion per line works best)</label>
+      <textarea id="story" rows="5" placeholder="As a user, I can reset my password.&#10;- The reset link expires in 15 minutes&#10;- A used or expired link shows an error"></textarea>
     </div>
-    <div id="src-gen">
-      <details class="adv" id="mapbox">
-        <summary>Read the app first (recommended for browser tests)</summary>
-        <div class="hint" style="margin:10px 0">QAX opens your app in a browser, follows its links (never logout / delete
-          style links, never submits a form) and records every page and element, so the generated tests use the real ones.</div>
-        <div class="field"><label for="mapurl">App URL</label>
-          <input id="mapurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false"></div>
-        <div class="field"><label for="mapproj">Project name</label>
-          <input id="mapproj" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
-        <div class="field"><label for="mapuser">Login user (optional)</label>
-          <input id="mapuser" autocomplete="off" spellcheck="false"></div>
-        <div class="field"><label for="mappass">Login password (optional — used for this read only, never stored)</label>
-          <input id="mappass" type="password" autocomplete="new-password"></div>
-        <label class="consent" for="mapexplore"><input type="checkbox" id="mapexplore">
-          <span><b>Also follow create / edit / delete / logout links</b> (a disposable staging app only —
-            this CHANGES DATA; every write is listed).</span></label>
-        <label class="consent" for="mapauth"><input type="checkbox" id="mapauth">
-          <span><b>I own this app or am authorized to test it.</b></span></label>
-        <div class="row" style="margin-top:10px;justify-content:flex-end">
-          <button class="btn2" id="mapgo" onclick="readApp()">Read the app</button></div>
-        <div id="mapout"></div>
-      </details>
-      <div class="field">
-        <label for="story">User story / acceptance criteria</label>
-        <textarea id="story" rows="5" placeholder="As a user, I can reset my password via an emailed link that expires in 15 minutes. The link works once; an expired or reused link shows an error."></textarea>
-      </div>
-      <details class="adv">
-        <summary>Or paste source code instead (optional)</summary>
-        <div class="field" style="margin-top:12px"><label for="code">Source code</label>
-          <textarea id="code" rows="6" placeholder="// paste a function, endpoint, or module"></textarea></div>
-      </details>
-      <div class="row" style="margin-top:14px;justify-content:flex-end">
-        <button class="btn" id="gengo" onclick="runGenerate()">Generate test cases</button>
-      </div>
-      <div class="hint">AI drafts structured test cases for you to review. You can push them to Jira/Xray as they are,
-        or run them against your app first (step 3).</div>
-    </div>
-    <div id="src-file" style="display:none">
-      <div class="field"><label for="tcfile">Test cases file (JSON)</label>
+    <details class="adv">
+      <summary>Login, project and more inputs</summary>
+      <div class="field" style="margin-top:12px"><label for="mapuser">Login user (optional)</label>
+        <input id="mapuser" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="mappass">Login password (optional — used for this run only, never stored)</label>
+        <input id="mappass" type="password" autocomplete="new-password"></div>
+      <div class="field"><label for="mapproj">Project name</label>
+        <input id="mapproj" oninput="this.dataset.touched=1" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="code">Source code (optional — paste a function or module)</label>
+        <textarea id="code" rows="5" placeholder="// paste a function, endpoint, or module"></textarea></div>
+      <div class="field"><label for="tcfile">Load a test-cases file (JSON) — start from your own cases, skips writing them</label>
         <input type="file" id="tcfile" accept=".json,application/json" onchange="loadTests(this)"></div>
-      <div class="hint">A QAX output file (<code>{"test_cases": [...]}</code>) or a JSON list — e.g.
-        <code>evals/data/ui_demo_cases.json</code> for the bundled demo app.</div>
+      <label class="consent" for="mapexplore"><input type="checkbox" id="mapexplore">
+        <span><b>Also follow create / edit / delete / logout links while reading</b> (a disposable staging app only —
+          this CHANGES DATA; every write is listed).</span></label>
+    </details>
+    <label class="consent" for="mapauth"><input type="checkbox" id="mapauth">
+      <span><b>I own this app or am authorized to test it.</b></span></label>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn" id="fqgo" onclick="analyzeAll()">Understand &amp; write test cases</button>
     </div>
+    <div id="mapout"></div>
+    <div id="fqunderstand"></div>
     <div class="hint" id="funcstate" style="margin-top:8px"></div>
   </div>
 
@@ -345,13 +335,16 @@
 
   <section id="genresults">
     <div class="rtool" id="gentool" style="display:none">
-      <button class="btn2" id="gentfilebtn" onclick="fileTests()">⤴ Push to Jira/Xray</button>
+      <button class="btn2" onclick="downloadCases('csv')">⤓ CSV</button>
+      <button class="btn2" onclick="downloadCases('json')">⤓ JSON</button>
+      <button class="btn2" id="gentfilebtn" onclick="fileTests()">⤴ Share to Jira / Xray</button>
     </div>
-    <div class="sec-title">Generated test cases <span id="gencount" style="color:var(--txt)"></span></div>
+    <div class="sec-title">3 · Test cases <span id="gencount" style="color:var(--txt)"></span></div>
+    <div id="fqcoverage"></div>
     <div id="tests"></div>
     <div class="hint" id="genjira" style="margin-top:14px"></div>
     <div class="panel" id="execpanel" style="display:none">
-      <div class="sec-title">Run these tests against your app</div>
+      <div class="sec-title">4 · Run them end to end</div>
       <div class="field"><label for="exurl">App URL</label>
         <input id="exurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false"></div>
       <div class="field"><label for="exengine">Engine</label>
@@ -382,6 +375,7 @@
         Playwright and the page selectors of your app; it does not run in read-only mode.</div>
       <div id="exout"></div>
     </div>
+    <div class="panel" id="fqreport" style="display:none"></div>
   </section>
 </div>
 
@@ -421,8 +415,8 @@ function logLine(step,status,detail){
 }
 function setMode(m){
   // Two tracks: the security scan, and functional QA (generation is its step 1).
-  // 'gen' is kept as an alias (old links, /app#generate) → functional QA, generate source.
-  if(m==='gen'){ m='func'; setSource('gen'); }
+  // 'gen' is kept as an alias (old links, /app#generate) → functional QA.
+  if(m==='gen'){ m='func'; }
   const scan = m==='scan';
   $('panel-scan').style.display = scan?'':'none';
   $('panel-func').style.display = scan?'none':'';
@@ -435,35 +429,8 @@ function setMode(m){
   if(!scan) $('funcstate').innerHTML = have ? ('<b>'+have+'</b> test case(s) ready — review them, then run them below.') : '';
   $('scanning').style.display='none'; $('err').style.display='none';
 }
-function setSource(src){
-  const gen = src!=='file';
-  $('src-gen').style.display = gen?'':'none';
-  $('src-file').style.display = gen?'none':'';
-  $('src-gen-btn').classList.toggle('active', gen);
-  $('src-file-btn').classList.toggle('active', !gen);
-}
 function showErr(m){ $('err').textContent=m; $('err').style.display='block'; }
 
-async function runGenerate(){
-  const story=$('story').value.trim(), code=$('code').value.trim();
-  if(!story && !code){ showErr('Enter a user story or paste some source code.'); return; }
-  $('err').style.display='none'; $('results').style.display='none'; $('genresults').style.display='none';
-  const btn=$('gengo'); btn.disabled=true; const orig=btn.textContent; btn.textContent='Generating…';
-  $('scanning').style.display='block'; $('scanmsg').textContent='Generating test cases…'; $('live').innerHTML='';
-  logLine('generate','start','asking QAX to draft test cases from your input');
-  try{
-    const r=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({story,code,project:($('mapproj').value||'').trim()})});
-    const d=await r.json();
-    if(d.error){ showErr(d.error); }
-    else { logLine('generate','ok',(d.tests||[]).length+' valid test case(s) drafted'
-             +(d.invalid?(' · '+d.invalid+' rejected by schema validation'):'')
-             +(d.app_map_pages?(' · grounded in '+d.app_map_pages+' real page(s)'):'')
-             +((d.summary||{}).unmapped_cases?(' · '+d.summary.unmapped_cases+' use an element not on the map (needs review)'):''));
-           renderTests(d.tests||[]); }
-  }catch(e){ showErr('Generation failed: '+e); }
-  finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; }
-}
 window._lastTests=[];
 function loadTests(input){
   const f=input.files&&input.files[0]; if(!f) return;
@@ -513,6 +480,7 @@ function renderTests(cases){
       +'</div>';
   }).join('');
   $('execpanel').style.display='block';
+  renderCoverage();
   $('genjira').innerHTML = 'Review, run them against your app below, then <b>push to Jira / Xray</b> with the button above.';
 }
 
@@ -544,32 +512,134 @@ function engineHint(){
   if(ui && !$('exproj').value) $('exproj').value=_cfg.project||'';
   if(ui && !_cfg.browser) $('exhint').innerHTML='⚠️ Playwright is not installed on the server: <code>pip install playwright && playwright install chromium</code>';
 }
-async function readApp(){
-  const out=$('mapout'), url=$('mapurl').value.trim(), project=$('mapproj').value.trim();
-  if(!$('mapauth').checked){ out.innerHTML='<div class="hk">Confirm you are authorized to test this app.</div>'; return; }
-  const btn=$('mapgo'); btn.disabled=true; out.innerHTML='<div class="hk">Reading the app…</div>';
+function fqProject(){
+  // a project name from the URL's host, unless the user typed one
+  const p=$('mapproj'); if(p.dataset.touched) return;
+  try{ const h=new URL($('mapurl').value.trim()).host.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,''); p.value=h||''; }catch(e){}
+}
+window._fqCriteria=[]; window._fqCoverage=null;
+async function analyzeAll(){
+  const url=$('mapurl').value.trim(), repo=$('fqrepo').value.trim(), story=$('story').value.trim(), code=$('code').value.trim();
+  if(!url && !repo && !story && !code){ showErr('Give QAX something to test: the app URL, a repository, a user story or code.'); return; }
+  if(url && !$('mapauth').checked){ showErr('Confirm you own this app or are authorized to test it.'); return; }
+  $('err').style.display='none'; $('genresults').style.display='none'; $('fqreport').style.display='none';
+  const btn=$('fqgo'); btn.disabled=true; const orig=btn.textContent; btn.textContent='Working…';
+  $('scanning').style.display='block'; $('scanmsg').textContent='Understanding your inputs and writing test cases…'; $('live').innerHTML='';
+  if(url) logLine('read','start','reading the app at '+url+' (links, menus, forms)');
+  if(repo) logLine('repo','start','reading the repository');
+  if(story) logLine('story','start','numbering the acceptance criteria');
+  logLine('generate','start','writing test cases (ISTQB techniques, traced to the criteria)');
   try{
-    const r=await api('/api/map',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({url,project,username:$('mapuser').value,password:$('mappass').value,authorized:true,
-        explore_actions:$('mapexplore').checked})});
+    const r=await api('/api/functional/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url,repo,story,code,project:$('mapproj').value.trim(),username:$('mapuser').value,
+        password:$('mappass').value,explore_actions:$('mapexplore').checked,authorized:$('mapauth').checked})});
     const d=await r.json();
-    if(d.error){ out.innerHTML='<div class="hk">⚠️ '+esc(d.error)+'</div>'; return; }
-    const n=(d.pages||[]).reduce((a,p)=>a+p.elements,0);
-    out.innerHTML='<div class="hk"><b>'+(d.pages||[]).length+'</b> page(s), <b>'+n+'</b> element(s) read'
-      +(d.login_ok?' · logged in':(d.login_ok===false?' · ⚠️ login did not succeed — public pages only':''))
-      +'<br>'+(d.pages||[]).slice(0,12).map(p=>esc(p.path)+' ('+p.elements+')').join(' · ')
-      +(d.revealed?'<br>Revealed by opening menus/dialogs: '+d.revealed+' element(s)':'')
-      +((d.skipped_links||[]).length?'<br>Not followed (would log out / change data): '+d.skipped_links.slice(0,6).map(esc).join(', ')+' — tick "Also follow…" to map them':'')
-      +((d.explored_actions||[]).length?'<br>Action links followed: '+d.explored_actions.slice(0,6).map(esc).join(', '):'')
-      +(d.writes?'<br>⚠️ '+d.writes+' write request(s) were sent while reading':'')
-      +'<br>Generation now uses these pages. Run the tests with project <code>'+esc(d.project)+'</code>.</div>';
-    $('exurl').value=$('exurl').value||url; $('exproj').value=d.project;
-  }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
-  finally{ btn.disabled=false; $('mappass').value=''; }
+    renderUnderstanding(d.understanding||{});
+    if(d.error && !(d.tests||[]).length){ showErr(d.error); }
+    if((d.tests||[]).length){
+      logLine('generate','ok',d.tests.length+' test case(s) written'+(d.invalid?(' · '+d.invalid+' rejected by validation'):''));
+      window._fqCoverage=d.coverage||null; renderTests(d.tests);
+      if(url){ $('exurl').value=url; $('exengine').value='ui'; engineHint(); $('exproj').value=(d.understanding||{}).project||''; $('exro').checked=false; $('exauth').checked=$('mapauth').checked; }
+    }
+  }catch(e){ showErr('Failed: '+e); }
+  finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; $('mappass').value=''; }
+}
+function renderUnderstanding(u){
+  window._fqCriteria=u.criteria||[];
+  const pages=u.pages||[];
+  let h='<div class="sec-title" style="margin-top:14px">2 · What QAX understood</div><div class="hk">';
+  if(pages.length) h+='<b>The app:</b> '+pages.length+' page(s), '+pages.reduce((a,p)=>a+p.elements,0)+' element(s)'
+    +(u.login_ok?' · logged in':(u.login_ok===false?' · ⚠️ login did not succeed':''))+'<br><span style="color:var(--muted)">'
+    +pages.slice(0,14).map(p=>esc(p.path)).join(' · ')+'</span><br>';
+  if((u.skipped_links||[]).length) h+='Not followed while reading (would change data): '+u.skipped_links.slice(0,6).map(esc).join(', ')+'<br>';
+  if(u.writes) h+='⚠️ '+u.writes+' write request(s) were sent while reading<br>';
+  if(u.repo) h+='<b>The repository:</b> '+esc(u.repo.overview||u.repo.folder)+((u.repo.risk_areas||[]).length?'<br>Risk areas: '+u.repo.risk_areas.map(esc).join(', '):'')+'<br>';
+  if((u.criteria||[]).length) h+='<b>Acceptance criteria:</b><br>'+u.criteria.map(c=>'<code>'+esc(c.id)+'</code> '+esc(c.text)).join('<br>')+'<br>';
+  (u.notes||[]).forEach(n=>{ h+='⚠️ '+esc(n)+'<br>'; });
+  h+='</div>'; $('fqunderstand').innerHTML=h;
+}
+function renderCoverage(){
+  const c=window._fqCoverage, el=$('fqcoverage'); if(!el) return;
+  if(!c || !Object.keys(c.by_criterion||{}).length){ el.innerHTML=''; return; }
+  const ac=window._fqCriteria||[], txt=id=>(ac.find(a=>a.id===id)||{}).text||'';
+  const tech=Object.entries(c.techniques||{}).map(([k,v])=>esc(k)+' ×'+v).join(' · ');
+  el.innerHTML='<div class="hk"><b>Requirement coverage: '+c.percent+'%</b>'
+    +(c.uncovered.length?' — <b style="color:var(--p2)">not covered: '+c.uncovered.map(esc).join(', ')+'</b>':' — every criterion has a case')
+    +'<br>'+Object.entries(c.by_criterion).map(([k,v])=>'<code>'+esc(k)+'</code> '+esc(txt(k)).slice(0,70)+' → '+(v.length?v.map(esc).join(', '):'<b>no case</b>')).join('<br>')
+    +(tech?'<br><span style="color:var(--muted)">Techniques: '+tech+'</span>':'')+'</div>';
+}
+function _csvCell(v){ v=(v==null?'':(typeof v==='object'?JSON.stringify(v):String(v))); return '"'+v.replace(/"/g,'""')+'"'; }
+function downloadCases(kind){
+  const t=window._lastTests||[]; if(!t.length) return;
+  let body, type, name;
+  if(kind==='json'){ body=JSON.stringify({test_cases:t.map(x=>{const y={...x}; delete y._verdict; return y;})},null,2); type='application/json'; name='qax-test-cases.json'; }
+  else {
+    const rows=[['ID','Title','Priority','Type','Description','Preconditions','Steps','Expected']];
+    t.forEach(x=>{ const st=(x.manual_steps||[]); rows.push([x.test_case_id,x.title,x.priority,x.test_type,x.description,
+      (x.preconditions||[]).join('\n'), st.map(s=>s.step_number+'. '+s.action).join('\n'), st.map(s=>s.step_number+'. '+(s.expected_result||'')).join('\n')]); });
+    body=rows.map(r=>r.map(_csvCell).join(',')).join('\n'); type='text/csv'; name='qax-test-cases.csv';
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([body],{type})); a.download=name; a.click();
+}
+window._fqLastRun=null;
+function renderReport(d){
+  window._fqLastRun=d;
+  const box=$('fqreport'); const res=d.results||[]; if(!res.length){ box.style.display='none'; return; }
+  const byId={}; (window._lastTests||[]).forEach(t=>{ byId[t.test_case_id]=t; });
+  const fails=res.filter(r=>r.status==='FAIL'), problems=res.filter(r=>(r.page_errors||[]).length);
+  const ac=window._fqCriteria||[], cov=window._fqCoverage;
+  let acRows='';
+  if(cov && ac.length){
+    acRows='<div class="sec-title" style="margin-top:12px">Requirements</div><div class="hk">'+ac.map(a=>{
+      const ids=(cov.by_criterion||{})[a.id]||[]; const st=ids.map(i=>(res.find(r=>r.test_case_id===i)||{}).status).filter(Boolean);
+      const v=!ids.length?'NOT COVERED':st.includes('FAIL')?'FAILED':st.length&&st.every(x=>x==='PASS')?'PASSED':'NOT FULLY RUN';
+      return '<code>'+esc(a.id)+'</code> '+esc(a.text).slice(0,80)+' → <b>'+v+'</b>'; }).join('<br>')+'</div>';
+  }
+  let h='<div class="sec-title">5 · Report</div><div class="hk"><b>'+(d.passed||0)+' passed · '+(d.failed||0)+' failed · '
+    +((d.skipped||0)+(d.errors||0)+(d.not_run||0))+' not run</b> (not passes)'
+    +(d.writes_sent?'<br>'+d.writes_sent+' request(s) that change data were sent to the app (not undone)':'')+'</div>'+acRows;
+  if(problems.length) h+='<div class="sec-title" style="margin-top:12px">Problems seen in the pages</div><div class="hk">'
+    +problems.map(r=>'<b>'+esc(r.test_case_id)+'</b>: '+(r.page_errors||[]).slice(0,4).map(e=>esc(e.kind+': '+e.text)).join(' · ')).join('<br>')+'</div>';
+  h+='<div class="sec-title" style="margin-top:12px">Bugs found ('+fails.length+')</div>';
+  if(fails.length){
+    h+='<div class="hk">'+fails.map(r=>{ const f=(r.steps||[]).find(s=>s.status==='FAIL')||{};
+      return '<label class="bugrow"><input type="checkbox" class="bugpick" value="'+esc(r.test_case_id)+'" checked><span><b>'
+        +esc((byId[r.test_case_id]||{}).title||r.title||r.test_case_id)+'</b> — step '+esc(f.step_number)+': '+esc(f.actual_result||r.error||'failed')+'</span></label>'; }).join('')
+      +'<div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button>'
+      +'<button class="btn" id="fqbugsbtn" onclick="fileBugs()">⤴ File selected bugs to Jira</button></div><div id="fqbugsout"></div></div>';
+  } else h+='<div class="hk">No failed case. <button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button></div>';
+  box.innerHTML=h; box.style.display='block';
+}
+async function fileBugs(){
+  const d=window._fqLastRun||{}; const pick=[...document.querySelectorAll('.bugpick:checked')].map(x=>x.value);
+  const results=(d.results||[]).filter(r=>pick.includes(r.test_case_id)); const out=$('fqbugsout');
+  if(!results.length){ out.innerHTML='Select at least one bug.'; return; }
+  const live=!!(_cfg.live_export && window.confirm('File '+results.length+' bug(s) for real in Jira? Cancel = dry-run preview.'));
+  out.innerHTML='Filing…';
+  try{
+    const r=await api('/api/functional/bugs',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({results,tests:window._lastTests,url:$('exurl').value.trim(),dry_run:!live})});
+    const j=await r.json();
+    if(j.error){ out.innerHTML='⚠️ '+esc(j.error); return; }
+    out.innerHTML=(j.dry_run?'🧪 <b>Dry run</b> — nothing was filed. These bugs would be created:':'✅ Filed:')
+      +(j.bugs||[]).map((b,i)=>'<details style="margin-top:6px"><summary>'+esc(((j.results||[])[i]||{}).jira_key||'')+' '+esc(b.title)+'</summary><pre class="ev">'+esc(b.text)+'</pre></details>').join('')
+      +(j.dry_run&&!_cfg.live_export?'<div class="hint">Live filing is off — set <code>QAX_ALLOW_LIVE_EXPORT=true</code> (and Jira credentials) on the server.</div>':'');
+  }catch(e){ out.innerHTML='⚠️ '+esc(String(e)); }
+}
+function downloadE2EReport(){
+  const d=window._fqLastRun||{}, t=window._lastTests||[], when=new Date().toISOString().slice(0,16).replace('T',' ');
+  const byId={}; t.forEach(x=>{byId[x.test_case_id]=x;});
+  const row=r=>{ const f=(r.steps||[]).find(s=>s.status==='FAIL')||{}; return '<tr><td>'+esc(r.test_case_id)+'</td><td>'+esc((byId[r.test_case_id]||{}).title||r.title||'')
+    +'</td><td><b>'+esc(r.status)+'</b></td><td>'+esc(f.actual_result||r.error||'')+'</td><td>'+esc(((byId[r.test_case_id]||{}).description||'').split('.')[0])+'</td></tr>'; };
+  const html='<!doctype html><meta charset="utf-8"><title>QAX E2E report</title><style>body{font:14px system-ui;margin:24px;color:#111}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:6px;text-align:left;vertical-align:top}</style>'
+    +'<h1>Functional QA report</h1><p>App: <b>'+esc($('exurl').value)+'</b> · '+esc(when)+'</p>'
+    +'<p><b>'+(d.passed||0)+' passed · '+(d.failed||0)+' failed · '+((d.skipped||0)+(d.errors||0)+(d.not_run||0))+' not run</b></p>'
+    +'<table><tr><th>ID</th><th>Test case</th><th>Verdict</th><th>Failure</th><th>Covers</th></tr>'+(d.results||[]).map(row).join('')+'</table>';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([html],{type:'text/html'})); a.download='qax-e2e-report.html'; a.click();
 }
 async function runTests(preview){
   const out=$('exout'), url=$('exurl').value.trim();
-  if(!window._lastTests.length){ out.innerHTML='<div class="hk">Generate or load test cases first (step 1).</div>'; return; }
+  if(!window._lastTests.length){ out.innerHTML='<div class="hk">Write or load test cases first (steps 1–3).</div>'; return; }
   if(!preview && !$('exauth').checked){ out.innerHTML='<div class="hk">Confirm you are authorized to test this app.</div>'; return; }
   const btn=$('exgo'); btn.disabled=true; out.innerHTML='<div class="hk">'+(preview?'Planning…':'Running…')+'</div>';
   try{
@@ -601,6 +671,7 @@ async function runTests(preview){
         else if(notRun[tc.test_case_id]) tc._verdict={status:'NOTRUN',label:'not run',evidence:notRun[tc.test_case_id]};
       });
       renderTests(window._lastTests);
+      renderReport(d);
     }
     out.innerHTML=h;
   }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }

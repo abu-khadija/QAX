@@ -210,6 +210,97 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
     }
 
 
+_PRIORITY_TO_SEV = {"critical": "P1", "high": "P2", "medium": "P3", "low": "P4"}
+
+
+def functional_result_to_bug(result: dict, case: dict | None = None, *, base_url: str = "",
+                             environment: str | None = None, client_safe: bool = False) -> dict:
+    """
+    A failed functional (E2E) test case as a Jira Bug in the ISTQB defect-report shape:
+    title, severity, environment, the requirement it breaks, steps to reproduce (the
+    case's own steps, in order), expected vs actual (from the failing step), evidence
+    (screenshot / trace paths, page problems seen), reproducibility (only what was
+    measured: one run). Same bug-dict keys as finding_to_bug(), so JiraBugFiler files it.
+
+    Args:
+        result (dict): One TestExecutor/APIRunner result (status FAIL).
+        case (dict | None): The test case that ran (title, steps, priority, description).
+        base_url (str): The app under test (step 1 gets a real URL).
+        environment (str | None): Where it ran (defaults to base_url).
+        client_safe (bool): No tool name in the text or labels.
+    """
+    import re as _re
+    case = case or {}
+    title_case = str(case.get("title") or result.get("title") or "Functional test failed")
+    sev = _PRIORITY_TO_SEV.get(str(case.get("priority") or "medium").lower(), "P3")
+    steps_run = result.get("steps") or []
+    failing = next((st for st in steps_run if st.get("status") == "FAIL"), {})
+    env = environment or base_url or "the application under test"
+    covers = _re.search(r"Covers:\s*([^|.]+)", str(case.get("description") or ""))
+    requirement = covers.group(1).strip() if covers else ""
+
+    repro_steps = []
+    for st in case.get("manual_steps") or []:
+        a = str(st.get("action") or "").strip()
+        if a:
+            repro_steps.append(a)
+    if not repro_steps:                               # from what actually ran
+        for st in steps_run:
+            a = str(st.get("action") or st.get("action_type") or "").strip()
+            act = str(st.get("actual_result") or "").split(" (")[0]
+            if act:
+                repro_steps.append(act if not a else f"{a}: {act}"[:200])
+    if base_url and repro_steps:
+        repro_steps[0] = f"Open {base_url} — {repro_steps[0]}"
+
+    expected = str(case.get("expected_result") or "")
+    for st in case.get("manual_steps") or []:
+        if st.get("step_number") == failing.get("step_number") and st.get("expected_result"):
+            expected = str(st["expected_result"])
+    actual = str(failing.get("actual_result") or result.get("error") or "The step failed")
+    if failing.get("error"):
+        actual += f" — {failing['error']}"
+    evidence = [p for p in (failing.get("screenshot"), result.get("screenshot"),
+                            result.get("trace")) if p]
+    problems = [f"{e.get('kind')}: {e.get('text')}" for e in (result.get("page_errors") or [])][:8]
+
+    summary = f"{title_case} — fails at step {failing.get('step_number', '?')}"
+    tool = "" if client_safe else "QAX "
+    blocks = [
+        ("h", "Summary"), ("p", [(summary, False)]),
+        ("p", [("Severity: ", True), (f"{sev} / {_SEV_NAME.get(sev, '')} — from the test case priority", False)]),
+        ("p", [("Environment: ", True), (env, False)]),
+    ]
+    if requirement:
+        blocks.append(("p", [("Requirement: ", True), (requirement, False)]))
+    blocks += [("p", [("Reproducibility: ", True),
+                      (f"Failed 1/1 {tool}run on {env}. Repeat the steps to confirm.", False)]),
+               ("h", "Steps to Reproduce"), ("ol", repro_steps or ["See the attached evidence."]),
+               ("h", "Expected Result"), ("p", [(expected or "As stated by the test case.", False)]),
+               ("h", "Actual Result"), ("p", [(actual, False)])]
+    if problems:
+        blocks += [("h", "Page problems seen"), ("ol", problems)]
+    if evidence:
+        blocks += [("h", "Evidence"), ("ol", evidence)]
+    text = "\n".join([summary, f"Severity: {sev}", f"Environment: {env}"]
+                     + ([f"Requirement: {requirement}"] if requirement else [])
+                     + ["Steps:"] + [f"{n}. {t}" for n, t in enumerate(repro_steps, 1)]
+                     + [f"Expected: {expected}", f"Actual: {actual}"] + problems + evidence)
+    fp = fingerprint(title_case, base_url, client_safe=client_safe)
+    labels = ["functional", "e2e"] + ([] if client_safe else ["qax"])
+    return {
+        "test_case_id": str(result.get("test_case_id") or case.get("test_case_id") or "E2E"),
+        "title": f"[{sev}] {title_case}",
+        "severity": sev,
+        "description": text,
+        "adf": _adf_blocks(blocks),
+        "labels": labels,
+        "fingerprint": fp,
+        "evidence_text": text,
+        "evidence_filename": f"evidence-e2e-{fp[-8:]}.txt",
+    }
+
+
 def _adf_blocks(blocks: list) -> dict:
     """
     ADF doc from (kind, content) blocks: 'h' heading, 'p' paragraph of

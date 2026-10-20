@@ -20,6 +20,18 @@ Every scan written with `--out` records the exact version and commit that produc
 - Seeing the run: `--screenshots all`, `--trace`, `--watch` (CLI) / step screenshots, *Watch it run*, trace (web).
 - `map --explore-actions`; menus/dialogs opened and recorded; sitemap.xml; the app's own login link; ARIA widgets,
   rich editors (CodeMirror/ProseMirror/Quill) and RPC/GraphQL reads understood.
+- **Functional QA is one E2E flow** (web): inputs (app URL + login, repository folder or https Git URL, user
+  story / acceptance criteria, code, or a cases file) → *what QAX understood* (pages, repo overview, numbered
+  criteria) → test cases with requirement coverage per criterion and technique mix, downloadable as CSV/JSON or
+  shared to Jira/Xray (dry run unless enabled) → run end to end → report (verdicts, criteria pass/fail, page
+  problems) → the failures as ISTQB-shaped Jira bugs (dry run unless enabled), HTML report.
+  `POST /api/functional/analyze`, `POST /api/functional/bugs`; `core/traceability.py`; `functional_result_to_bug()`.
+- ISTQB knowledge in generation: experience-based techniques (error guessing, exploratory charters, checklists),
+  white-box coverage when code is given, pairwise, test types, risk-based priority, and a required
+  `Covers: AC-n | Technique: X` traceability line.
+- Smarter browser runs: JavaScript exceptions, console errors, 5xx and failed requests reported per case (even on a
+  PASS); a click that opens a new tab continues there; cookie banners answered with their reject option; a
+  covering overlay closed (Escape) or an off-screen element scrolled into view before a click fails.
 
 ### Changed
 - External writes need an explicit opt-in: `pipeline --live`; `execute` files auto-bugs only with `--upload`;

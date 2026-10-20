@@ -447,3 +447,27 @@ def test_explore_actions_follows_risky_links_only_when_asked(ui_app):
     bold = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", username="demo", password="demo123",
                                explore_actions=True))
     assert any("logout" in a for a in bold.explored_actions)
+
+
+def test_the_runner_gets_past_obstacles_and_reports_page_problems(ui_app):
+    """Cookie banner (privacy-preserving answer), an overlay over the button, a button below the
+    fold, a link that opens a new tab — none may stop the run; a JS exception and an HTTP 500
+    in the background are reported even though the case passes."""
+    case = {"test_case_id": "OBS", "title": "obstacles", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/obstacles"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": "#covered-btn"},
+        {"step_number": 3, "playwright_action": "assert", "selector_key": "#out",
+         "assertion_type": "text", "assertion_value": "Covered clicked"},
+        {"step_number": 4, "playwright_action": "click", "selector_key": "#far-btn"},
+        {"step_number": 5, "playwright_action": "assert", "selector_key": "#out",
+         "assertion_type": "text", "assertion_value": "Far clicked"},
+        {"step_number": 6, "playwright_action": "click", "selector_key": "#newtab-link"},
+        {"step_number": 7, "playwright_action": "assert", "selector_key": "#help-title",
+         "assertion_type": "text", "assertion_value": "Help centre"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result"), s.get("error"))
+                                   for s in r["steps"]]
+    assert "Reject all" in r["steps"][0]["actual_result"]               # not "Accept all"
+    assert "Escape" in r["steps"][1]["actual_result"]                   # overlay handled
+    kinds = {e["kind"] for e in r.get("page_errors", [])}
+    assert "javascript exception" in kinds and "HTTP 500" in kinds

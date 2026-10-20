@@ -451,6 +451,172 @@ def _clean_project(value) -> str:
     return "".join(ch for ch in str(value or "") if ch.isalnum() or ch in "-_")[:64]
 
 
+def _repo_source(repo: str) -> "tuple[str, str]":
+    """
+    A source repository for the Understand step: a local folder, or an https Git URL
+    cloned shallowly into output/repos/. Returns (folder, error). No credentials in
+    URLs (they would be logged); only http(s); never raises.
+    """
+    import re as _re
+    import subprocess
+    from pathlib import Path
+    from urllib.parse import urlparse
+    repo = (repo or "").strip()
+    if not repo:
+        return "", ""
+    if not repo.startswith(("http://", "https://")):
+        path = Path(repo).expanduser()
+        return (str(path), "") if path.is_dir() else ("", f"Repository folder not found: {repo}")
+    u = urlparse(repo)
+    if "@" in u.netloc:
+        return "", "Remove the credentials from the repository URL (they would end up in logs)."
+    slug = _re.sub(r"[^A-Za-z0-9_.-]+", "_", (u.netloc + u.path).strip("/"))[:80] or "repo"
+    dest = Path(__file__).resolve().parent.parent / "output" / "repos" / slug
+    if dest.is_dir():
+        return str(dest), ""
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(["git", "clone", "--depth", "1", "--quiet", repo, str(dest)],
+                           capture_output=True, text=True, timeout=180,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        if r.returncode != 0:
+            return "", f"Could not clone the repository: {(r.stderr or '').strip()[:200]}"
+        return str(dest), ""
+    except Exception as exc:  # noqa: BLE001
+        return "", f"Could not clone the repository: {str(exc)[:200]}"
+
+
+@app.post("/api/functional/analyze")
+def functional_analyze():
+    """
+    Functional QA, steps 1-3: take every input the user has — the running app's URL, a
+    source repository (folder or https Git URL), a user story / acceptance criteria, code —
+    understand them (read the app, understand the repo, number the acceptance criteria),
+    then write test cases grounded in all of it, each traced to a criterion and a technique.
+    Returns {understanding, tests, invalid, coverage, error}. Reading the app needs the
+    authorization checkbox; the login values are used for this read only.
+    """
+    import asyncio
+    data = request.get_json(force=True, silent=True) or {}
+    url = str(data.get("url", "")).strip().rstrip("/")
+    story = str(data.get("story", "")).strip()
+    code = str(data.get("code", "")).strip()
+    repo = str(data.get("repo", "")).strip()
+    project = _clean_project(data.get("project")) or "app"
+
+    def _on(v) -> bool:
+        return str(v).lower() in ("1", "true", "yes", "on")
+    if not (url or story or code or repo):
+        return jsonify({"error": "Give QAX something to test: the app URL, a repository, a user story or code."}), 400
+    understanding: dict = {"project": project, "pages": [], "criteria": [], "repo": None, "notes": []}
+    app_map = None
+
+    # 1 · the running app, read from its URL
+    if url:
+        if not url.startswith(("http://", "https://")):
+            return jsonify({"error": "The app URL must start with http:// or https://."}), 400
+        if not _target_authorized():
+            return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
+        from core.app_mapper import map_app, save_map
+        app_map = asyncio.run(map_app(url, username=str(data.get("username", "")),
+                                      password=str(data.get("password", "")),
+                                      insecure=_on(data.get("insecure", "")),
+                                      explore_actions=_on(data.get("explore_actions", ""))))
+        if app_map.error:
+            understanding["notes"].append(f"Could not read the app: {app_map.error}")
+            app_map = None
+        else:
+            save_map(app_map, project)
+            understanding.update(
+                pages=[{"path": p["path"], "elements": len(p.get("elements") or {})} for p in app_map.pages],
+                login_ok=app_map.login_ok, skipped_links=app_map.skipped_links,
+                explored_actions=app_map.explored_actions, writes=len(app_map.writes))
+
+    # 2 · the source repository
+    repo_context = None
+    if repo:
+        folder, err = _repo_source(repo)
+        if err:
+            understanding["notes"].append(err)
+        else:
+            try:
+                from services.comprehension_service import RepoComprehensionService
+                from services.context import QAXContext
+                comp = RepoComprehensionService(QAXContext.from_env()).comprehend(folder, input_type="folder")
+                if getattr(comp, "error", None):
+                    understanding["notes"].append(_ai_error_message(comp.error).replace(
+                        "Generation failed", "Could not understand the repository"))
+                else:
+                    repo_context = comp.as_context()
+                    understanding["repo"] = {"folder": folder, "overview": getattr(comp, "overview", ""),
+                                             "risk_areas": getattr(comp, "risk_areas", [])}
+            except Exception as exc:  # noqa: BLE001
+                understanding["notes"].append(_ai_error_message(exc).replace(
+                    "Generation failed", "Could not understand the repository"))
+
+    # 3 · the requirements: numbered acceptance criteria
+    from core.traceability import coverage, criteria_block, extract_criteria
+    criteria = extract_criteria(story)
+    understanding["criteria"] = criteria
+    if not (story or code):
+        story = ("Explore and test the main user flows of this application: what a user can create, "
+                 "change, delete and see, including invalid input and permissions.")
+        understanding["notes"].append("No user story given — QAX wrote an exploratory charter from what it read.")
+
+    # 4 · test cases, grounded in all of the above
+    try:
+        from services.context import QAXContext
+        from services.exceptions import QAXConfigError
+        from services.generation_service import GenerationOptions, GenerationService
+        from services.progress import NullProgressReporter
+        ctx = "\n\n".join(x for x in (repo_context, criteria_block(criteria)) if x) or None
+        opts = GenerationOptions(user_story=story, content=code or story, app_map=app_map,
+                                 repo_context=ctx, test_type=str(data.get("test_type") or "") or None)
+        try:
+            res = GenerationService(QAXContext.from_env()).generate(
+                "code://web-input" if code else "story://web-input", options=opts,
+                progress=NullProgressReporter())
+        except QAXConfigError as exc:
+            return jsonify({"understanding": understanding, "tests": [], "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"understanding": understanding, "tests": [], "error": _ai_error_message(exc)})
+    if res.error:
+        return jsonify({"understanding": understanding, "tests": [], "error": _ai_error_message(res.error)})
+    tests = res.test_cases or []
+    return jsonify({"understanding": understanding, "tests": tests, "invalid": len(res.invalid or []),
+                    "summary": res.summary or {}, "coverage": coverage(tests, criteria)})
+
+
+@app.post("/api/functional/bugs")
+def functional_bugs():
+    """
+    Functional QA, step 5: the failed cases of a run as Jira bugs (ISTQB defect-report
+    shape, evidence included). Same live-gate as every export: a dry-run preview unless
+    the operator enabled QAX_ALLOW_LIVE_EXPORT on the server AND the caller asked.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    results = [r for r in (data.get("results") or []) if isinstance(r, dict) and r.get("status") == "FAIL"]
+    if not results:
+        return jsonify({"error": "No failed case to report."}), 400
+    cases = {str(t.get("test_case_id")): t for t in (data.get("tests") or []) if isinstance(t, dict)}
+    allow_live = os.getenv("QAX_ALLOW_LIVE_EXPORT", "false").lower() == "true"
+    dry_run = True if not allow_live else (data.get("dry_run", True) is not False)
+    from core.jira_bugs import JiraBugFiler, functional_result_to_bug
+    url = str(data.get("url", "")).strip()
+    bugs = [functional_result_to_bug(r, cases.get(str(r.get("test_case_id"))), base_url=url)
+            for r in results]
+    try:
+        out = JiraBugFiler(dry_run=dry_run, project_key=str(data.get("project_key", "")).strip() or None
+                           ).file_many(bugs)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"Bug filing failed: {exc}"}), 502
+    out = dict(out or {})
+    out["dry_run"] = dry_run
+    out["bugs"] = [{"test_case_id": b["test_case_id"], "title": b["title"], "text": b["description"]}
+                   for b in bugs]
+    return jsonify(out)
+
+
 @app.post("/api/map")
 def map_app_route():
     """
@@ -495,7 +661,7 @@ def _ai_error_message(err) -> str:
     """Turn an AI-provider error into a sentence the user can act on (the raw text stays in the log)."""
     raw = str(err or "")
     low = raw.lower()
-    hint = " You can still load a test-cases file (step 1 → Load a test-cases file) and run it."
+    hint = " You can still load a test-cases file (Login, project and more inputs → Load a test-cases file) and run it."
     if "credit balance is too low" in low:
         return "Generation failed: the AI provider account has no credit left — add credit to the Anthropic account." + hint
     if "invalid x-api-key" in low or "authentication_error" in low or "api key" in low and "missing" in low:

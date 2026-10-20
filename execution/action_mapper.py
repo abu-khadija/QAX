@@ -94,6 +94,61 @@ def resolve_step_value(value: str) -> "tuple[str, str]":
         return value, ""
     return os.getenv(m.group(1), ""), m.group(1)
 
+_CONSENT_JS = r"""() => {
+  // a cookie/consent banner: choose the most privacy-preserving answer (reject / necessary
+  // only); if it offers only "accept", leave it alone and say so
+  const box = [...document.querySelectorAll('[id*=cookie i],[class*=cookie i],[id*=consent i],[class*=consent i],[id*=gdpr i],[class*=gdpr i],[aria-label*=cookie i]')]
+    .find(e => e.offsetWidth || e.offsetHeight);
+  if (!box) return '';
+  const btns = [...box.querySelectorAll('button, a, [role=button]')].filter(b => b.offsetWidth || b.offsetHeight);
+  const pick = btns.find(b => /reject|decline|deny|necessary only|only necessary|essential only|refuse/i.test(b.innerText || ''));
+  if (pick) { pick.click(); return 'cookie banner: chose "' + (pick.innerText || '').trim().slice(0, 30) + '"'; }
+  return btns.length ? 'cookie banner present: no reject option, left as is' : '';
+}"""
+
+
+async def _dismiss_cookie_banner(page) -> str:
+    """Answer a cookie banner with its most privacy-preserving option. Never raises."""
+    try:
+        return await page.evaluate(_CONSENT_JS) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+async def _click_through_obstacles(page, selector: str) -> str:
+    """
+    Click, and get past what commonly blocks a click instead of failing on it:
+    an overlay/menu/toast covering the element (Escape, then retry), an element outside
+    the viewport (scroll into view, then retry), a cookie banner (privacy-preserving
+    answer, then retry). Re-raises the original error if the element really cannot be
+    clicked. Returns a note of what was done ("" when nothing was needed).
+    """
+    try:
+        await page.click(selector, timeout=7_000)
+        return ""
+    except Exception as first:  # noqa: BLE001
+        msg = str(first)
+        notes = []
+        if "intercepts pointer events" in msg or "obscured" in msg:
+            banner = await _dismiss_cookie_banner(page)
+            if banner:
+                notes.append(banner)
+            else:
+                await page.keyboard.press("Escape")
+                notes.append("closed an overlay that covered the element (Escape)")
+        try:
+            await page.locator(selector).first.scroll_into_view_if_needed(timeout=3_000)
+            if not notes:
+                notes.append("scrolled the element into view")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await page.click(selector, timeout=8_000)
+            return "; ".join(notes) or "retried"
+        except Exception:  # noqa: BLE001
+            raise first
+
+
 async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
     """
     After a click/submit: let a navigation it started load, and give background
@@ -817,9 +872,10 @@ class ActionMapper:
                 base_url = _os.getenv("APP_BASE_URL", "http://localhost")
                 full_url = target if target.startswith("http") else f"{base_url}{target}"
                 await page.goto(full_url, wait_until="load", timeout=30_000)
+                banner = await _dismiss_cookie_banner(page)
                 base_result.update({
                     "status": "PASS",
-                    "actual_result": f"Navigated to: {page.url}",
+                    "actual_result": f"Navigated to: {page.url}" + (f" ({banner})" if banner else ""),
                 })
 
             elif action in ("click", "press", "tap", "submit"):
@@ -831,11 +887,11 @@ class ActionMapper:
                     base_result.update({"status": "FAIL", "actual_result": f"The element is disabled: {selector}",
                                         "error": "Cannot click a disabled element"})
                     return base_result
-                await page.click(selector, timeout=15_000)
+                note = await _click_through_obstacles(page, selector)
                 await _settle_after_action(page)
                 base_result.update({
                     "status": "PASS",
-                    "actual_result": f"Clicked element: {selector}",
+                    "actual_result": f"Clicked element: {selector}" + (f" ({note})" if note else ""),
                 })
 
             elif action in ("fill", "type", "enter", "input", "set_value"):

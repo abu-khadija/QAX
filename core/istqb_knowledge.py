@@ -74,7 +74,62 @@ TECHNIQUES: list[dict] = [
 ]
 
 
-def prompt_block() -> str:
+# Experience-based techniques (ISTQB Foundation 4.4): where specs run out.
+EXPERIENCE_TECHNIQUES: list[dict] = [
+    {"name": "Error Guessing",
+     "apply": ("Add cases for the mistakes developers typically make here: empty or whitespace-only "
+               "input, duplicates, double submit, very long text, special characters and emoji, "
+               "leading/trailing spaces, case sensitivity, dates around midnight and month ends.")},
+    {"name": "Exploratory Testing (charters)",
+     "apply": ("For an area with no clear spec, state a short charter (Explore <area> with <resources> "
+               "to discover <information>) as a case whose steps probe the riskiest behaviours first.")},
+    {"name": "Checklist-based Testing",
+     "apply": ("Use a standard UI checklist on every screen touched: required-field gates, error "
+               "messages next to the field, disabled-until-valid buttons, cancel really cancels, "
+               "back/refresh keep or reset state as intended, success feedback after save.")},
+]
+
+# White-box techniques (ISTQB Foundation 4.3): only when source code is given.
+WHITE_BOX: list[dict] = [
+    {"name": "Statement / Branch Coverage",
+     "apply": ("When code is given, make every if/else, early return, exception path and loop "
+               "(0, 1, many iterations) reachable by at least one case.")},
+]
+
+# Combinatorial (ISTQB Advanced Test Analyst): many parameters, too many combinations.
+COMBINATORIAL: list[dict] = [
+    {"name": "Pairwise (all-pairs) Testing",
+     "apply": ("When 3+ independent options combine (role x plan x language x device), cover every "
+               "PAIR of values at least once instead of every combination.")},
+]
+
+# Test types (ISTQB Foundation 2.2): not only functional.
+TEST_TYPES: list[dict] = [
+    {"name": "Functional", "apply": "what the system does, against each acceptance criterion"},
+    {"name": "Usability and accessibility",
+     "apply": ("labels on inputs, keyboard reachability, visible focus, readable error text: at "
+               "least one case per screen when a UI is involved")},
+    {"name": "Compatibility and basic performance",
+     "apply": "responsive/mobile and slow-response behaviour, only where the story implies it"},
+    {"name": "Confirmation and regression",
+     "apply": ("a fixed bug gets a confirmation case; neighbouring features that share the changed "
+               "code get a regression case")},
+]
+
+#: How a case records what it covers, without a schema change: its description starts
+#: with this line, so a report can compute requirement coverage and the technique mix.
+TRACEABILITY_RULE = ("Start every case's description with a traceability line: "
+                     "'Covers: AC-<n>[, AC-<m>] | Technique: <technique name>.' Use the acceptance-"
+                     "criteria numbers given in the story (AC-1, AC-2 ...); if the story has none, number "
+                     "the behaviours you derived. Every acceptance criterion must be covered by at "
+                     "least one case.")
+
+RISK_RULE = ("Prioritise by risk = likelihood x impact: money, permissions, data loss and "
+             "irreversible actions are critical/high; cosmetic issues are low. Generate the "
+             "high-risk cases first.")
+
+
+def prompt_block(with_code: bool = False) -> str:
     """
     Render a concise, actionable ISTQB doctrine block for the generation prompt.
 
@@ -90,4 +145,13 @@ def prompt_block() -> str:
     lines.append("Guiding principles: derive the oracle from the spec (a pass never proves "
                  "correctness); spend cases where defects cluster (authz, money, state, "
                  "computed values); every boundary and every invalid class gets a case.")
+    for t in EXPERIENCE_TECHNIQUES + COMBINATORIAL:
+        lines.append(f"- {t['name']}: {t['apply']}")
+    if with_code:
+        for t in WHITE_BOX:
+            lines.append(f"- {t['name']}: {t['apply']}")
+    lines.append("Test types to consider (not only functional): "
+                 + "; ".join(f"{t['name']} ({t['apply']})" for t in TEST_TYPES))
+    lines.append(RISK_RULE)
+    lines.append(TRACEABILITY_RULE)
     return "\n".join(lines)

@@ -203,6 +203,7 @@ class TestExecutor:
         step_shots = os.getenv("QAX_STEP_SCREENSHOTS", "false").strip().lower() == "true"
         for i, step in enumerate(steps, start=1):
             step["step_number"] = i  # Ensure step_number is set
+            page = await runner.get_page() or page        # a new tab opened by the last step
             step_result = await self._execute_step(step, page, runner, tc_id)
             step_results.append(step_result)
             # `--screenshots all` / `--watch`: what the browser showed after EVERY step —
@@ -440,7 +441,13 @@ class TestExecutor:
                 runner.take_throttled()
             if hasattr(runner, "take_dialogs"):
                 runner.take_dialogs()
+            if hasattr(runner, "take_page_errors"):
+                runner.take_page_errors()
             result = await self.execute_test_case(tc, runner)
+            if hasattr(runner, "take_page_errors"):
+                errs = runner.take_page_errors()
+                if errs:
+                    result["page_errors"] = errs          # observed problems, even on a PASS
             if hasattr(runner, "take_dialogs"):
                 dialogs = runner.take_dialogs()
                 if dialogs:

@@ -563,8 +563,14 @@ def test_env_file_fills_gaps_but_never_overrides_what_the_operator_set(tmp_path,
 def test_the_app_has_two_tracks_and_generation_lives_inside_functional_qa(client):
     html = client.get("/app").get_data(as_text=True)
     assert 'id="mode-scan"' in html and 'id="mode-func"' in html and 'id="mode-gen"' not in html
-    assert 'id="panel-gen"' not in html and 'id="src-gen"' in html and 'id="src-file"' in html
-    assert "setSource(" in html and "if(m==='gen'){ m='func'; setSource('gen'); }" in html  # old links
+    assert 'id="panel-gen"' not in html and 'id="src-gen"' not in html
+    assert "if(m==='gen'){ m='func'; }" in html                                         # old links
+    # one E2E flow: inputs → understand → cases (export/share) → run → report → bugs to Jira
+    for needle in ('id="mapurl"', 'id="fqrepo"', 'id="story"', 'analyzeAll()', "/api/functional/analyze",
+                   "downloadCases('csv')", "Share to Jira / Xray", "renderReport(d)", "/api/functional/bugs",
+                   "Functional QA (E2E)"):
+        assert needle in html, needle
+    assert "Generate test cases from a story" not in html
     landing = client.get("/").get_data(as_text=True)
     assert "/app#functional" in landing and "/app#generate" not in landing
 
@@ -683,3 +689,88 @@ def test_artifact_route_serves_only_run_screenshots_and_traces(client, tmp_path)
             assert client.get("/api/artifact", query_string={"path": bad}).status_code == 404, bad
     finally:
         ok.unlink()
+
+
+# ── E2E flow: understand → trace → bugs ──────────────────────────────────────
+
+def test_acceptance_criteria_are_numbered_and_coverage_is_traced():
+    from core.traceability import coverage, criteria_block, extract_criteria
+    story = "As a user I can reset my password.\n- The link expires in 15 minutes\n- A used link shows an error"
+    ac = extract_criteria(story)
+    assert [c["id"] for c in ac] == ["AC-1", "AC-2"] and ac[0]["text"] == "The link expires in 15 minutes"
+    assert [c["id"] for c in extract_criteria("Users can log in. Wrong passwords are rejected.")] == ["AC-1", "AC-2"]
+    assert extract_criteria("") == [] and criteria_block([]) == ""
+    assert "AC-2: A used link shows an error" in criteria_block(ac)
+    cases = [{"test_case_id": "T1", "description": "Covers: AC-1 | Technique: Boundary Value Analysis. x"},
+             {"test_case_id": "T2", "description": "Covers: AC-1, AC-9 | Technique: Error Guessing."},
+             {"test_case_id": "T3", "description": "no trace line"}]
+    cov = coverage(cases, ac)
+    assert cov["by_criterion"] == {"AC-1": ["T1", "T2"], "AC-2": []}
+    assert cov["uncovered"] == ["AC-2"] and cov["untraced_cases"] == ["T3"] and cov["percent"] == 50
+    assert cov["techniques"] == {"Boundary Value Analysis": 1, "Error Guessing": 1}
+
+
+def test_a_failed_e2e_case_becomes_an_istqb_shaped_bug():
+    from core.jira_bugs import functional_result_to_bug
+    case = {"test_case_id": "T1", "title": "Reset link expires", "priority": "High",
+            "description": "Covers: AC-1 | Technique: BVA.",
+            "manual_steps": [{"step_number": 1, "action": "Request a reset link"},
+                             {"step_number": 2, "action": "Open it after 16 minutes", "expected_result": "Link expired"}]}
+    result = {"test_case_id": "T1", "status": "FAIL",
+              "steps": [{"step_number": 1, "status": "PASS"},
+                        {"step_number": 2, "status": "FAIL", "actual_result": "Password form shown",
+                         "screenshot": "output/screenshots/t1.png"}],
+              "page_errors": [{"kind": "HTTP 500", "text": "POST /reset"}]}
+    bug = functional_result_to_bug(result, case, base_url="http://app.local")
+    assert bug["title"] == "[P2] Reset link expires" and bug["severity"] == "P2"
+    d = bug["description"]
+    assert "Requirement: AC-1" in d and "1. Open http://app.local — Request a reset link" in d
+    assert "Expected: Link expired" in d and "Actual: Password form shown" in d
+    assert "HTTP 500: POST /reset" in d and "output/screenshots/t1.png" in d
+    assert "qax" not in functional_result_to_bug(result, case, client_safe=True)["labels"]
+
+
+def test_web_functional_analyze_reads_understands_and_traces(client, monkeypatch, tmp_path):
+    import core.app_mapper as am
+    import services.generation_service as gs
+    from services.results import GenerationResult
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path)
+
+    async def fake_map(url, **kw):
+        return _a_map()
+    monkeypatch.setattr(am, "map_app", fake_map)
+    seen = {}
+
+    def generate(self, source, options=None, progress=None):
+        seen["opts"] = options
+        return GenerationResult(source=source, test_cases=[
+            {"test_case_id": "T1", "title": "t", "description": "Covers: AC-1 | Technique: Use Case Testing."}])
+    monkeypatch.setattr(gs.GenerationService, "generate", generate)
+    body = {"url": "http://app.local", "story": "- Users can add a note\n- Empty notes are rejected", "project": "notes"}
+    assert client.post("/api/functional/analyze", json=body).status_code == 400   # not authorized
+    d = client.post("/api/functional/analyze", json=dict(body, authorized=True)).get_json()
+    u = d["understanding"]
+    assert [p["path"] for p in u["pages"]] == ["/login", "/notes"] and len(u["criteria"]) == 2
+    assert seen["opts"].app_map is not None and "AC-2: Empty notes are rejected" in seen["opts"].repo_context
+    assert d["coverage"]["uncovered"] == ["AC-2"] and d["coverage"]["percent"] == 50
+    # a repository URL carrying credentials is refused before anything is cloned
+    d = client.post("/api/functional/analyze", json={"repo": "https://user:tok@github.com/o/r", "story": "x y z"}).get_json()
+    assert any("credentials" in n for n in d["understanding"]["notes"])
+    assert client.post("/api/functional/analyze", json={}).status_code == 400
+
+
+def test_web_functional_bugs_files_only_failures_and_stays_dry_run(client, monkeypatch):
+    import core.jira_bugs as jb
+    calls = {}
+    real = jb.JiraBugFiler.__init__
+
+    def init(self, *a, **kw):
+        calls["dry_run"] = kw.get("dry_run")
+        real(self, *a, **kw)
+    monkeypatch.setattr(jb.JiraBugFiler, "__init__", init)
+    res = [{"test_case_id": "T1", "status": "FAIL", "steps": [{"step_number": 1, "status": "FAIL", "actual_result": "no"}]},
+           {"test_case_id": "T2", "status": "PASS"}]
+    d = client.post("/api/functional/bugs", json={"results": res, "dry_run": False, "url": "http://a"}).get_json()
+    assert d["dry_run"] is True and calls["dry_run"] is True          # live export is off on the server
+    assert [b["test_case_id"] for b in d["bugs"]] == ["T1"]
+    assert client.post("/api/functional/bugs", json={"results": res[1:]}).status_code == 400

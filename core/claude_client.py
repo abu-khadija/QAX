@@ -586,7 +586,8 @@ class ClaudeClient:
 
         try:
             from core.istqb_knowledge import prompt_block as _istqb_prompt_block
-            istqb_section = "\n" + _istqb_prompt_block() + "\n"
+            istqb_section = "\n" + _istqb_prompt_block(
+                with_code=not str(file_path).startswith(("story://", "jira://"))) + "\n"
         except Exception:
             istqb_section = ""
 
