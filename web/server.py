@@ -626,7 +626,25 @@ def execute_tests():
         return jsonify({"error": "Generate or load test cases first."}), 400
     if not url.startswith(("http://", "https://")):
         return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
+    selection = None
+    if str(data.get("changed_since", "")).strip():
+        # run only what a change can affect (core.change_selection) — git diff of a local checkout
+        from core.app_mapper import CONFIG_DIR
+        from core.change_selection import changed_files, select
+        repo_dir = str(data.get("repo", "")).strip()
+        from pathlib import Path as _P
+        if not repo_dir or not _P(repo_dir).expanduser().is_dir() or \
+                any(x.startswith(".") for x in _P(repo_dir).expanduser().resolve().parts[1:]):
+            return jsonify({"error": "Give the app's local git checkout (a folder) to compare changes."}), 400
+        files, err = changed_files(str(_P(repo_dir).expanduser()), str(data["changed_since"]).strip(), "HEAD")
+        if err:
+            return jsonify({"error": f"Could not read the change: {err}"}), 400
+        selection = select(tests, files, str(_P(repo_dir).expanduser()), CONFIG_DIR / (project or "_none_"))
+        keep = {x["id"] for x in selection["selected"]}
+        tests = [t for t in tests if str(t.get("test_case_id", "?")) in keep]
     plan = _execute_plan(tests, url, read_only, engine)
+    if selection is not None:
+        plan["selection"] = selection
     cases = plan.pop("_cases")
     if data.get("preview"):
         return jsonify({"plan": plan})
@@ -663,6 +681,11 @@ def execute_tests():
         # per-project memory: what changed since the last run (regressions, fixes, flaky cases)
         from core.run_history import compare, history, save_run
         hist_project = project or _clean_project(url.split("//", 1)[-1]) or "default"
+        from core.run_history import quarantine as _q
+        quarantined = _q(hist_project)
+        for r in out["results"]:
+            if str(r.get("test_case_id")) in quarantined:
+                r["quarantined"] = True      # still run and shown — never filed as a bug
         out["changes"] = compare(history(hist_project), out["results"])
         save_run(hist_project, url, out["results"])
     return (jsonify(out), 502) if res.error else jsonify(out)
@@ -722,12 +745,19 @@ def artifact():
     raw = str(request.args.get("path", ""))
     try:
         target = (Path(raw) if Path(raw).is_absolute() else (root.parent / raw)).resolve()
-        allowed = [(root / "screenshots").resolve(), (root / "traces").resolve()]
+        allowed = [(root / "screenshots").resolve(), (root / "traces").resolve(), (root / "network").resolve()]
         if not any(target.is_relative_to(a) for a in allowed) or not target.is_file():
             return jsonify({"error": "not found"}), 404
         return send_file(target)
     except Exception:  # noqa: BLE001
         return jsonify({"error": "not found"}), 404
+
+
+@app.get("/api/doctor")
+def doctor_route():
+    """Setup status for the UI's Setup panel (core.doctor): names and states only, never a value."""
+    from core.doctor import run_checks
+    return jsonify({"checks": run_checks()})
 
 
 @app.get("/api/config")

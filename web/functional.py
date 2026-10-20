@@ -206,7 +206,9 @@ def functional_bugs():
     """
     import re as _re
     data = request.get_json(force=True, silent=True) or {}
-    results = [r for r in (data.get("results") or []) if isinstance(r, dict) and r.get("status") == "FAIL"]
+    # a test problem or the environment is never filed as a bug in the app
+    results = [r for r in (data.get("results") or []) if isinstance(r, dict) and r.get("status") == "FAIL"
+               and r.get("cause") not in ("test", "environment")]
     story_key = str(data.get("story_key", "")).strip().upper()
     if story_key and not _re.fullmatch(r"[A-Z][A-Z0-9_]+-\d+", story_key):
         return jsonify({"error": f"'{story_key}' is not a Jira issue key (like PROJ-123)."}), 400
@@ -327,7 +329,19 @@ def overview_route():
     project = _clean_project(request.args.get("project", ""))
     if not project:
         return jsonify({"error": "Enter a project name."}), 400
-    return jsonify(build_overview(project, CONFIG_DIR, _RUNS_DIR))
+    return jsonify(build_overview(project, CONFIG_DIR, _RUNS_DIR, url=str(request.args.get("url", ""))))
+
+
+def quarantine_route():
+    """Put a flaky case in or out of quarantine for a project (kept out of bugs and readiness)."""
+    from core.run_history import set_quarantine
+    data = request.get_json(force=True, silent=True) or {}
+    project = _clean_project(data.get("project"))
+    case_id = str(data.get("case_id", "")).strip()
+    if not project or not case_id:
+        return jsonify({"error": "project and case_id are needed"}), 400
+    return jsonify({"quarantine": set_quarantine(project, case_id, bool(data.get("on", True)),
+                                                 str(data.get("reason", ""))[:200])})
 
 
 def register(app, server) -> None:
@@ -337,6 +351,7 @@ def register(app, server) -> None:
         g[name] = getattr(server, name)
     app.post("/api/functional/analyze")(functional_analyze)
     app.get("/api/overview")(overview_route)
+    app.post("/api/quarantine")(quarantine_route)
     app.post("/api/functional/bugs")(functional_bugs)
     app.post("/api/session")(session_route)
     app.post("/api/map")(map_app_route)

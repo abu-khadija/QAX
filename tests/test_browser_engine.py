@@ -978,3 +978,25 @@ def test_a_rate_limited_login_is_an_error_even_when_the_message_is_gone_by_the_e
          "assertion_value": "Welcome, demo"}]}
     r = _run([case])["results"][0]
     assert r["status"] == "ERROR" and r.get("throttled"), (r["status"], r.get("error"))
+
+
+def test_a_failed_case_keeps_its_network_log_without_secrets_and_a_cause(ui_app, monkeypatch):
+    """P1 (2026-10-20): a HAR for every case that does not pass — the evidence for "what did the
+    server say?" — with no password, token or cookie in it; each failure gets its cause."""
+    monkeypatch.setenv("QAX_VAR_CANARY", "demo123")          # the demo password, typed from a secret
+    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    planted = next(c for c in cases if c["test_case_id"] == "TC-UI-004")
+    for st in planted["automation_steps"]:
+        if st.get("value") == "demo123":
+            st["value"] = "{{env:QAX_VAR_CANARY}}"
+    ok = next(c for c in cases if c["test_case_id"] == "TC-UI-001")
+    res = {r["test_case_id"]: r for r in _run([planted, ok])["results"]}
+    bad = res["TC-UI-004"]
+    assert bad["status"] == "FAIL" and bad["cause"] == "app" and "network_log" not in res["TC-UI-001"]
+    har = json.loads(open(bad["network_log"]).read())
+    entries = har["log"]["entries"]
+    assert har["log"]["version"] == "1.2" and any("/notes" in e["request"]["url"] for e in entries)
+    raw = open(bad["network_log"]).read()
+    assert "demo123" not in raw and "sid=" not in raw                       # no password, no session cookie
+    import os as _os
+    assert oct(_os.stat(bad["network_log"]).st_mode & 0o777) == "0o600"

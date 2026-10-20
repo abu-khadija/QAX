@@ -42,6 +42,15 @@ git, the output folder and which integrations are configured, and prints the exa
 | Parallel runs disagree with a single run | The cases depend on each other or on shared data; make each self-contained (`{{unique}}`, `cleanup_steps`). |
 | Writing cases without Anthropic | `QAX_AI_PROVIDER=openai` + `QAX_AI_MODEL` (+ `QAX_AI_BASE_URL` for Azure or a local Ollama). |
 
+## Change-based runs
+
+| You see | Fix |
+|---|---|
+| Steps feel slow, or a page is judged before it finished updating | After each action QAX continues when either the network is idle or the requests the action started are done. `QAX_SETTLE=networkidle` forces the network-idle wait only. |
+| `--changed-since` runs everything | A shared file changed (layout, settings, dependencies, messages) or QAX could not place a file on any page — it says which. That is the safe answer. |
+| A case you expected was skipped | Each skip lists the pages the case visits. Re-read the app (`map`) if its pages changed; a case with no navigate step and no known element always runs. |
+| Failures are marked "test" or "environment" | They are not bugs in the app: fix the case, or check that the app/browser answered (rate limits included), then re-run. |
+
 ## Jira / Xray
 
 | You see | Fix |

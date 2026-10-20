@@ -49,7 +49,7 @@
       "project": "healthchecks",
       "cases": "evals/data/healthchecks_cases.json",
       "base_url": "http://127.0.0.1:9091",
-      "start": "cd ~/Downloads/qax-corpus/healthchecks && .venv/bin/python manage.py runserver 127.0.0.1:9091 --noreload",
+      "start": "cd ~/Downloads/qax-corpus/healthchecks && SITE_ROOT=http://127.0.0.1:9091 .venv/bin/python manage.py runserver 127.0.0.1:9091 --noreload",
       "needs_env": [
         "QAX_VAR_HC_USER",
         "QAX_VAR_HC_PASSWORD"

@@ -50,6 +50,8 @@ TOOLS = [
          "cases_file": {"type": "string", "description": "A JSON file of test cases (instead of test_cases)."},
          "project": {"type": "string"}, "engine": {"type": "string", "enum": ["ui", "api"]},
          "read_only": {"type": "boolean", "description": "API engine only; default false for runs."},
+         "changed_since": {"type": "string", "description": "Run only the cases a change can affect: a git ref (e.g. origin/main)."},
+         "repo": {"type": "string", "description": "The app's local git checkout (with changed_since)."},
          "authorized": _AUTH}}},
     {"name": "qax_scan",
      "description": "Security scan of the running app with deterministic probes; reports only what it proves "
@@ -105,6 +107,7 @@ def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
                                              "project": args.get("project", ""),
                                              "engine": args.get("engine", "ui"),
                                              "read_only": bool(args.get("read_only", False)),
+                                             "changed_since": args.get("changed_since", ""), "repo": args.get("repo", ""),
                                              "authorized": bool(args.get("authorized"))})
         elif name == "qax_scan":
             d = _call_route("/api/scan", {"url": args.get("url", ""), "token": args.get("token", ""),

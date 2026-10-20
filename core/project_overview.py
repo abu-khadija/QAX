@@ -44,7 +44,7 @@ def save_requirements(project: str, criteria: list, coverage: dict, story_key: s
         pass
 
 
-def build_overview(project: str, config_dir: Path, runs_dir: str) -> dict:
+def build_overview(project: str, config_dir: Path, runs_dir: str, url: str = "") -> dict:
     """
     The project's cards: {"project", "cards": [{id, title, state: ok|warn|bad|empty, value,
     detail, rows?, action}]}. `action` names the place in the UI that produces or deepens it.
@@ -138,7 +138,7 @@ def build_overview(project: str, config_dir: Path, runs_dir: str) -> dict:
                       "action": "analyze"})
 
     # 7 · Security — the last scan of the same app (host), proven findings only
-    host = urlparse(base_url or (hist[0].get("url", "") if hist else "")).netloc
+    host = urlparse(base_url or (hist[0].get("url", "") if hist else "") or url).netloc
     scan = None
     if host:
         try:
@@ -161,4 +161,68 @@ def build_overview(project: str, config_dir: Path, runs_dir: str) -> dict:
     else:
         cards.append({"id": "security", "title": "Security", "state": "empty", "value": "Not scanned",
                       "detail": "Scan the same app (the other track): proven security bugs appear here.", "action": "scan"})
+    # 8 · Coverage gaps — criteria no case covers
+    if req and req.get("criteria"):
+        unc = (req.get("coverage") or {}).get("uncovered") or []
+        txt = {c["id"]: c.get("text", "") for c in req["criteria"]}
+        cards.append({"id": "coverage_gaps", "title": "Coverage gaps", "state": "warn" if unc else "ok",
+                      "value": f"{len(unc)} criterion(a) without a case" if unc else "Every criterion has a case",
+                      "rows": [{"id": u, "text": txt.get(u, "")[:80], "verdict": "NO CASE"} for u in unc],
+                      "detail": "Write a case for each (step 3), or confirm it cannot be tested.", "action": "analyze"})
+
+    # 9 · Flaky cases — verdict flips with no change in between; quarantine keeps them out of bugs
+    from core.run_history import quarantine
+    q = quarantine(p)
+    flaky = []
+    if len(hist) >= 2:
+        flaky = compare(hist[1:], [{"test_case_id": k, "status": v} for k, v in hist[0]["verdicts"].items()])["flaky"]
+    if flaky or q:
+        cards.append({"id": "flaky", "title": "Flaky cases", "state": "warn" if [f for f in flaky if f not in q] else "ok",
+                      "value": f"{len(flaky)} flaky · {len(q)} quarantined",
+                      "rows": [{"id": c, "text": "quarantined" if c in q else "flips between runs",
+                                "verdict": "QUARANTINED" if c in q else "FLAKY", "quarantined": c in q}
+                               for c in sorted(set(flaky) | set(q))],
+                      "detail": "A quarantined case still runs and is shown, but is not filed as a bug and does not "
+                                "block release readiness. Fix it, then take it out.", "action": "run"})
+
+    # 10 · Critical findings — the app's failures (last run) and proven P1/P2 security bugs (last scan)
+    crit = []
+    if hist:
+        last, causes, titles = hist[0]["verdicts"], hist[0].get("causes") or {}, hist[0].get("titles") or {}
+        crit += [{"id": k, "text": titles.get(k, ""), "verdict": "FAIL"} for k, v in last.items()
+                 if v == "FAIL" and causes.get(k, "app") in ("app", "unclear") and k not in q]
+    if scan:
+        crit += [{"id": c.get("severity", ""), "text": str(c.get("title", ""))[:80], "verdict": "SECURITY"}
+                 for c in (scan.get("claims") or []) if c.get("severity") in ("P1", "P2")]
+    if hist or scan:
+        cards.append({"id": "critical", "title": "Critical findings", "state": "bad" if crit else "ok",
+                      "value": f"{len(crit)} open" if crit else "None open",
+                      "rows": crit[:8], "detail": "Functional failures caused by the app (last run) and proven "
+                                                  "P1/P2 security bugs (last scan).", "action": "bugs"})
+
+    # 11 · Release readiness — a rule over the cards above (not a guarantee)
+    if hist:
+        blockers = []
+        last = hist[0]["verdicts"]
+        causes = hist[0].get("causes") or {}
+        f = [k for k, v in last.items() if v == "FAIL" and k not in q]
+        nr = [k for k, v in last.items() if v not in ("PASS", "FAIL") and k not in q]
+        if f:
+            blockers.append(f"{len(f)} case(s) failing: {', '.join(f[:5])}")
+        if nr:
+            blockers.append(f"{len(nr)} case(s) did not run to a verdict ({', '.join(sorted({causes.get(k, '?') for k in nr}))})")
+        if req and req.get("criteria"):
+            from core.traceability import requirement_verdicts as _rv
+            bad = [v["id"] for v in _rv(req["criteria"], req.get("coverage") or {},
+                                        [{"test_case_id": k, "status": v} for k, v in last.items()])
+                   if v["verdict"] != "PASSED"]
+            if bad:
+                blockers.append(f"criteria not passed: {', '.join(bad)}")
+        if scan and any(c.get("severity") == "P1" for c in scan.get("claims") or []):
+            blockers.append("a proven P1 security bug in the last scan")
+        cards.append({"id": "readiness", "title": "Release readiness", "state": "bad" if blockers else "ok",
+                      "value": "Not ready" if blockers else "Ready by the measured checks",
+                      "rows": [{"id": "•", "text": b, "verdict": ""} for b in blockers],
+                      "detail": "A rule over the last run, the requirements and the last scan — what QAX did not test "
+                                "is not covered by it.", "action": "run"})
     return {"project": p, "cards": cards}

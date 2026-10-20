@@ -36,8 +36,11 @@ def save_run(project: str, url: str, results: list, root: Path | None = None) ->
         folder = (root or _root()) / "functional_runs" / _safe(project)
         folder.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        rec = {"when": ts, "url": url, "verdicts": {str(r.get("test_case_id")): r.get("status")
-                                                    for r in results or [] if isinstance(r, dict)}}
+        rs = [r for r in results or [] if isinstance(r, dict)]
+        rec = {"when": ts, "url": url, "verdicts": {str(r.get("test_case_id")): r.get("status") for r in rs},
+               # why a case did not pass and what it is called — for the overview's critical list
+               "causes": {str(r.get("test_case_id")): r.get("cause") for r in rs if r.get("cause")},
+               "titles": {str(r.get("test_case_id")): str(r.get("title") or "")[:120] for r in rs}}
         path = folder / f"{ts}.json"
         tmp = folder / f".{ts}.tmp"
         tmp.write_text(json.dumps(rec, indent=2))
@@ -115,3 +118,31 @@ def add_regression_cases(project: str, cases: list, bug_keys: dict, root: Path |
         return str(path)
     except Exception:  # noqa: BLE001
         return ""
+
+
+def quarantine(project: str, root: Path | None = None) -> dict:
+    """The project's quarantined cases {case_id: {"when", "reason"}} (flaky cases kept out of
+    bug lists and release readiness, still run and still shown)."""
+    try:
+        f = (root or _root()) / "functional_runs" / _safe(project) / "quarantine.json"
+        return json.loads(f.read_text()) if f.exists() else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def set_quarantine(project: str, case_id: str, on: bool, reason: str = "", root: Path | None = None) -> dict:
+    """Put a case in (on=True) or out of quarantine. Returns the new quarantine map."""
+    q = quarantine(project, root)
+    if on:
+        q[str(case_id)] = {"when": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"), "reason": reason or "flaky"}
+    else:
+        q.pop(str(case_id), None)
+    try:
+        folder = (root or _root()) / "functional_runs" / _safe(project)
+        folder.mkdir(parents=True, exist_ok=True)
+        tmp = folder / ".quarantine.tmp"
+        tmp.write_text(json.dumps(q, indent=2))
+        os.replace(tmp, folder / "quarantine.json")
+    except Exception:  # noqa: BLE001
+        pass
+    return q

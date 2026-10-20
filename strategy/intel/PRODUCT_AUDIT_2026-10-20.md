@@ -289,6 +289,13 @@ incumbents), a managed QA service (people business, not product).
 regression, a virtualized-list false FAIL from leftover test data, rate-limit false FAILs). Details:
 strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md (last section).
 
+
+**Change-based selection, measured (2026-10-20, evals/change_bench.py):** three seeded, built and run changes to
+Spring PetClinic — phone validation dropped (Owner.java → 8 of 9 cases selected, the regression TC-PC-004 among
+them), vet last name not shown (vetList.html → 1 of 9, TC-PC-007 caught), a message changed in the shared
+messages.properties (→ all 9, by the shared-file rule, TC-PC-004 caught). **0 regressions missed**; cases saved
+11 % / 89 % / 0 %. n = 3 seeds on one app — the method, not a general rate.
+
 **Now in the merge gate [V]:** functional verdicts == truth on the demo app, twice, no flips.
 Corpus result on record (2026-10-20): 10 apps, 68/68 correct, 20/20 negative controls failed — n=10,
 hand-written cases, one machine; not a general accuracy claim.
@@ -308,18 +315,18 @@ S1–S4, B1 — see §3/§3a. Rollback: each is a guard; disabling it re-opens t
 | 1 | Measure live generation | never run (§2) | know if the on-ramp works | AI credit or a local model (founder) | `make eval-generation` on the demo + 3 corpus stories; fix what it shows | bars in evals/generation_quality.py met on 3 stories | the harness (exists) | model drift → re-measure per model change | coverage 100%, traced ≥90%, grounded ≥90%, planted bug found, 0 false failures | 1–3 (uncertain: depends on results) |
 | 2 | Jira story in / bugs out, live | never exercised (§2) | the promised loop | Jira trial (founder) | run the E2E flow with a story key on one corpus app; file 1 bug live with explicit OK | story read, bug filed, linked, verdict comment posted, duplicate check works | a recorded live run in evidence | live writes → only with operator OK | 1 complete loop recorded | 1 |
 | 3 | Xray (+ Zephyr) live | mocked only | export/results for Xray teams | Xray trial (founder) | export 5 cases, import one execution | issues created with steps; execution shows verdicts | recorded run | — | 1 recorded run | 1–2 (uncertain) |
-| 4 | Failure triage rules | ERROR is one bucket (§6 step 8) | less time on non-bugs | — | classify: environment (DNS/connection/5xx burst/timeouts on navigate), test (unknown element, assertion unevaluable), app (assertion mismatch on a loaded page) | each result carries `cause`; report groups by it | unit + demo-app cases per class | misclassification → keep the raw evidence visible | bench: cause correct on seeded failures | 2 |
-| 5 | HAR on failure | no network evidence (§2) | API-level root cause | — | `record_har` per failing case, secrets redacted | a failing case links a HAR without Authorization/cookies | trace-like secret test | size → keep only for failures | evidence completeness | 1 |
-| 6 | Settings screen (status only) | Jira/AI config only in .env (§6 step 4) | onboarding | — | read-only status of AI/Jira/Xray/live-export, never values; how to enable | a newcomer sees why filing is dry-run | UI test | never echo secrets | Quickstart time (Phase 0) | 1 |
+| 4 | ✅ DONE 2026-10-20 — Failure triage rules | ERROR is one bucket (§6 step 8) | less time on non-bugs | — | classify: environment (DNS/connection/5xx burst/timeouts on navigate), test (unknown element, assertion unevaluable), app (assertion mismatch on a loaded page) | each result carries `cause`; report groups by it | unit + demo-app cases per class | misclassification → keep the raw evidence visible | bench: cause correct on seeded failures | 2 |
+| 5 | ✅ DONE — HAR on failure | no network evidence (§2) | API-level root cause | — | `record_har` per failing case, secrets redacted | a failing case links a HAR without Authorization/cookies | trace-like secret test | size → keep only for failures | evidence completeness | 1 |
+| 6 | ✅ DONE — Settings screen (status only) | Jira/AI config only in .env (§6 step 4) | onboarding | — | read-only status of AI/Jira/Xray/live-export, never values; how to enable | a newcomer sees why filing is dry-run | UI test | never echo secrets | Quickstart time (Phase 0) | 1 |
 | 7 | Dead code | re-checked: nothing to remove (§2) | — | — | — | — | — | — | — | done (no change) |
 
 ### P2 — differentiation
 | # | Item | Value | Depends | Acceptance | Effort |
 |---|---|---|---|---|---|
-| 1 | Change → test selection | run what a change can break | map (exists), routes in the diff | seeded changes on PetClinic/eShop: 0 missed regressions, ≥40% fewer cases than "all" | 5–8 (uncertain) |
+| 1 | ✅ DONE (first version) — Change → test selection | run what a change can break | map (exists), routes in the diff | seeded changes on PetClinic/eShop: 0 missed regressions, ≥40% fewer cases than "all" | 5–8 (uncertain) |
 | 2 | PR comment with per-criterion verdicts + CI on a real repo | the loop in the developer's tool | pushable repo (founder), P2-1 | one real PR shows the comment | 2 |
-| 3 | Project home (both tracks), coverage-gaps / critical-findings / readiness cards | one place to decide | overview (exists) | cards per §7 from real data only | 3 |
-| 4 | Flaky quarantine | stop flaky cases blocking | history (exists) | a flaky case is marked, not counted as FAIL, listed | 1 |
+| 3 | ✅ DONE — Project home (both tracks), coverage-gaps / critical-findings / readiness cards | one place to decide | overview (exists) | cards per §7 from real data only | 3 |
+| 4 | ✅ DONE — Flaky quarantine | stop flaky cases blocking | history (exists) | a flaky case is marked, not counted as FAIL, listed | 1 |
 | 5 | Per-run cost for functional runs | budget | usage tracking | cost shown per run | 1 |
 | 6 | axe-core | full WCAG audit | licence review (MPL-2.0) | axe results as observations | 1 |
 

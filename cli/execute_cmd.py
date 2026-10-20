@@ -131,6 +131,10 @@ def run_execute_command() -> None:
                         help="Do not ask before running (CI). Also implied when CI=true.")
     parser.add_argument("--junit", default="", metavar="PATH",
                         help="Also write the results as JUnit XML (CI test dashboards).")
+    parser.add_argument("--changed-since", default="", metavar="REF",
+                        help="Run only the cases a change can affect: the git diff between REF and HEAD of --repo "
+                             "(e.g. origin/main). Shared files (layout, settings, dependencies) run everything.")
+    parser.add_argument("--repo", default="", metavar="PATH", help="The app's git checkout (for --changed-since).")
     _add_seeing_flags(parser)
     _add_browser_flags(parser)
 
@@ -181,6 +185,23 @@ def run_execute_command() -> None:
     if not test_cases:
         print("\n  No test cases found. Check your --test-case / --suite / --file args.\n")
         sys.exit(0)
+
+    # ── Change-based selection: only what the change can affect ──────────────
+    if args.changed_since:
+        from core.change_selection import changed_files, select
+        from core.app_mapper import CONFIG_DIR
+        files, err = changed_files(args.repo or ".", args.changed_since, "HEAD")
+        if err:
+            print(f"\n  ✗ Could not read the change: {err}\n")
+            sys.exit(1)
+        sel = select(test_cases, files, args.repo or ".", CONFIG_DIR / (os.getenv("DEFAULT_PROJECT") or ""))
+        keep = {s["id"] for s in sel["selected"]}
+        print(f"\n  Change since {args.changed_since}: {len(files)} file(s) — {sel['why']}")
+        for s_ in sel["selected"][:20]:
+            print(f"    run  {s_['id']}: {s_['reasons'][0][:100]}")
+        for s_ in sel["skipped"][:20]:
+            print(f"    skip {s_['id']}: {s_['reason'][:100]}")
+        test_cases = [tc for tc in test_cases if str(tc.get("test_case_id", "?")) in keep]
 
     # ── Show list and confirm ──────────────────────────────────────────────
     print(f"\n  Found {len(test_cases)} test case(s) to execute:")

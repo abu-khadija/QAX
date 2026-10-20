@@ -69,3 +69,12 @@ def test_the_ui_javascript_parses():
     r = subprocess.run([node, "-e", "new Function(require('fs').readFileSync(process.argv[1],'utf8'))", str(js)],
                        capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr[-500:]
+
+
+def test_the_setup_panel_shows_status_never_secrets(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-SECRET-SETUP-VALUE")
+    monkeypatch.delenv("QAX_API_TOKEN", raising=False)
+    r = _c().get("/api/doctor")
+    names = {c["name"] for c in r.get_json()["checks"]}
+    assert {"AI provider", "Jira", "Xray", "Browser engine", "Live writes"} <= names
+    assert "SECRET-SETUP-VALUE" not in r.get_data(as_text=True)

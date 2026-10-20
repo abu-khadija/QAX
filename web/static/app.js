@@ -4,6 +4,27 @@ const esc = s => String(s==null?"":s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'
 /* /api calls carry X-QAX-Token when the server requires one (QAX_API_TOKEN). The token is asked
    once, kept for this tab only (sessionStorage), and never put in a URL. */
 function _tok(){ try{ return sessionStorage.getItem('qaxTok')||''; }catch(e){ return ''; } }
+async function toggleSetup(){
+  // what is configured on this server (AI provider, Jira, Xray, browser, live writes) — names and
+  // status only, never a value; each line says how to change it (all in .env on the server)
+  const box=$('setup'), btn=$('setupbtn'); const open=box.style.display==='none';
+  box.style.display=open?'block':'none'; btn.setAttribute('aria-expanded', open);
+  if(!open) return;
+  box.innerHTML='<div class="hk">Checking…</div>';
+  try{
+    const d=await (await api('/api/doctor')).json(); const icon={ok:'✅',warn:'⚠️',fail:'❌'};
+    box.innerHTML='<div class="sec-title" style="margin-top:0">Setup on this server</div><div class="hk">'
+      +(d.checks||[]).map(c=>icon[c.status]+' <b>'+esc(c.name)+'</b> — '+esc(c.detail)+(c.fix?'<br><span style="color:var(--muted);margin-left:22px">→ '+esc(c.fix)+'</span>':'')).join('<br>')
+      +'</div><div class="hint">Settings live in <code>.env</code> next to QAX (secrets never leave this machine and are never shown here). '
+      +'Restart the server after a change. Command line: <code>python main.py doctor</code>.</div>';
+  }catch(e){ box.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
+}
+async function openArtifact(path){
+  // a network log (HAR) or another saved artifact, through api() so a token-protected server works
+  try{ const r=await api('/api/artifact?path='+encodeURIComponent(path)); if(!r.ok) return;
+    const b=await r.blob(); const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+    a.download=path.split('/').pop(); a.click(); }catch(e){}
+}
 async function loadArtifacts(){
   // screenshots go through api() so a token-protected server still shows them (an <img src>
   // cannot carry the X-QAX-Token header, and the token never goes in a URL)
@@ -138,7 +159,8 @@ async function doExport(items, kind, btn, msgEl){
 }
 function engineHint(){
   const ui=$('exengine').value==='ui'; $('exprojf').style.display=ui?'':'none';
-  if(ui && !$('exproj').value) $('exproj').value=_cfg.project||'';
+  if(ui && !$('mapproj').value) $('mapproj').value=_cfg.project||'';
+  $('exprojname').textContent=$('mapproj').value||'— (enter a project name at the top)';
   if(ui && !_cfg.browser) $('exhint').innerHTML='⚠️ Playwright is not installed on the server: <code>pip install playwright && playwright install chromium</code>';
 }
 function fqProject(){
@@ -168,7 +190,7 @@ async function analyzeAll(){
     if((d.tests||[]).length){
       logLine('generate','ok',d.tests.length+' test case(s) written'+(d.invalid?(' · '+d.invalid+' rejected by validation'):''));
       window._fqCoverage=d.coverage||null; renderTests(d.tests);
-      if(url){ $('exurl').value=url; $('exengine').value='ui'; engineHint(); $('exproj').value=(d.understanding||{}).project||''; $('exro').checked=false; $('exauth').checked=$('mapauth').checked; }
+      if(url){ $('exurl').value=url; $('exengine').value='ui'; engineHint(); if(!$('mapproj').value) $('mapproj').value=(d.understanding||{}).project||''; engineHint(); $('exro').checked=false; $('exauth').checked=$('mapauth').checked; }
     }
   }catch(e){ showErr('Failed: '+e); }
   finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; $('mappass').value=''; loadOverview(); }
@@ -206,19 +228,34 @@ async function recordSession(forgetIt){
     out.innerHTML=d.error?('⚠️ '+esc(d.error)):(d.saved?('✅ Session saved '+esc(d.when||'')+' — runs start logged in. <a href="#" onclick="recordSession(true);return false">forget it</a>'):(forgetIt?'Session deleted.':esc(d.message||'Not saved.')));
   }catch(e){ out.textContent='⚠️ '+e; }
 }
+async function setQuarantine(caseId, on){
+  const project=(window._overviewProject||$('mapproj').value||'').trim(); if(!project) return;
+  await api('/api/quarantine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project,case_id:caseId,on})});
+  loadOverview();
+}
+function hostProject(url){ try{ return new URL(url).host.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,''); }catch(e){ return ''; } }
+document.addEventListener('DOMContentLoaded', ()=>{
+  try{ const p=localStorage.getItem('qaxProject'); if(p){ window._overviewProject=p; if(!$('mapproj').value) $('mapproj').value=p; loadOverview(); } }catch(e){}
+  const u=$('url'); if(u) u.addEventListener('change', ()=>{ const p=hostProject(u.value.trim()); if(p){ window._overviewProject=p; loadOverview(); } });
+  const m=$('mapproj'); if(m) m.addEventListener('change', ()=>{ window._overviewProject=m.value.trim(); loadOverview(); });
+});
 async function loadOverview(){
   // the project's quality from what QAX measured — every card says where its data comes from
-  const box=$('fqoverview'); const project=($('mapproj').value||$('exproj').value||'').trim();
+  const box=$('fqoverview');
+  const project=(window._overviewProject||$('mapproj').value||'').trim();
+  try{ if(project) localStorage.setItem('qaxProject', project); }catch(e){}
   if(!project){ box.innerHTML=''; return; }
   try{
-    const r=await api('/api/overview?project='+encodeURIComponent(project)); const d=await r.json();
+    const appUrl=(($('panel-scan')&&$('panel-scan').style.display!=='none')?$('url').value:$('mapurl').value)||'';
+    const r=await api('/api/overview?project='+encodeURIComponent(project)+'&url='+encodeURIComponent(appUrl.trim())); const d=await r.json();
     if(d.error){ box.innerHTML=''; return; }
     const go={run:"$('execpanel').scrollIntoView({block:'start'})",analyze:"$('mapurl').focus()",
               bugs:"($('fqreport')||$('execpanel')).scrollIntoView()",scan:"setMode('scan')"};
     box.innerHTML='<div class="ovhead"><div class="sec-title" style="margin:0">Project overview · '+esc(d.project)+'</div>'
       +'<span class="hint" style="margin:0">From saved runs only — nothing estimated</span></div><div class="ovgrid">'
       +d.cards.map(c=>'<div class="ovcard '+esc(c.state)+'"><h4>'+esc(c.title)+'</h4><div class="v">'+esc(c.value)+'</div>'
-        +(c.rows?'<div class="rq">'+c.rows.slice(0,6).map(x=>'<code>'+esc(x.id)+'</code> <b>'+esc(x.verdict)+'</b> '+esc(x.text).slice(0,48)).join('<br>')+'</div>':'')
+        +(c.rows?'<div class="rq">'+c.rows.slice(0,8).map(x=>'<code>'+esc(x.id)+'</code> <b>'+esc(x.verdict)+'</b> '+esc(x.text).slice(0,60)
+            +(c.id==='flaky'?' <a href="#" onclick="setQuarantine(\''+esc(x.id)+'\','+(!x.quarantined)+');return false">'+(x.quarantined?'release':'quarantine')+'</a>':'')).join('<br>')+'</div>':'')
         +'<div class="d">'+esc(c.detail||'')+'</div>'
         +(c.state==='empty'&&go[c.action]?'<button class="btn2" onclick="'+go[c.action]+'">Start here</button>':'')+'</div>').join('')
       +'</div>';
@@ -256,7 +293,11 @@ function renderReport(d){
   window._fqLastRun=d;
   const box=$('fqreport'); const res=d.results||[]; if(!res.length){ box.style.display='none'; return; }
   const byId={}; (window._lastTests||[]).forEach(t=>{ byId[t.test_case_id]=t; });
-  const fails=res.filter(r=>r.status==='FAIL'), problems=res.filter(r=>(r.page_errors||[]).length);
+  // only failures the APP caused are bug candidates; test problems and environment trouble are
+  // listed apart (they are fixed elsewhere, never filed as bugs)
+  const fails=res.filter(r=>r.status==='FAIL'&&(!r.cause||r.cause==='app'||r.cause==='unclear')&&!r.quarantined),
+        notBugs=res.filter(r=>r.status!=='PASS'&&(r.cause==='test'||r.cause==='environment')),
+        problems=res.filter(r=>(r.page_errors||[]).length);
   const ac=window._fqCriteria||[], cov=window._fqCoverage;
   let acRows='';
   if(cov && ac.length){
@@ -290,11 +331,31 @@ function renderReport(d){
             +(p.accessibility.length>8?'<br>… '+(p.accessibility.length-8)+' more':''):'<br>no accessibility problem among the basic checks'); }).join('<br><br>')
       +'<br><span style="color:var(--muted)">Basic automated checks only — not a full accessibility audit (no screen reader, keyboard or focus-order testing).</span></div>';
   }
+  // what to do next, from the verdicts (rules, in the order a QA lead would act)
+  const nxt=[];
+  if(d.changes&&d.changes.regressions&&d.changes.regressions.length) nxt.push('Fix what newly fails first: '+d.changes.regressions.map(esc).join(', '));
+  if(fails.filter(r=>r.cause!=='unclear').length) nxt.push('File the '+fails.filter(r=>r.cause!=='unclear').length+' bug(s) below to Jira');
+  if(fails.filter(r=>r.cause==='unclear').length) nxt.push('Look at the screenshot of '+fails.filter(r=>r.cause==='unclear').map(r=>esc(r.test_case_id)).join(', ')+' — app change or stale case?');
+  const tp=res.filter(r=>r.cause==='test'); if(tp.length) nxt.push('Fix '+tp.length+' test case(s) that could not run'+(tp.some(r=>/No element named/.test(JSON.stringify(r.steps||[])))?' — re-read the app (Understand) so its elements are known':''));
+  const ev=res.filter(r=>r.cause==='environment'); if(ev.length) nxt.push('Check the environment, then re-run '+ev.length+' case(s): '+(ev.some(r=>r.throttled)?'the app rate-limited QAX — wait or raise the limit on staging':'the app or browser did not answer'));
+  if(cov&&(cov.uncovered||[]).length) nxt.push('Write cases for the criteria with none: '+cov.uncovered.map(esc).join(', '));
+  if(d.changes&&d.changes.flaky&&d.changes.flaky.length) nxt.push('Quarantine or stabilise the flaky case(s): '+d.changes.flaky.map(esc).join(', '));
+  if(!nxt.length&&res.length&&res.every(r=>r.status==='PASS')) nxt.push('All passed — run again after the next change; the overview shows what changes');
+  if(nxt.length) h+='<div class="sec-title" style="margin-top:12px">Next</div><div class="hk">'+nxt.map(x=>'→ '+x).join('<br>')+'</div>';
+  if(notBugs.length){
+    const by={test:[],environment:[]}; notBugs.forEach(r=>by[r.cause].push(r));
+    h+='<div class="sec-title" style="margin-top:12px">Not bugs in the app ('+notBugs.length+')</div><div class="hk">'
+      +(by.test.length?'<b>Test problems</b> — fix the case, then re-run: '+by.test.map(r=>esc(r.test_case_id)+' <span style="color:var(--muted)">('+esc((r.steps||[]).find(s=>s.status!=='PASS')?.actual_result||r.error||'').slice(0,70)+')</span>').join(' · ')+'<br>':'')
+      +(by.environment.length?'<b>Environment</b> — the app or browser did not answer, or rate-limited QAX: '+by.environment.map(r=>esc(r.test_case_id)).join(', '):'')+'</div>';
+  }
   h+='<div class="sec-title" style="margin-top:12px">Bugs found ('+fails.length+')</div>';
   if(fails.length){
     h+='<div class="hk">'+fails.map(r=>{ const f=(r.steps||[]).find(s=>s.status==='FAIL')||{};
-      return '<label class="bugrow"><input type="checkbox" class="bugpick" value="'+esc(r.test_case_id)+'" checked><span><b>'
-        +esc((byId[r.test_case_id]||{}).title||r.title||r.test_case_id)+'</b> — step '+esc(f.step_number)+': '+esc(f.actual_result||r.error||'failed')+'</span></label>'; }).join('')
+      const unclear=r.cause==='unclear';
+      return '<label class="bugrow"><input type="checkbox" class="bugpick" value="'+esc(r.test_case_id)+'"'+(unclear?'':' checked')+'><span><b>'
+        +esc((byId[r.test_case_id]||{}).title||r.title||r.test_case_id)+'</b> — step '+esc(f.step_number)+': '+esc(f.actual_result||r.error||'failed')
+        +(unclear?' <span style="color:var(--p2)">· unclear: the app changed or the case is stale — check the screenshot before filing</span>':'')
+        +(r.network_log?' <a href="#" onclick="openArtifact(\''+esc(r.network_log)+'\');return false">network log</a>':'')+'</span></label>'; }).join('')
       +'<div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px"><select id="fqlang" title="Language of the bugs and the report" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select><button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button>'
       +'<button class="btn" id="fqbugsbtn" onclick="fileBugs()">⤴ File selected bugs to Jira</button></div><div id="fqbugsout"></div></div>';
   } else h+='<div class="hk">No failed case. <select id="fqlang" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select> <button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button></div>';
@@ -308,7 +369,7 @@ async function fileBugs(){
   out.innerHTML='Filing…';
   try{
     const r=await api('/api/functional/bugs',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({results,tests:window._lastTests,url:$('exurl').value.trim(),dry_run:!live,project:$('exproj').value.trim(),
+      body:JSON.stringify({results,tests:window._lastTests,url:$('exurl').value.trim(),dry_run:!live,project:$('mapproj').value.trim(),
         story_key:(window._fqStoryKey||''),lang:($('fqlang')||{}).value||'en',criteria:window._fqCriteria||[],coverage:window._fqCoverage||{},
         all_results:(d.results||[]).map(r=>({test_case_id:r.test_case_id,status:r.status}))})});
     const j=await r.json();
@@ -350,13 +411,16 @@ async function runTests(preview){
   try{
     const r=await api('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tests:window._lastTests,url,preview,read_only:$('exro').checked,
-        engine:$('exengine').value,project:$('exproj').value.trim(),insecure:$('exinsecure').checked,
+        engine:$('exengine').value,project:$('mapproj').value.trim(),insecure:$('exinsecure').checked,
         watch:$('exwatch').checked,trace:$('extrace').checked,
         device:$('exdevice').value,browser:$('exbrowser').value,workers:+$('exworkers').value,visual:$('exvisual').checked,
+        changed_since:($('exsince')||{}).value?.trim()||'',repo:($('exrepo')||{}).value?.trim()||'',
         authorized:$('exauth').checked,token:$('extoken').value.trim()})});
     const d=await r.json(); const p=d.plan||{};
     let h='';
     if(d.error) h+='<div class="hk">⚠️ '+esc(d.error)+'</div>';
+    if(p.selection) h+='<div class="hk"><b>Change-based selection</b> — '+esc(p.selection.why)
+      +((p.selection.skipped||[]).length?'<br><span style="color:var(--muted)">Skipped: '+p.selection.skipped.map(x=>esc(x.id)+' ('+esc(x.reason).slice(0,60)+')').join(' · ')+'</span>':'')+'</div>';
     h+='<div class="hk"><b>Plan</b> — '+(p.runnable||[]).length+' runnable '+(p.engine==='ui'?'in the browser':'over HTTP')+' against '+esc(p.url||url)
       +(p.read_only?' (read-only)':'')+'; '+(p.not_run||[]).length+' will not run'
       +((p.not_run||[]).length?':<br>'+p.not_run.map(n=>'• '+esc(n.title||n.test_case_id)+' — '+esc(n.reason)).join('<br>'):'')+'</div>';

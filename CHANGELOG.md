@@ -7,6 +7,19 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- **Change-based selection** (`execute --changed-since REF --repo PATH`, web, MCP): the git diff → the pages it can
+  affect → only the cases that visit them, each with its reason; shared files and changes QAX cannot place run
+  everything. `evals/change_bench.py`: three seeded, built and run changes to PetClinic — 0 regressions missed.
+- **Failure cause** on every non-passing result: app / test / environment / unclear (rules from recorded signals).
+  Only app (and, unticked, unclear) failures are offered as bugs; test and environment problems are listed apart.
+- **Network log (HAR 1.2)** for every case that does not pass — headers, status, timing, start of failed bodies;
+  Authorization/cookies/API keys and every QAX_VAR_* value removed; request bodies not stored; 0600.
+- **Setup panel** (⚙ Setup, `/api/doctor`): AI provider, Jira, Xray, browser, live writes — status only.
+- **Project home**: the overview sits above both tracks (scan projects by host); one project field;
+  a "Next" line in the report; cards for coverage gaps, flaky cases (with quarantine), critical findings and
+  release readiness — all from saved records.
+- Steps wait for the page's own requests (EventSource/websockets ignored) instead of a network idle that apps with
+  a live stream never reach.
 - `make bench-functional`: functional verdicts scored against truth written before the run (detection,
   false failures, missed defects, first-run success, repeatability); the demo-app lane is in the merge gate.
 - Project overview (`/api/overview`, cards in Functional QA): last run, changes since the run before,

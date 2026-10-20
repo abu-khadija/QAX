@@ -350,4 +350,6 @@ These references support the security and operating principles; review current g
 
 12. (2026-10-20) Functional benchmark run on all 10 corpus apps + the demo (79 cases, 2–3 runs each): 79/79 correct, 7/7 known defects detected, 0 false failures, 0 flips — after fixing a same-day naming regression, a leftover-data false FAIL and rate-limit false FAILs it caught. Every app now has a recorded start command and login (local, uncommitted). Engineering audit fixed: API-runner redirect credential leak, browser-crash false FAILs, concurrent scans, Jira duplicate check fail-open, non-atomic writes, dependency floors.
 
+13. (2026-10-20) P1 engineering items closed: failure cause (app/test/environment/unclear), HAR on failure (secrets removed), Setup panel, project home with coverage-gap/flaky-quarantine/critical/readiness cards, next-actions line, change-based selection (3 seeded PetClinic changes built and run: 0 regressions missed, 11/89/0 % cases saved), adaptive wait (~8 % less corpus time, verdicts unchanged: 79/79, 0 flips).
+
 **Next action:** Finish product-completion engineering (evidence-backed defects); then run the deferred Phase 0 demos and the human-dependent Phase 1 exit criteria. Do not start hosted SaaS implementation until beta evidence justifies it and the hosted-mode security gate is approved.

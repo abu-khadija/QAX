@@ -1065,3 +1065,31 @@ def test_one_unreadable_run_file_does_not_hide_the_history(tmp_path):
     save_run("p", "http://a", [{"test_case_id": "T", "status": "PASS"}], root=tmp_path)
     (tmp_path / "functional_runs" / "p" / "29991231T000000000000Z.json").write_text("{half-writ")
     assert [h["verdicts"] for h in history("p", root=tmp_path)] == [{"T": "PASS"}]
+
+
+def test_overview_cards_for_gaps_flaky_critical_and_readiness(client, tmp_path, monkeypatch):
+    """Coverage gaps, flaky cases (with quarantine), critical findings and release readiness —
+    each computed from saved records; a quarantined case leaves bugs and readiness but still shows."""
+    import time
+
+    import core.app_mapper as am
+    from core.project_overview import save_requirements
+    from core.run_history import save_run
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path / "projects")
+    save_requirements("shop", [{"id": "AC-1", "text": "pay"}, {"id": "AC-2", "text": "refund"}],
+                      {"by_criterion": {"AC-1": ["T1", "T2"], "AC-2": []}, "uncovered": ["AC-2"]})
+    for verdicts in (("PASS", "PASS"), ("PASS", "FAIL"), ("PASS", "PASS"), ("PASS", "FAIL")):
+        save_run("shop", "http://shop.local", [{"test_case_id": "T1", "status": verdicts[0], "title": "pay ok"},
+                                               {"test_case_id": "T2", "status": verdicts[1], "title": "pay twice",
+                                                "cause": "app"}])
+        time.sleep(0.01)
+    cards = {c["id"]: c for c in client.get("/api/overview?project=shop").get_json()["cards"]}
+    assert cards["coverage_gaps"]["rows"][0]["id"] == "AC-2"
+    assert [r["id"] for r in cards["flaky"]["rows"]] == ["T2"] and cards["flaky"]["rows"][0]["verdict"] == "FLAKY"
+    assert cards["critical"]["rows"][0]["id"] == "T2" and cards["readiness"]["value"] == "Not ready"
+    assert client.post("/api/quarantine", json={"project": "shop", "case_id": "T2", "on": True}).status_code == 200
+    cards = {c["id"]: c for c in client.get("/api/overview?project=shop").get_json()["cards"]}
+    assert cards["flaky"]["rows"][0]["verdict"] == "QUARANTINED" and cards["critical"]["value"] == "None open"
+    assert not any("failing" in r["text"] for r in cards["readiness"]["rows"])   # quarantined: not a blocker
+    assert any("criteria not passed" in r["text"] for r in cards["readiness"]["rows"])  # AC-2 has no case
+    assert client.post("/api/quarantine", json={"project": "shop"}).status_code == 400

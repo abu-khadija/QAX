@@ -168,3 +168,12 @@ What the benchmark caught on the way (all fixed, with tests):
 
 Limits: 7 known defects (1 planted + 6 negative controls) — detection on real, unknown bugs is not measured here;
 older apps have no negative controls in their case files; hand-written cases; one machine.
+
+### Re-run after the P1/P2 batch (failure cause, HAR, change selection, adaptive wait) — 2026-10-20 night
+
+Same 79 cases, two runs each: **79/79 correct, 7/7 known defects, 0 false failures, 0 flips.** Time over the whole
+corpus: ~499 s → ~457 s per pass (about 8 % less; linkding 7.7 → 4.8 s/case, Beszel 12.4 → 10.2). Not every app got
+faster: microblog 6.8 → 8.1 s/case in this run (one run — needs a repeat). The wait after an action now continues
+when either the network is idle or the requests the action started are done (a first version that only did the
+latter made Memos twice as slow — a long-poll that never finishes; measured and replaced before commit).
+Healthchecks needs `SITE_ROOT=http://127.0.0.1:9091` to start (recorded in start-all.sh and the manifest).

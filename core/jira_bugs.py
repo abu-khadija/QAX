@@ -292,7 +292,7 @@ def functional_result_to_bug(result: dict, case: dict | None = None, *, base_url
     if failing.get("error"):
         actual += f" — {failing['error']}"
     evidence = [p for p in (failing.get("screenshot"), result.get("screenshot"),
-                            result.get("trace")) if p]
+                            result.get("trace"), result.get("network_log")) if p]
     problems = [f"{e.get('kind')}: {e.get('text')}" for e in (result.get("page_errors") or [])][:8]
 
     summary = f"{title_case} — {w['fails_at']} {failing.get('step_number', '?')}"

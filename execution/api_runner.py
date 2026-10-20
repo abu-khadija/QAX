@@ -799,6 +799,8 @@ class APIRunner:
 
         for tc in test_cases:
             r = self.execute_test_case(tc)
+            from core.triage import classify
+            classify(r)
             results.append(r)
 
             # A coverage template that fails BEFORE its final assertion step

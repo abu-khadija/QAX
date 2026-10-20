@@ -1,0 +1,15 @@
+{
+  "_comment": "Seeded changes for evals/change_bench.py: each is a real edit to Spring PetClinic, built and run. Truth = the cases whose verdict changes against the unchanged app (measured, not assumed). Selection must contain every one of them.",
+  "app": {"repo": "~/Downloads/qax-corpus/spring-petclinic", "project": "petclinic",
+          "cases": "evals/data/petclinic_cases.json", "port": 8946,
+          "build": "./mvnw -q -DskipTests -Dcheckstyle.skip -Dspring-javaformat.skip=true package",
+          "run": "{java} -jar target/spring-petclinic-4.0.0-SNAPSHOT.jar --server.port={port}"},
+  "seeds": [
+    {"name": "owner-phone-validation-dropped", "file": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+     "find": "@Pattern(regexp = \"\\\\d{10}\"", "replace": "@Pattern(regexp = \".*\""},
+    {"name": "vet-last-name-not-shown", "file": "src/main/resources/templates/vets/vetList.html",
+     "find": "${vet.firstName + ' ' + vet.lastName}", "replace": "${vet.firstName}"},
+    {"name": "phone-message-changed-in-shared-messages", "file": "src/main/resources/messages/messages.properties",
+     "find": "telephone.invalid=Telephone must be a 10-digit number", "replace": "telephone.invalid=Phone number is not valid"}
+  ]
+}

@@ -15,8 +15,10 @@
     <span class="tag">AI QA platform</span>
     <span class="spacer"></span>
     <a href="/" class="home-link">← Product overview</a>
+    <button class="btn2" type="button" id="setupbtn" onclick="toggleSetup()" aria-expanded="false">⚙ Setup</button>
     <span class="pill-ghost">runs locally</span>
   </header>
+  <section class="panel" id="setup" style="display:none" aria-label="Setup status"></section>
 
   <section class="hero">
     <h1>Test your running app. <span class="grad">Report only what you can prove.</span></h1>
@@ -24,6 +26,7 @@
        <b>Scan</b> probes the API for security bugs. Both run on this machine, and every result carries its evidence.</p>
   </section>
 
+  <div id="fqoverview"></div>
   <div class="modes">
     <button class="mode active" id="mode-scan" onclick="setMode('scan')">
       <div class="mt">🛡️ Scan &amp; prove bugs</div>
@@ -99,7 +102,6 @@
   </div>
 
   <div class="panel" id="panel-func" style="display:none">
-    <div id="fqoverview"></div>
     <div class="steps4">
       <span><b>1</b> Inputs</span><span><b>2</b> Understand</span><span><b>3</b> Test cases · review · export</span>
       <span><b>4</b> Run end to end</span><span><b>5</b> Report · bugs → Jira</span>
@@ -108,6 +110,8 @@
       sent to Jira until you choose to.</div>
     <div class="field"><label for="mapurl">App URL (the running app to read and test)</label>
       <input id="mapurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false" oninput="fqProject()"></div>
+    <div class="field"><label for="mapproj">Project (one name for this app — its map, runs and overview)</label>
+        <input id="mapproj" oninput="this.dataset.touched=1" onchange="loadOverview()" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
     <div class="field"><label for="fqrepo">Source repository (optional — a local folder or an https Git URL)</label>
       <input id="fqrepo" placeholder="https://github.com/org/app  or  /path/to/app" autocomplete="off" spellcheck="false"></div>
     <div class="field">
@@ -123,8 +127,7 @@
       <div class="row" style="gap:8px;align-items:center;margin:-4px 0 12px">
         <button class="btn2" type="button" onclick="recordSession()">🔐 Log in in a browser window (SSO / 2FA)</button>
         <span class="hint" id="sessstate"></span></div>
-      <div class="field"><label for="mapproj">Project name</label>
-        <input id="mapproj" oninput="this.dataset.touched=1" onchange="loadOverview()" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
+      
       <div class="field"><label for="code">Source code (optional — paste a function or module)</label>
         <textarea id="code" rows="5" placeholder="// paste a function, endpoint, or module"></textarea></div>
       <div class="field"><label for="tcfile">Load a test-cases file (JSON) — start from your own cases, skips writing them</label>
@@ -184,13 +187,22 @@
       <div class="sec-title">4 · Run them end to end</div>
       <div class="field"><label for="exurl">App URL</label>
         <input id="exurl" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false"></div>
+      <details class="adv"><summary>Only the cases a code change can affect (optional)</summary>
+        <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div class="field" style="flex:2;min-width:200px"><label for="exrepo">The app's git checkout (folder)</label>
+            <input id="exrepo" placeholder="/path/to/app" autocomplete="off" spellcheck="false"></div>
+          <div class="field" style="flex:1;min-width:140px"><label for="exsince">Changes since (git ref)</label>
+            <input id="exsince" placeholder="origin/main" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="hint">QAX reads the diff, works out which pages it can affect, and runs only the cases that visit them —
+          a shared file (layout, settings, dependencies) runs everything. Every choice is listed with its reason.</div>
+      </details>
       <div class="field"><label for="exengine">Engine</label>
         <select id="exengine" onchange="engineHint()">
           <option value="api">HTTP (API) — cases with API steps</option>
           <option value="ui">Browser (Playwright) — clicks through your pages</option>
         </select></div>
-      <div class="field" id="exprojf" style="display:none"><label for="exproj">Project (selectors)</label>
-        <input id="exproj" placeholder="config/projects/&lt;name&gt;/selectors.json" autocomplete="off" spellcheck="false"></div>
+      <div class="hint" id="exprojf" style="display:none">Project: <b id="exprojname">—</b> (set at the top, step 1 — its app map gives the selectors)</div>
       <div class="field"><label for="extoken">Bearer token (optional)</label>
         <input id="extoken" placeholder="for apps behind auth" autocomplete="off" spellcheck="false"></div>
       <div class="row" style="gap:10px;flex-wrap:wrap">

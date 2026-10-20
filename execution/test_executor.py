@@ -483,6 +483,8 @@ class TestExecutor:
                 runner.take_dialogs()
             if hasattr(runner, "take_page_errors"):
                 runner.take_page_errors()
+            if hasattr(runner, "take_network"):
+                runner.take_network()                      # start this case's network log empty
             result = await self.execute_test_case(tc, runner)
             await self._after_case(tc, result, runner)
             if hasattr(runner, "take_page_errors"):
@@ -515,6 +517,15 @@ class TestExecutor:
             # What this case sent that can change data on the target (form posts, deletes…).
             # QAX does not undo data created through the UI — it says what it sent.
             result["writes"] = runner.take_writes() if hasattr(runner, "take_writes") else []
+            if hasattr(runner, "take_network"):
+                net = runner.take_network()
+                if result.get("status") != "PASS" and net:
+                    from core.network_log import save as _save_har
+                    har = _save_har(str(tc.get("test_case_id", "case")), net)
+                    if har:
+                        result["network_log"] = har      # HAR, secrets removed
+            from core.triage import classify
+            classify(result)                     # app / test / environment / unclear
             results.append(result)
 
             if stop_on_fail and result["status"] in ("FAIL", "ERROR"):
@@ -544,7 +555,9 @@ class TestExecutor:
         )
 
         writes_sent = sum(len(r.get("writes") or []) for r in results)
+        from core.triage import summary as _causes
         return {
+            "causes": _causes(results),
             "writes_sent": writes_sent,
             "throttled": throttled,
             "total": total,
@@ -817,6 +830,7 @@ async def run_parallel(test_cases: list, workers: int = 2, *, headless: bool = T
         "throttled": sum(1 for r in results if r.get("throttled")),
         "total": total, "passed": counts["PASS"], "failed": counts["FAIL"],
         "errors": counts["ERROR"], "skipped": counts["SKIP"],
+        "causes": __import__("core.triage", fromlist=["summary"]).summary(results),
         "pass_rate": round((counts["PASS"] / total * 100) if total else 0.0, 1),
         "results": results, "start_time": start_ts, "end_time": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": round(time.monotonic() - start, 2),

@@ -21,6 +21,7 @@ Action detection rules (first match wins):
 """
 
 import json
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -215,10 +216,47 @@ async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
         await page.wait_for_load_state("load", timeout=15_000)
     except Exception:  # noqa: BLE001
         pass
-    try:
-        await page.wait_for_load_state("networkidle", timeout=idle_ms)
-    except Exception:  # noqa: BLE001
-        pass
+    inflight = None if os.getenv("QAX_SETTLE", "").lower() == "networkidle" else getattr(page, "_qax_inflight", None)
+    if inflight is None and os.getenv("QAX_SETTLE", "").lower() != "networkidle":
+        frame_page = getattr(page, "_page", None)            # a step inside an iframe
+        inflight = getattr(frame_page, "_qax_inflight", None)
+    async def _own_requests_done():
+        # only requests the action started (or that began just before it) count: a long-poll or
+        # stream fetch opened earlier never finishes (Memos) and must not hold every step
+        import time as _t
+        since = _t.monotonic() - 0.5
+        quiet, waited = 0, 0
+        while waited < idle_ms:
+            if any(t0 >= since for t0 in list(inflight.values())):
+                quiet = 0
+            else:
+                quiet += 50
+                if quiet >= 250:
+                    return
+            await asyncio.sleep(0.05)
+            waited += 50
+
+    async def _network_idle():
+        try:
+            await page.wait_for_load_state("networkidle", timeout=idle_ms)
+        except Exception:  # noqa: BLE001
+            await asyncio.sleep(idle_ms / 1000)
+
+    if inflight is not None:
+        # whichever says "settled" first: Playwright's network idle (no connection for 500 ms) or
+        # "the requests this action started are done" — an app with a live stream never reaches
+        # network idle (every step waited the full idle_ms on Beszel); never slower than before
+        tasks = [asyncio.ensure_future(_own_requests_done()), asyncio.ensure_future(_network_idle())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED, timeout=idle_ms / 1000 + 0.5)
+        finally:
+            for t in tasks:
+                t.cancel()
+    else:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=idle_ms)
+        except Exception:  # noqa: BLE001
+            pass
     try:
         from core.dom_analyzer import _wait_dom_stable
         await _wait_dom_stable(page, max_ms=3_000, quiet_polls=2)   # incl. a late SPA redirect

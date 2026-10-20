@@ -25,6 +25,7 @@ until Playwright adds Python 3.14 support.
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -220,6 +221,56 @@ class PlaywrightRunner:
         self.context.on("request", _on_request)
         self._throttled = 0
 
+        # Network log for the case (saved as HAR only when the case does not pass): pages and
+        # API calls with status, timing and headers; the start of the body of failed calls.
+        self._net = []
+        self._net_by = {}
+
+        def _net_req(req):
+            try:
+                if req.resource_type in ("image", "font", "media", "stylesheet") or len(self._net) >= 500:
+                    return
+                e = {"method": req.method, "url": req.url, "type": req.resource_type,
+                     "req_headers": dict(req.headers), "t0": time.monotonic(),
+                     "started": datetime.now(timezone.utc).isoformat()}
+                self._net.append(e)
+                self._net_by[id(req)] = e
+            except Exception:  # noqa: BLE001
+                pass
+
+        async def _net_body(e, resp):
+            try:
+                e["body"] = (await resp.text())[:2000]
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _net_resp(resp):
+            try:
+                e = self._net_by.get(id(resp.request))
+                if e is None:
+                    return
+                e.update(status=resp.status, resp_headers=dict(resp.headers),
+                         ms=(time.monotonic() - e["t0"]) * 1000, mime=resp.headers.get("content-type", ""))
+                if resp.status >= 400 and e["type"] in ("document", "xhr", "fetch"):
+                    import asyncio as _a
+                    _a.ensure_future(_net_body(e, resp))
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _net_failed(req):
+            try:
+                e = self._net_by.get(id(req))
+                if e is not None:
+                    e.update(status=0, failure=str(req.failure or "failed"), ms=(time.monotonic() - e["t0"]) * 1000)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            self.context.on("request", _net_req)
+            self.context.on("response", _net_resp)
+            self.context.on("requestfailed", _net_failed)
+        except Exception:  # noqa: BLE001
+            pass
+
         async def _rate_limit_page(resp):
             # Healthchecks answers a submitted login with 200 + "Too many attempts" — the message
             # is gone once the case moves on, so it is caught here, when the answer arrives
@@ -300,6 +351,19 @@ class PlaywrightRunner:
             try:
                 pg.on("pageerror", lambda exc: _note("javascript exception", exc))
                 pg.on("console", lambda m: _note("console error", m.text) if m.type == "error" else None)
+                # requests in flight, without long-lived streams (EventSource, websockets): the
+                # step waits for THESE, not for a "network idle" an app with a live stream never reaches
+                pg._qax_inflight = {}             # request id → when it started
+
+                def _start(r):
+                    if r.resource_type not in ("eventsource", "websocket", "media", "image", "font"):
+                        pg._qax_inflight[id(r)] = time.monotonic()
+
+                def _end(r):
+                    pg._qax_inflight.pop(id(r), None)
+                pg.on("request", _start)
+                pg.on("requestfinished", _end)
+                pg.on("requestfailed", _end)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -363,6 +427,11 @@ class PlaywrightRunner:
         except Exception as e:  # noqa: BLE001
             logger.debug("trace stop failed: %s", e)
             return ""
+
+    def take_network(self) -> list:
+        """Return and clear the network entries recorded since the last call."""
+        out, self._net, self._net_by = list(getattr(self, "_net", []) or []), [], {}
+        return out
 
     def take_page_errors(self) -> list:
         """Return and clear the page problems (JS exceptions, console errors, 5xx, failed requests)."""
