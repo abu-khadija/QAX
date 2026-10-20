@@ -47,7 +47,7 @@ def test_named_token_auth_header():
         def json(self): return {}
 
     class FakeSession:
-        def request(self, method, url, json=None, headers=None, timeout=None):
+        def request(self, method, url, json=None, headers=None, timeout=None, **kw):
             sent["headers"] = headers or {}
             return FakeResp()
     runner.session = FakeSession()

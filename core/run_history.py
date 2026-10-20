@@ -13,6 +13,7 @@ Files only under output/; never raises.
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +39,9 @@ def save_run(project: str, url: str, results: list, root: Path | None = None) ->
         rec = {"when": ts, "url": url, "verdicts": {str(r.get("test_case_id")): r.get("status")
                                                     for r in results or [] if isinstance(r, dict)}}
         path = folder / f"{ts}.json"
-        path.write_text(json.dumps(rec, indent=2))
+        tmp = folder / f".{ts}.tmp"
+        tmp.write_text(json.dumps(rec, indent=2))
+        os.replace(tmp, path)
         return str(path)
     except Exception:  # noqa: BLE001
         return ""
@@ -50,7 +53,13 @@ def history(project: str, limit: int = 10, root: Path | None = None) -> list:
         folder = (root or _root()) / "functional_runs" / _safe(project)
         # run records are named by time (20261020T…); other files in the folder are not runs
         files = sorted((f for f in folder.glob("*.json") if f.name[:1].isdigit()), reverse=True)[:limit]
-        return [json.loads(f.read_text()) for f in files]
+        out = []
+        for f in files:                         # one half-written file must not hide the others
+            try:
+                out.append(json.loads(f.read_text()))
+            except Exception:  # noqa: BLE001
+                continue
+        return out
     except Exception:  # noqa: BLE001
         return []
 

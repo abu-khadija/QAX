@@ -71,3 +71,30 @@ def test_a_page_on_another_localhost_port_cannot_start_a_scan_with_a_get(monkeyp
     assert r.status_code == 403
     r = _c().get("/api/scan/stream?url=http://127.0.0.1:9")            # curl: no browser headers → old behaviour
     assert r.status_code == 400 and "authorized" in r.get_json()["error"]
+
+
+def test_only_one_scan_runs_at_a_time(monkeypatch):
+    """Engineering audit 2026-10-20: concurrent scans corrupted each other's AI-usage numbers and
+    there was no limit on how many hit the target at once."""
+    import web.server as ws
+    monkeypatch.delenv("QAX_API_TOKEN", raising=False)
+    assert ws._SCAN_LOCK.acquire(blocking=False)
+    try:
+        body = {"url": "http://127.0.0.1:9", "authorized": True}
+        assert _c().post("/api/scan", json=body).status_code == 409
+        assert _c().post("/api/scan/stream", json=body).status_code == 409
+    finally:
+        ws._SCAN_LOCK.release()
+
+
+def test_a_scan_stops_when_its_viewer_leaves():
+    import queue as _q
+
+    import pytest as _pt
+
+    import web.server as ws
+    p = ws._QueueProgress(_q.Queue())
+    p.emit("probe", "info", "running")
+    p.cancelled = True
+    with _pt.raises(ws.ScanCancelled):
+        p.emit("probe", "info", "next stage")

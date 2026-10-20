@@ -156,6 +156,14 @@ _VISIBLE_FIELD_VALUES_JS = r"""(root) => {
 }"""
 
 
+def _is_browser_gone(exc: Exception) -> bool:
+    """True when a step failed because the browser / page / context itself went away."""
+    t = str(exc).lower()
+    return any(k in t for k in ("target closed", "target page, context or browser has been closed",
+                                "browser has been closed", "browser closed", "connection closed",
+                                "has been disconnected", "context closed"))
+
+
 class _InFrame:
     """
     A page whose element methods run inside one iframe (click, fill, query_selector,
@@ -789,7 +797,9 @@ class ActionMapper:
                 await page.fill(selector, value, timeout=15_000)
                 base_result.update({
                     "status": "PASS",
-                    "actual_result": f"Filled '{selector}' with value: '{value}'",
+                    "actual_result": f"Filled '{selector}' with value: "
+                                     + ("••••" if any(w in (selector + action_text).lower() for w in ("pass", "secret", "token"))
+                                        else f"'{value}'"),
                 })
 
             elif action_type == "select":
@@ -828,9 +838,10 @@ class ActionMapper:
                 })
 
         except Exception as e:  # noqa: BLE001
+            crashed = _is_browser_gone(e)
             base_result.update({
-                "status": "FAIL",
-                "actual_result": f"Step execution failed",
+                "status": "ERROR" if crashed else "FAIL",
+                "actual_result": "The browser stopped (environment)" if crashed else "Step execution failed",
                 "error": str(e)[:300],
             })
 
@@ -1074,9 +1085,11 @@ class ActionMapper:
                           "`main.py map` or fix the step's selector_key"),
             })
         except Exception as e:  # noqa: BLE001
+            # a browser that died is the environment, not the app: ERROR (never filed as a bug)
+            crashed = _is_browser_gone(e)
             base_result.update({
-                "status": "FAIL",
-                "actual_result": "Step execution failed",
+                "status": "ERROR" if crashed else "FAIL",
+                "actual_result": "The browser stopped (environment)" if crashed else "Step execution failed",
                 "error": str(e)[:300],
             })
 

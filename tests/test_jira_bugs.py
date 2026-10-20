@@ -297,3 +297,36 @@ def test_ticket_carries_a_parseable_build_line():
     bug = finding_to_bug(_enriched(), environment="E", build={"id": "7f3a9c1b2d4e", "version": "28.1.0"})
     assert "Build: 7f3a9c1b2d4e (28.1.0)" in bug["description"]
     assert "Build:" not in finding_to_bug(_enriched(), environment="E")["description"]      # unknown → no line
+
+
+def test_an_unreachable_duplicate_check_never_files_a_possible_duplicate(monkeypatch):
+    """Engineering audit 2026-10-20: a 429/outage on the search used to mean "no duplicate"."""
+    import time as _t
+    monkeypatch.setattr(_t, "sleep", lambda s: None)
+
+    class _S:
+        def __init__(self):
+            self.posts = []
+
+        def post(self, url, **kw):
+            self.posts.append(url)
+            class R:
+                status_code = 429
+                text = "slow down"
+                def json(self):
+                    return {}
+            return R()
+
+        def get(self, url, **kw):
+            class R:
+                status_code = 200
+                def json(self):
+                    return {"issueTypes": [{"id": "1", "name": "Bug"}], "fields": [{"fieldId": "summary"}]}
+            return R()
+    s = _S()
+    f = JiraBugFiler(dry_run=False, base_url="https://acme.atlassian.net", email="a@b.c", token="t",
+                     project_key="QA", session=s)
+    res = f.file({"test_case_id": "B1", "title": "t", "fingerprint": "qax-fp-1"})
+    assert res["success"] is False and "duplicate check" in res["error"]
+    assert not [u for u in s.posts if u.endswith("/rest/api/3/issue")]          # nothing filed
+    assert len([u for u in s.posts if "search" in u]) == 3                         # retried

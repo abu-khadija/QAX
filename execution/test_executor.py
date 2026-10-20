@@ -400,7 +400,8 @@ class TestExecutor:
                     text = ""
             m = self._THROTTLE_TEXT.search(text or "")
             if n429 or m:
-                why = f"{n429} HTTP 429 answer(s)" if n429 else f"the page says \"{m.group(0)}\""
+                why = (f"the app answered {n429} time(s) with a rate limit (HTTP 429 or \"too many attempts\")"
+                       if n429 else f"the page says \"{m.group(0)}\"")
                 result["status"] = "ERROR"
                 result["throttled"] = True
                 result["error"] = (f"The app rate-limited QAX ({why}) — not a verdict on the feature. "
@@ -463,7 +464,17 @@ class TestExecutor:
             # Every case starts in a clean browser session (no cookies/storage from
             # the case before), so a verdict never depends on the order of the cases.
             if n and hasattr(runner, "new_session"):
-                await runner.new_session()
+                fresh = await runner.new_session()
+                if fresh is False and hasattr(runner, "ensure_alive"):
+                    fresh = await runner.ensure_alive()
+                if fresh is False:
+                    # no browser could be (re)started: every remaining case is an environment
+                    # ERROR — never a FAIL, never a filed bug
+                    for rest in test_cases[n:]:
+                        results.append({"test_case_id": rest.get("test_case_id", "?"), "title": rest.get("title", ""),
+                                        "status": "ERROR", "steps": [], "writes": [],
+                                        "error": "the browser stopped and could not be restarted (environment)"})
+                    break
             if hasattr(runner, "take_writes"):
                 runner.take_writes()                       # start this case's ledger empty
             if hasattr(runner, "take_throttled"):
@@ -784,7 +795,18 @@ async def run_parallel(test_cases: list, workers: int = 2, *, headless: bool = T
                 pass
         return [(chunk[k][0], r) for k, r in enumerate(batch.get("results") or [])], batch.get("stopped_early", False)
 
-    parts = await asyncio.gather(*(one(c) for c in chunks if c))
+    live = [c for c in chunks if c]
+    raw = await asyncio.gather(*(one(c) for c in live), return_exceptions=True)
+    parts = []
+    for chunk, got in zip(live, raw):
+        if isinstance(got, BaseException):
+            # one worker crashed: its cases are environment ERRORs — the other workers' results stay
+            parts.append(([(i, {"test_case_id": tc.get("test_case_id", "?"), "title": tc.get("title", ""),
+                                "status": "ERROR", "steps": [], "writes": [],
+                                "error": f"browser worker crashed (environment): {str(got)[:200]}"})
+                           for i, tc in chunk], False))
+        else:
+            parts.append(got)
     results = [r for _, r in sorted((x for part, _ in parts for x in part), key=lambda t: t[0])]
     counts = {"PASS": 0, "FAIL": 0, "ERROR": 0, "SKIP": 0}
     for r in results:

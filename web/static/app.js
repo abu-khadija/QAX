@@ -52,7 +52,7 @@ function setMode(m){
   if(!scan) $('funcstate').innerHTML = have ? ('<b>'+have+'</b> test case(s) ready — review them, then run them below.') : '';
   $('scanning').style.display='none'; $('err').style.display='none';
 }
-function showErr(m){ $('err').textContent=m; $('err').style.display='block'; }
+function showErr(m){ const el=$('err'); el.textContent=m; el.style.display='block'; el.scrollIntoView({block:'center',behavior:'smooth'}); }
 
 window._lastTests=[];
 function loadTests(input){
@@ -68,6 +68,11 @@ function loadTests(input){
 }
 function renderTests(cases){
   window._lastTests=cases||[];
+  // pick the engine the cases are written for (a browser-cases file used to stay on HTTP and
+  // be reported as "will not run" — UX walk 2026-10-20)
+  const ui=(cases||[]).filter(c=>(c.automation_steps||[]).length&&!(c.api_steps||[]).length).length;
+  const apiN=(cases||[]).filter(c=>(c.api_steps||[]).length).length;
+  if($('exengine')&&(ui||apiN)){ $('exengine').value= ui>=apiN?'ui':'api'; if(typeof engineHint==='function') engineHint(); }
   $('genresults').style.display='block';
   $('gentool').style.display = (cases&&cases.length)?'flex':'none';
   $('gencount').textContent = cases.length ? '· '+cases.length : '';
@@ -389,7 +394,7 @@ function fileTests(){
 
 function runScan(){
   const url=$('url').value.trim();
-  if(!url){ $('url').focus(); return; }
+  if(!url){ showError('Enter the URL of your running app (for example http://localhost:8000).'); $('url').focus(); return; }
   if(!$('authorized').checked){ showError('Confirm you own this app or are authorized to test it.'); $('authorized').focus(); return; }
   $('genresults').style.display='none'; $('plan').style.display='none';
   $('go').disabled=true;
@@ -434,7 +439,10 @@ function _scanFields(){
     endpoints:$('eplist').value, examples:$('exbodies').value, read_only:$('readonly').checked, insecure:$('insecure').checked};
 }
 function finish(){ if(_es){ try{ _es.abort(); }catch{} _es=null; } $('scanning').style.display='none'; $('go').disabled=false; setTimeout(loadRuns,600); }
-function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; }
+function showError(m){ const el=$('err'); el.textContent='⚠  '+m; el.style.display='block'; el.scrollIntoView({block:'center',behavior:'smooth'}); }
+// an error about a field goes away as soon as the user changes the inputs (it was left standing
+// after the box it asked for was ticked — UX walk 2026-10-20)
+document.addEventListener('change', e=>{ if(e.target.closest && e.target.closest('.panel')) { const el=$('err'); if(el) el.style.display='none'; } });
 
 function render(d){
   const sc = d.scorecard||{}, cost = sc.cost||{};
@@ -455,7 +463,7 @@ function render(d){
   $('stats').innerHTML = [
     ['n p1',nClaims,'Confirmed · deterministic'],
     ['n p3',nLeads,'Leads · AI / hygiene'],
-    ['n',sc.tests_run??'—','Tests run'],
+    ['n',sc.tests_run??'—','Generated tests run'],
     ['n',(sc.duration_sec??'—')+'s','Duration'],
     ['n',cstr,'LLM cost'],
     ['n '+(sc.end_to_end?'ok':''),sc.end_to_end?'yes':'no','End-to-end'],
@@ -614,8 +622,12 @@ function notTestedHTML(d){
     const hints={'token_b':"a second, ordinary user's token", 'auth-token':'a valid token or session cookie',
       'valid-body':'an example valid request body', 'api-surface':"the app's OpenAPI spec (QAX found few endpoints)",
       'write-permission':'a scan without read-only, once you may write test data'};
-    h+='<div class="sec-title" style="margin-top:18px">Not tested — '+gaps.length+' check'+(gaps.length>1?'s':'')
-      +' could not run <span style="color:var(--muted);font-weight:500">(quiet here means "unknown", not "safe")</span></div>';
+    // a check that found something here RAN — read-only only kept it from its write requests
+    const found=new Set(((d.claims||[]).map(c=>c.probe||c.source)).filter(Boolean));
+    const partly=gaps.filter(g=>found.has(g.probe)||/not \(fully\) run/.test(g.reason||'')).length;
+    h+='<div class="sec-title" style="margin-top:18px">Not fully tested — '+gaps.length+' check'+(gaps.length>1?'s':'')
+      +(partly?(' ('+partly+' ran in part: only the parts below were skipped)'):'')
+      +' <span style="color:var(--muted);font-weight:500">(quiet here means "unknown", not "safe")</span></div>';
     Object.entries(groups).forEach(([k,list])=>{
       h+='<div class="hk"><b>'+esc(list.map(g=>g.probe).join(', '))+'</b><br><span style="color:var(--muted)">To enable: '
         +esc(hints[k]||k)+'</span></div>';
@@ -629,7 +641,7 @@ function notTestedHTML(d){
 
 async function previewPlan(){
   const url=$('url').value.trim();
-  if(!url){ $('url').focus(); return; }
+  if(!url){ showError('Enter the URL of your running app (for example http://localhost:8000).'); $('url').focus(); return; }
   const box=$('plan'); box.style.display='block'; box.innerHTML='<div class="hint">Reading the app (read-only requests only)…</div>';
   $('planbtn').disabled=true;
   try{
@@ -641,7 +653,8 @@ async function previewPlan(){
     let h='<div class="sec-title" style="margin-top:0">Scan plan — nothing has been attacked yet</div>';
     h+='<div class="stats" style="margin:10px 0"><span class="chip"><b>'+esc(s.endpoint_count)+'</b> endpoints found</span>'
       +'<span class="chip"><b>'+esc(c.will_run)+'</b> of '+esc(c.total)+' checks will run</span>'
-      +'<span class="chip"><b>'+((c.skipped_because_read_only||[]).length)+'</b> skipped (read-only)</span></div>';
+      +'<span class="chip"><b>'+((c.skipped_because_read_only||[]).length)+'</b> skipped entirely (read-only)</span>'
+      +(c.read_only_note?'':'')+'</div><div class="hint">In read-only, other checks also leave out their write requests (POST/PUT/DELETE), so the result may list them as “not fully tested”.</div>';
     h+='<div class="hint">'+esc(p.note||'')+' Surface from: '+esc(s.source||'')+'.</div>';
     if((s.sample||[]).length) h+='<div class="hint" style="margin-top:8px"><b>Endpoints (sample):</b> <code>'+s.sample.slice(0,12).map(esc).join('</code> <code>')+'</code></div>';
     if((c.writes_data||[]).length) h+='<div class="hint" style="margin-top:8px"><b>Checks that write data:</b> '+c.writes_data.map(esc).join(', ')
@@ -658,7 +671,7 @@ async function loadRuns(){
     const r=await api('/api/runs'); const j=await r.json(); const runs=j.runs||[];
     $('history').style.display=(runs.length && $('panel-scan').style.display!=='none')?'block':'none';
     $('runs').innerHTML=runs.slice(0,15).map(x=>
-      '<div class="hk" style="cursor:pointer" onclick="openRun(\''+esc(x.run_id)+'\')">'
+      '<div class="hk" style="cursor:pointer" role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openRun(\''+esc(x.run_id)+'\')}" onclick="openRun(\''+esc(x.run_id)+'\')">'
       +'<b>'+esc(x.scanned_at||'')+'</b> · '+esc(x.url||'')
       +' · <b>'+x.claims+'</b> confirmed · '+x.leads+' leads · '+x.not_tested+' not tested'
       +(x.read_only?' · 🔒 read-only':'')+' <span style="color:var(--muted)">(open)</span></div>').join('');

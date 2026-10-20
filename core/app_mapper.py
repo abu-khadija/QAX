@@ -167,6 +167,13 @@ def load_map(project: str | None) -> AppMap | None:
         return None
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write a file so a reader never sees half of it (temp file + rename)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def save_map(app_map: AppMap, project: str) -> Path:
     """
     Write app_map.json and merge the element keys into selectors.json (one section per
@@ -175,7 +182,7 @@ def save_map(app_map: AppMap, project: str) -> Path:
     folder = CONFIG_DIR / project
     folder.mkdir(parents=True, exist_ok=True)
     path = map_path(project)
-    path.write_text(json.dumps(app_map.to_dict(), indent=2) + "\n", encoding="utf-8")
+    _write_atomic(path, json.dumps(app_map.to_dict(), indent=2) + "\n")
     sel_path = folder / "selectors.json"
     try:
         sel = json.loads(sel_path.read_text(encoding="utf-8")) if sel_path.exists() else {}
@@ -200,7 +207,7 @@ def save_map(app_map: AppMap, project: str) -> Path:
             elif k not in merged and v in live:
                 merged[k] = v
         sel[section] = merged
-    sel_path.write_text(json.dumps(sel, indent=2) + "\n", encoding="utf-8")
+    _write_atomic(sel_path, json.dumps(sel, indent=2) + "\n")
     return path
 
 

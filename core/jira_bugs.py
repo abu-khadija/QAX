@@ -445,24 +445,35 @@ class JiraBugFiler:
             self._screen = None
         return self._screen
 
+    UNVERIFIED = "?duplicate-check-failed"
+
     def find_duplicate(self, fp: str) -> str | None:
-        """Key of an OPEN issue already carrying this fingerprint label, else None."""
+        """
+        Key of an OPEN issue already carrying this fingerprint label, else None — or
+        UNVERIFIED when Jira could not be asked (it used to fail OPEN: a rate-limited search
+        meant "no duplicate", and a duplicate ticket was filed). Retries 429/5xx twice.
+        """
         if not (fp and self.configured()):
             return None
-        try:
-            jql = (f'project = "{self.project_key}" AND labels = "{fp}" '
-                   f'AND statusCategory != Done ORDER BY created DESC')
-            r = self.session.post(f"{self.base_url}/rest/api/3/search/jql",
-                                  json={"jql": jql, "maxResults": 1, "fields": ["key"]},
-                                  auth=(self.email, self.token),
-                                  headers={"Accept": "application/json"}, timeout=20)
-            if r.status_code != 200:
-                return None
-            issues = (r.json() or {}).get("issues") or []
-            return issues[0].get("key") if issues else None
-        except Exception as exc:
-            logger.warning("QAX JiraBugFiler: duplicate check failed: %s", exc)
-            return None
+        import time as _t
+        jql = (f'project = "{self.project_key}" AND labels = "{fp}" '
+               f'AND statusCategory != Done ORDER BY created DESC')
+        for attempt in range(3):
+            try:
+                r = self.session.post(f"{self.base_url}/rest/api/3/search/jql",
+                                      json={"jql": jql, "maxResults": 1, "fields": ["key"]},
+                                      auth=(self.email, self.token),
+                                      headers={"Accept": "application/json"}, timeout=20)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("QAX JiraBugFiler: duplicate check failed: %s", exc)
+                r = None
+            if r is not None and r.status_code == 200:
+                issues = (r.json() or {}).get("issues") or []
+                return issues[0].get("key") if issues else None
+            if r is not None and r.status_code not in (429, 500, 502, 503, 504):
+                break
+            _t.sleep(min(2 ** attempt, 4))
+        return self.UNVERIFIED
 
     # ── payload ──────────────────────────────────────────────────────────────
 
@@ -509,6 +520,14 @@ class JiraBugFiler:
             payload, dropped = self.build_payload(bug, screen)
             res["dropped_fields"] = dropped
             dup = self.find_duplicate(bug.get("fingerprint", ""))
+            if dup == self.UNVERIFIED:
+                if self.dry_run:
+                    res.update(success=True, jira_key=f"DRY-RUN-BUG-{bid}", preview=payload,
+                               note="the duplicate check could not reach Jira")
+                else:
+                    res["error"] = ("Jira's duplicate check could not be completed (rate limit or outage) — "
+                                    "not filed, to avoid a duplicate ticket. Try again later.")
+                return res
             if dup:
                 res.update(success=True, jira_key=dup, duplicate_of=dup)
                 if self.dry_run:

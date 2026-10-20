@@ -147,7 +147,16 @@ _ELEMENTS_JS = r"""(avoid) => {
   const roots = [document];
   for (let i = 0; i < roots.length && roots.length < 200; i++)
     for (const el of roots[i].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
-  const deepAll = (sel) => { let r = []; for (const rt of roots) { try { r = r.concat([...rt.querySelectorAll(sel)]); } catch (e) { return null; } } return r; };
+  // the DOM does not change while it is being read: each query is answered once (a page with
+  // thousands of links made this quadratic — engineering audit 2026-10-20)
+  const _q = new Map();
+  const deepAll = (sel) => {
+    if (_q.has(sel)) return _q.get(sel);
+    let r = [];
+    for (const rt of roots) { try { r = r.concat([...rt.querySelectorAll(sel)]); } catch (e) { r = null; break; } }
+    _q.set(sel, r);
+    return r;
+  };
   const one = (sel) => { const r = deepAll(sel); return !!r && r.length === 1; };
   const q = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const cssPath = (el) => {
@@ -252,7 +261,12 @@ _ELEMENTS_JS = r"""(avoid) => {
       const target = tag === 'input' ? `input[@value='${btnText}']`
         : `${tag === 'a' ? 'a' : (role === 'button' && tag !== 'button' ? '*[@role="button"]' : 'button')}[normalize-space(.)='${btnText}']`;
       const ownText = (x) => [...x.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
-      let anc = e.closest('tr') || e.parentElement;
+      // only a REPEATED control (a table row, or the same button on 3+ cards) is tied to its
+      // title — a dialog's submit that repeats its opener ("Add System" ×2, Beszel) keeps its
+      // established name (add_system_button_2), or existing cases break
+      const twins = (deepAll(tag === 'input' ? 'input' : tag) || []).filter(x =>
+        (tag === 'input' ? (x.getAttribute('value') || '') : norm(x)) === btnText).length;
+      let anc = (e.closest('tr') || twins >= 3) ? (e.closest('tr') || e.parentElement) : null;
       for (let depth = 0; anc && anc !== document.body && depth < 7 && !sel; depth++, anc = anc.parentElement) {
         const tnode = [...anc.querySelectorAll('*')].filter(x => !x.contains(e) && !e.contains(x))
           .find(x => { const t = ownText(x); return t && t.length >= 2 && t.length <= 50 && !t.includes("'") && t !== btnText; });

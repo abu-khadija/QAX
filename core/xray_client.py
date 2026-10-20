@@ -121,20 +121,23 @@ class XrayClient:
         """
         if self._auth_token:
             return self._auth_token
+        if getattr(self, "_auth_error", None):
+            # authentication already failed in this run: do not wait 30 s per remaining case
+            raise self._auth_error
 
         logger.debug("Authenticating with Xray Cloud...")
 
-        response = requests.post(
-            XRAY_AUTH_URL,
-            json={
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            },
-            headers={"Content-Type": "application/json"},
-            timeout=30,
-        )
-
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                XRAY_AUTH_URL,
+                json={"client_id": self.client_id, "client_secret": self.client_secret},
+                headers={"Content-Type": "application/json"},
+                timeout=30,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            self._auth_error = exc
+            raise
 
         # Xray returns the token as a quoted string in the response body
         token = response.text.strip().strip('"')

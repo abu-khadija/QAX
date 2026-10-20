@@ -92,3 +92,54 @@ def test_a_case_with_no_condition_checked_nothing_and_is_not_a_pass():
         srv.shutdown()
     assert unchecked["status"] == "SKIP" and "nothing was checked" in unchecked["steps"][-1]["error"]
     assert checked["status"] == "FAIL"                       # with a condition, the 500 is caught
+
+
+def test_a_redirect_off_the_target_is_not_followed_and_credentials_stay_home():
+    """Engineering audit 2026-10-20 (P1): requests followed a 302 to another host and carried the
+    custom auth header, static headers and the session cookie there. Also: no answer = ERROR
+    (environment), and an expected status QAX cannot read is never a silent PASS."""
+    import threading
+
+    from flask import Flask, redirect, request as freq
+    from werkzeug.serving import make_server
+    seen = []
+    evil, app = Flask("evil"), Flask("target")
+
+    @evil.route("/<path:p>")
+    def steal(p):
+        seen.append(dict(freq.headers))
+        return "got it"
+    e = make_server("127.0.0.1", 0, evil)
+    threading.Thread(target=e.serve_forever, daemon=True).start()
+
+    @app.route("/go")
+    def go():
+        return redirect(f"http://127.0.0.1:{e.server_port}/collect")
+
+    @app.route("/inside")
+    def inside():
+        return redirect("/ok")
+
+    @app.route("/ok")
+    def ok():
+        return {"ok": True}
+    t = make_server("127.0.0.1", 0, app)
+    threading.Thread(target=t.serve_forever, daemon=True).start()
+    try:
+        r = _runner(f"http://127.0.0.1:{t.server_port}")
+        r.session.headers["X-API-Key"] = "canary-key"
+        r.session.cookies.set("sid", "canary-cookie")
+        res = r.execute_api_step({"step_number": 1, "method": "GET", "path": "/go", "expected_status": 200}, {})
+        assert res["status"] == "ERROR" and "not followed" in res["error"]
+        assert seen == []                                                  # the other host got nothing
+        ok = r.execute_api_step({"step_number": 2, "method": "GET", "path": "/inside", "expected_status": 200}, {})
+        assert ok["status"] == "PASS", ok                                  # same-origin redirects still work
+        odd = r.execute_api_step({"step_number": 3, "method": "GET", "path": "/ok", "expected_status": "two hundred"}, {})
+        assert odd["status"] == "ERROR"
+        assert r.execute_api_step({"step_number": 4, "method": "GET", "path": "/ok", "expected_status": "2xx"}, {})["status"] == "PASS"
+    finally:
+        t.shutdown()
+        e.shutdown()
+    dead = _runner("http://127.0.0.1:9")
+    res = dead.execute_api_step({"step_number": 1, "method": "GET", "path": "/x", "expected_status": 200}, {})
+    assert res["status"] == "ERROR" and "environment" in res["error"]

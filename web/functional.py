@@ -128,7 +128,8 @@ def functional_analyze():
             understanding["notes"].append(f"Could not read the app: {app_map.error}")
             app_map = None
         else:
-            save_map(app_map, project)
+            with _BROWSER_LOCK:       # a browser run may be reading selectors.json
+                save_map(app_map, project)
             understanding.update(
                 pages=[{"path": p["path"], "elements": len(p.get("elements") or {})} for p in app_map.pages],
                 login_ok=app_map.login_ok, skipped_links=app_map.skipped_links,
@@ -310,7 +311,8 @@ def map_app_route():
                                  storage_state=None if data.get("username") else state_for(project))
     if result.error:
         return jsonify({"error": result.error}), 502
-    save_map(result, project)
+    with _BROWSER_LOCK:
+        save_map(result, project)
     return jsonify({"project": project, "pages": [
         {"path": p["path"], "elements": len(p.get("elements") or {})} for p in result.pages],
         "login_ok": result.login_ok, "skipped_links": result.skipped_links,

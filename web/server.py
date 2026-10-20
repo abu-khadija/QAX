@@ -17,6 +17,7 @@ then open http://127.0.0.1:8900
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import tempfile
@@ -26,6 +27,8 @@ import time
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from services.progress import ProgressReporter
+
+logger = logging.getLogger("qax.web")
 
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app = Flask(__name__, static_folder=_STATIC, static_url_path="")
@@ -186,7 +189,8 @@ def _save_run(payload: dict) -> str | None:
         from urllib.parse import urlparse
         os.makedirs(_RUNS_DIR, exist_ok=True)
         host = (urlparse(payload.get("url", "")).netloc or "app").replace(":", "_").replace(".", "-")
-        rid = time.strftime("%Y%m%dT%H%M%S") + "_" + host
+        from datetime import datetime as _dt
+        rid = _dt.now().strftime("%Y%m%dT%H%M%S%f") + "_" + host     # two scans in one second no longer collide
         payload = dict(payload, run_id=rid, scanned_at=time.strftime("%Y-%m-%d %H:%M"))
         with open(os.path.join(_RUNS_DIR, rid + ".json"), "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False)
@@ -271,14 +275,26 @@ def files(p):
     return send_from_directory(os.path.join(os.getcwd(), "output"), p)
 
 
+class ScanCancelled(BaseException):
+    """The viewer left: stop the scan at its next progress point (BaseException so the
+    engine's `except Exception` guards do not swallow it)."""
+
+
+# One scan at a time: scans hit the target hard, and the AI-usage counter is per process.
+_SCAN_LOCK = threading.Lock()
+
+
 class _QueueProgress(ProgressReporter):
     """Tees every engine progress event into a queue for live streaming."""
 
     def __init__(self, q: "queue.Queue") -> None:
         super().__init__()
         self._q = q
+        self.cancelled = False
 
     def emit(self, step: str, status: str = "info", detail: str = "") -> None:
+        if self.cancelled:
+            raise ScanCancelled()
         super().emit(step, status, detail)
         try:
             self._q.put({"type": "progress", "step": step, "status": status, "detail": detail})
@@ -364,7 +380,21 @@ def _supply_chain_leads(repo: str) -> list:
 
 def _run_scan(url: str, repo: str, auth, *, read_only: bool = False, spec_url: str | None = None,
               extras: dict | None = None, progress=None) -> dict:
-    """Run a quick scan and return the UI payload, or {'error': ...}."""
+    """Run a quick scan and return the UI payload, or {'error': ...}. The empty temporary
+    folder used when no repository was given is removed afterwards (they used to pile up)."""
+    try:
+        return _run_scan_inner(url, repo, auth, read_only=read_only, spec_url=spec_url,
+                               extras=extras, progress=progress)
+    finally:
+        if repo and os.path.basename(repo.rstrip("/")).startswith("qax_web_") \
+                and os.path.dirname(os.path.abspath(repo)) == os.path.abspath(tempfile.gettempdir()):
+            import shutil
+            shutil.rmtree(repo, ignore_errors=True)
+
+
+def _run_scan_inner(url: str, repo: str, auth, *, read_only: bool = False, spec_url: str | None = None,
+                    extras: dict | None = None, progress=None) -> dict:
+    """The scan itself (see _run_scan)."""
     from services import scorecard, usage
     from services.context import QAXContext
     from services.orchestrator_service import OrchestratorService
@@ -456,7 +486,12 @@ def scan():
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
         return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
-    payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, extras=extras)
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A scan is already running — wait for it to finish."}), 409
+    try:
+        payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, extras=extras)
+    finally:
+        _SCAN_LOCK.release()
     return (jsonify(payload), 502) if payload.get("error") else jsonify(payload)
 
 
@@ -547,15 +582,14 @@ def _execute_plan(tests: list, url: str, read_only: bool, engine: str = "api") -
                                 "reason": "no steps"})
             elif read_only:
                 not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
-                                "reason": "read-only: the browser engine clicks and submits forms"})
+                                "reason": "read-only is on: the browser engine clicks and submits forms — untick read-only to run it (staging only)"})
             else:
                 runnable.append(tc)
             continue
         steps = tc.get("api_steps") or []
         if not steps:
             not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
-                            "reason": "no api_steps — UI-shaped case; run it with "
-                                      "`python main.py execute --file` (browser)"})
+                            "reason": "browser case (no API steps) — choose the Browser engine to run it"})
             continue
         writes = [str(s.get("method") or "GET").upper() for s in steps
                   if str(s.get("method") or "GET").upper() not in _SAFE_METHODS]
@@ -785,31 +819,40 @@ def scan_stream():
         return jsonify({"error": "Please enter the URL of your running app."}), 400
     if not _target_authorized():
         return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A scan is already running — wait for it to finish."}), 409
     q: "queue.Queue" = queue.Queue()
+    prog = _QueueProgress(q)
 
     def work():
         try:
-            payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, extras=extras, progress=_QueueProgress(q))
+            payload = _run_scan(url, repo, auth, read_only=read_only, spec_url=spec_url, extras=extras, progress=prog)
             q.put({"type": "error", "error": payload["error"]} if payload.get("error")
                   else {"type": "result", "payload": payload})
+        except ScanCancelled:
+            logger.info("QAX: scan of %s stopped — the viewer left", url)
         except Exception as exc:
             q.put({"type": "error", "error": str(exc)})
         finally:
+            _SCAN_LOCK.release()
             q.put({"type": "done"})
 
     threading.Thread(target=work, daemon=True).start()
 
     def gen():
-        yield "retry: 3000\n\n"
-        while True:
-            try:
-                ev = q.get(timeout=20)
-            except queue.Empty:
-                yield ": keepalive\n\n"
-                continue
-            yield "data: " + json.dumps(ev) + "\n\n"
-            if ev.get("type") == "done":
-                break
+        # no "retry:" — a reconnecting EventSource would start a NEW scan
+        try:
+            while True:
+                try:
+                    ev = q.get(timeout=20)
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                yield "data: " + json.dumps(ev) + "\n\n"
+                if ev.get("type") == "done":
+                    break
+        finally:
+            prog.cancelled = True        # the viewer left (or the scan ended): stop sending to the target
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})

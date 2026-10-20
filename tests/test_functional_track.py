@@ -416,7 +416,7 @@ def test_execute_preview_lists_what_runs_and_what_does_not(client):
     plan = r.get_json()["plan"]
     assert [x["title"] for x in plan["runnable"]] == ["list items"]
     reasons = {n["title"]: n["reason"] for n in plan["not_run"]}
-    assert "read-only" in reasons["create item"] and "no api_steps" in reasons["ui only"]
+    assert "read-only" in reasons["create item"] and "Browser engine" in reasons["ui only"]
 
 
 def test_execute_requires_authorization_and_a_url(client):
@@ -487,7 +487,7 @@ def test_browser_engine_never_runs_in_read_only_and_needs_steps(client):
                                              "preview": True, "read_only": True}).get_json()["plan"]
     assert plan["engine"] == "ui" and plan["runnable"] == []
     assert {n["title"]: n["reason"] for n in plan["not_run"]} == {
-        "ui": "read-only: the browser engine clicks and submits forms", "empty": "no steps"}
+        "ui": "read-only is on: the browser engine clicks and submits forms — untick read-only to run it (staging only)", "empty": "no steps"}
     plan = client.post("/api/execute", json={"tests": cases, "url": "http://app.local", "engine": "ui",
                                              "preview": True, "read_only": False}).get_json()["plan"]
     assert [x["title"] for x in plan["runnable"]] == ["ui"]
@@ -1058,3 +1058,10 @@ def test_the_project_overview_shows_only_measured_data(client, tmp_path, monkeyp
     assert [r["verdict"] for r in cards["requirements"]["rows"]] == ["PASSED", "FAILED"]
     assert cards["trend"]["points"] == [100, 50]
     assert client.get("/api/overview").status_code == 400
+
+
+def test_one_unreadable_run_file_does_not_hide_the_history(tmp_path):
+    from core.run_history import history, save_run
+    save_run("p", "http://a", [{"test_case_id": "T", "status": "PASS"}], root=tmp_path)
+    (tmp_path / "functional_runs" / "p" / "29991231T000000000000Z.json").write_text("{half-writ")
+    assert [h["verdicts"] for h in history("p", root=tmp_path)] == [{"T": "PASS"}]

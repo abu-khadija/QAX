@@ -41,6 +41,10 @@ logger = logging.getLogger(__name__)
 _MISSING = object()
 
 
+
+class _OffOriginRedirect(Exception):
+    """A response redirected off the approved target origin (not followed)."""
+
 class APIRunner:
     """
     HTTP-based execution runner for API-mode test case execution.
@@ -276,7 +280,7 @@ class APIRunner:
             dict: Updated result dict.
         """
         url  = self._resolve_url(value)
-        resp = self.session.get(url, timeout=self.timeout)
+        resp = self._send(self.session, "GET", url, timeout=self.timeout)
         result["response_code"] = resp.status_code
         result["actual_result"] = f"GET {url} → {resp.status_code}"
 
@@ -321,7 +325,7 @@ class APIRunner:
             dict: Updated result dict.
         """
         url  = self._resolve_url(value) if value else self.base_url
-        resp = self.session.post(url, timeout=self.timeout)
+        resp = self._send(self.session, "POST", url, timeout=self.timeout)
         result["response_code"] = resp.status_code
         result["actual_result"] = f"POST {url} → {resp.status_code}"
 
@@ -355,6 +359,26 @@ class APIRunner:
         if value.startswith("http://") or value.startswith("https://"):
             return value
         return f"{self.base_url}{value}" if self.base_url else value
+
+    def _send(self, sender, method: str, url: str, **kw):
+        """
+        One HTTP call that never follows a redirect off the approved origin: redirects are
+        followed by hand (max 5), each hop checked — requests would otherwise carry custom
+        auth headers, CSRF/tenant headers and the session cookie to whatever host a 302 names.
+        """
+        from urllib.parse import urljoin
+        resp = sender.request(method, url, allow_redirects=False, **kw)
+        for _ in range(5):
+            if resp.status_code not in (301, 302, 303, 307, 308) or not resp.headers.get("Location"):
+                return resp
+            nxt = urljoin(resp.url or url, resp.headers["Location"])
+            if not self._is_approved_origin(nxt):
+                raise _OffOriginRedirect(f"the app redirected to {nxt[:120]} — not followed (it is not the "
+                                         "approved target; credentials stay on the target origin)")
+            if resp.status_code in (301, 302, 303) and method.upper() != "HEAD":
+                method, kw = "GET", {k: v for k, v in kw.items() if k not in ("json", "data")}
+            resp = sender.request(method, nxt, allow_redirects=False, **kw)
+        return resp
 
     def _is_approved_origin(self, url: str) -> bool:
         """
@@ -504,15 +528,17 @@ class APIRunner:
 
         t0 = time.time()
         try:
-            resp = sender.request(
-                method, full_url,
-                json=body if isinstance(body, (dict, list)) else None,
-                headers=headers, timeout=self.timeout,
-            )
+            resp = self._send(sender, method, full_url,
+                              json=body if isinstance(body, (dict, list)) else None,
+                              headers=headers, timeout=self.timeout)
             result["response_code"] = resp.status_code
             result["actual_result"] = f"{method} {path} → {resp.status_code}"
 
-            if expected is not None and not self._status_matches(expected, resp.status_code):
+            if expected is not None and self._status_matches(expected, resp.status_code) is None:
+                # an expectation QAX cannot read checked nothing: a test problem, never a PASS
+                result["status"] = "ERROR"
+                result["error"] = f"expected_status {expected!r} is not a status code (e.g. 200, [403, 404], \"2xx\")"
+            elif expected is not None and not self._status_matches(expected, resp.status_code):
                 result["status"] = "FAIL"
                 result["error"]  = (f"Expected status {expected}, got "
                                     f"{resp.status_code} — {resp.text[:150]}")
@@ -531,9 +557,16 @@ class APIRunner:
                 # a record's owner equals the ATTACKER's own id ({{my_id}}).
                 if step.get("expect_json"):
                     self._assert_body(result, data, self._render(step["expect_json"], variables))
+        except _OffOriginRedirect as exc:
+            result["status"] = "ERROR"
+            result["error"] = str(exc)
         except Exception as exc:
-            result["status"] = "FAIL"
-            result["error"]  = str(exc)
+            # no answer at all (timeout, refused connection, DNS) is the ENVIRONMENT, not a verdict
+            # about the app: ERROR — a FAIL here became a false "regression" in run history
+            import requests as _rq
+            env = isinstance(exc, (_rq.exceptions.ConnectionError, _rq.exceptions.Timeout))
+            result["status"] = "ERROR" if env else "FAIL"
+            result["error"]  = (("no answer from the app (environment): " if env else "") + str(exc))[:300]
 
         # CONTROL step: "is this id listed in the body?" — recorded, never asserted. Lets a template tell a
         # private object from one that is shared by design (the other user can list it).
@@ -580,12 +613,17 @@ class APIRunner:
         single code or a LIST of acceptable codes — needed for security tests where
         the secure response can be any of several (403 OR 404 for a blocked resource).
         """
+        def one(x):
+            t = str(x).strip().lower()
+            if len(t) == 3 and t[0].isdigit() and t[1:] == "xx":          # "2xx", "4xx"
+                return actual // 100 == int(t[0])
+            return actual == int(t)
         try:
             if isinstance(expected, (list, tuple, set)):
-                return actual in {int(x) for x in expected}
-            return actual == int(expected)
+                return any(one(x) for x in expected)
+            return one(expected)
         except (TypeError, ValueError):
-            return True
+            return None          # not understood — the caller reports it, never a silent PASS
 
     @staticmethod
     def _assert_body(result: dict, data, expect: dict) -> None:

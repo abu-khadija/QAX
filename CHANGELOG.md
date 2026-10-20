@@ -61,6 +61,8 @@ Every scan written with `--out` records the exact version and commit that produc
 - `pyproject.toml` (`qax`, `qax-web` commands).
 
 ### Security
+- API runner: redirects are followed by hand and never off the target origin — requests used to carry custom
+  auth headers, static headers and the session cookie to whatever host a 302 named.
 - **Origin guard (P0):** a test case — possibly AI-written from prompt-injected text — could take the
   browser to another site or a cloud-metadata address and type a `{{env:QAX_VAR_*}}` secret there.
   Navigation and secret typing now stay on the app's origin (+ `QAX_ALLOWED_ORIGINS`); redirects off the
@@ -74,6 +76,23 @@ Every scan written with `--out` records the exact version and commit that produc
   `/files` serves images only, and the server will not listen beyond loopback without a token.
 
 ### Fixed
+- A rate-limited login (an app answering 200 + "Too many attempts") is caught when the answer arrives — the
+  message was gone by the end of the case and the case FAILED instead of ERROR (benchmark, Healthchecks).
+- A browser that crashes mid-batch is relaunched; if it cannot be, the remaining cases are ERROR (environment) —
+  they used to FAIL and could be filed as bugs. A crashed parallel worker no longer discards the others' results.
+- API runner: no answer (timeout, refused, DNS) is ERROR, not FAIL; an `expected_status` QAX cannot read is ERROR
+  (it used to PASS); "2xx"-style expectations work.
+- One scan at a time (409 otherwise); a streamed scan stops when its viewer leaves; scan temp folders are removed.
+- Jira's duplicate check fails closed (retries 429/5xx; never files when it could not check); Xray stops
+  re-authenticating for every case after a failure.
+- App maps, selectors and run records are written atomically; the app map is saved under the browser lock; two
+  scans in the same second no longer overwrite each other; one unreadable run file no longer hides the history.
+- A failed UI tour or visual comparison is listed under "not tested" instead of looking like a clean result.
+- Reading a page: each query answered once per read (quadratic on large pages); a dialog's submit that repeats its
+  opener keeps its established name (a too-broad card rule renamed it — caught by the benchmark on Beszel).
+- UI: scan results say "not fully tested (N ran in part)" instead of "could not run"; "Generated tests run";
+  errors scroll into view and clear when fixed; empty-URL message; loading browser cases picks the browser engine;
+  past scans work from the keyboard; progress no longer shows a temp path.
 - Reading an app: a crash when a form contains `<input name="id">` (DOM clobbering, eShopOnWeb); buttons
   repeated on every table row / product card are tied to their row's title instead of their position
   (PetClinic Angular, eShopOnWeb); numeric row-index ids are not trusted; image buttons without text are read;

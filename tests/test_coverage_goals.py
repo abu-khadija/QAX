@@ -211,7 +211,7 @@ class _CaptureSession:
         self.headers = {}
         self.last_headers = None
 
-    def request(self, method, url, json=None, headers=None, timeout=None):
+    def request(self, method, url, json=None, headers=None, timeout=None, **kw):
         from unittest.mock import MagicMock
         self.last_headers = headers or {}
         return MagicMock(status_code=200, text="{}", json=lambda: {})
@@ -275,7 +275,7 @@ def test_setup_failed_coverage_test_not_counted_as_failed():
 
     class _FailFirst:
         headers = {}
-        def request(self, method, url, json=None, headers=None, timeout=None):
+        def request(self, method, url, json=None, headers=None, timeout=None, **kw):
             from unittest.mock import MagicMock
             # the create step (POST) fails; nothing else should run after a FAIL
             return MagicMock(status_code=403, text="forbidden", json=lambda: {})

@@ -1,5 +1,5 @@
 {
-  "_comment": "Functional QA on a real SPA: Beszel hub v0.21.0 (MIT, React + Radix, PocketBase backend; its own UI), run locally. Selector keys from `main.py map --explore-actions`; dialog/menu items named live (exact names); row actions scoped with a Playwright selector. Includes create / edit / pause / delete (confirm) / logout. Credentials: QAX_VAR_BZ_USER / QAX_VAR_BZ_PASSWORD.",
+  "_comment": "Functional QA on a real SPA: Beszel hub v0.21.0 (MIT, React + Radix, PocketBase backend; its own UI), run locally. Selector keys from `main.py map --explore-actions`; dialog/menu items named live (exact names); row actions scoped with a Playwright selector. Includes create / edit / pause / delete (confirm) / logout. Credentials: QAX_VAR_BZ_USER / QAX_VAR_BZ_PASSWORD. 2026-10-20: the systems table renders only visible rows \u2014 cases filter by name before asserting, and delete what they create (cleanup_steps); 36 leftover systems from earlier runs had pushed the renamed row out of the DOM.",
   "test_cases": [
     {
       "test_case_id": "BZ-001",
@@ -128,11 +128,40 @@
           "step_number": 8
         },
         {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-add-{{unique}}",
+          "step_number": 9
+        },
+        {
           "playwright_action": "assert",
           "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "qax-add-{{unique}}",
-          "step_number": 9
+          "step_number": 10
+        }
+      ],
+      "cleanup_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/"
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-add-{{unique}}"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-add-{{unique}}') >> button:has-text('Open menu')"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "delete_menu_item"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "continue_button"
         }
       ]
     },
@@ -188,45 +217,86 @@
           "step_number": 8
         },
         {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-edit-{{unique}}",
+          "step_number": 9
+        },
+        {
           "playwright_action": "assert",
           "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "qax-edit-{{unique}}",
-          "step_number": 9
-        },
-        {
-          "playwright_action": "click",
-          "selector_key": "tr:has-text('qax-edit-{{unique}}') >> button:has-text('Open menu')",
           "step_number": 10
         },
         {
           "playwright_action": "click",
-          "selector_key": "edit_menu_item",
+          "selector_key": "tr:has-text('qax-edit-{{unique}}') >> button:has-text('Open menu')",
           "step_number": 11
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "edit_menu_item",
+          "step_number": 12
         },
         {
           "playwright_action": "fill",
           "selector_key": "name",
           "value": "qax-renamed-{{unique}}",
-          "step_number": 12
+          "step_number": 13
         },
         {
           "playwright_action": "click",
           "selector_key": "form:has(#name) button:not([type])",
-          "step_number": 13
+          "step_number": 14
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-renamed-{{unique}}",
+          "step_number": 15
         },
         {
           "playwright_action": "assert",
           "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "qax-renamed-{{unique}}",
-          "step_number": 14
+          "step_number": 16
         },
         {
-          "step_number": 15,
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-edit-{{unique}}",
+          "step_number": 17
+        },
+        {
+          "step_number": 18,
           "playwright_action": "assert",
           "selector_key": "text=qax-edit-{{unique}}",
           "assertion_type": "not_visible"
+        }
+      ],
+      "cleanup_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/"
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-renamed-{{unique}}"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-renamed-{{unique}}') >> button:has-text('Open menu')"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "delete_menu_item"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "continue_button"
         }
       ]
     },
@@ -282,32 +352,61 @@
           "step_number": 8
         },
         {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-pause-{{unique}}",
+          "step_number": 9
+        },
+        {
           "playwright_action": "assert",
           "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "qax-pause-{{unique}}",
-          "step_number": 9
-        },
-        {
-          "playwright_action": "click",
-          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')",
           "step_number": 10
         },
         {
           "playwright_action": "click",
-          "selector_key": "pause_menu_item",
+          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')",
           "step_number": 11
         },
         {
           "playwright_action": "click",
-          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')",
+          "selector_key": "pause_menu_item",
           "step_number": 12
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')",
+          "step_number": 13
         },
         {
           "playwright_action": "assert",
           "selector_key": "xpath=//*[@role='menuitem'][normalize-space(.)='Resume']",
           "assertion_type": "visible",
-          "step_number": 13
+          "step_number": 14
+        }
+      ],
+      "cleanup_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/"
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-pause-{{unique}}"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has-text('qax-pause-{{unique}}') >> button:has-text('Open menu')"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "delete_menu_item"
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "continue_button"
         }
       ]
     },
@@ -363,32 +462,38 @@
           "step_number": 8
         },
         {
+          "playwright_action": "fill",
+          "selector_key": "filter",
+          "value": "qax-del-{{unique}}",
+          "step_number": 9
+        },
+        {
           "playwright_action": "assert",
           "selector_key": "page",
           "assertion_type": "text",
           "assertion_value": "qax-del-{{unique}}",
-          "step_number": 9
-        },
-        {
-          "playwright_action": "click",
-          "selector_key": "tr:has-text('qax-del-{{unique}}') >> button:has-text('Open menu')",
           "step_number": 10
         },
         {
           "playwright_action": "click",
-          "selector_key": "delete_menu_item",
+          "selector_key": "tr:has-text('qax-del-{{unique}}') >> button:has-text('Open menu')",
           "step_number": 11
         },
         {
           "playwright_action": "click",
-          "selector_key": "continue_button",
+          "selector_key": "delete_menu_item",
           "step_number": 12
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "continue_button",
+          "step_number": 13
         },
         {
           "playwright_action": "assert",
           "selector_key": "text=qax-del-{{unique}}",
           "assertion_type": "not_visible",
-          "step_number": 13
+          "step_number": 14
         }
       ]
     },

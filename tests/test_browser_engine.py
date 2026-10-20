@@ -942,3 +942,39 @@ def test_a_trace_of_a_case_that_types_a_secret_is_not_kept(ui_app, monkeypatch):
     assert "trace" not in r["TR"] and "secret" in r["TR"]["trace_note"]
     import os as _os
     assert r["TP"].get("trace") and oct(_os.stat(r["TP"]["trace"]).st_mode & 0o777) == "0o600"
+
+
+def test_a_dialog_submit_that_repeats_its_opener_keeps_its_established_name(ui_app):
+    """Benchmark 2026-10-20: tying every repeated button to a title renamed Beszel's dialog submit
+    (add_system_button_2) and broke its cases. Only rows and 3+ cards are tied to a title."""
+    from playwright.async_api import async_playwright
+
+    from core.dom_analyzer import label_page
+
+    async def read():
+        async with async_playwright() as p:
+            b = await p.chromium.launch()
+            pg = await b.new_page()
+            await pg.goto(f"http://127.0.0.1:{ui_app}/dialog")
+            await pg.click("text=Add item")
+            els, _ = await label_page(pg)
+            await b.close()
+            return els
+    els = asyncio.run(read())
+    assert "add_item_button" in els and "add_item_button_2" in els, els
+
+
+def test_a_rate_limited_login_is_an_error_even_when_the_message_is_gone_by_the_end(ui_app):
+    """Benchmark 2026-10-20 (Healthchecks): the app answered a login with 200 + "Too many attempts",
+    the case moved on to another page, and the failure later on was reported as FAIL (a false bug).
+    The answer is now checked when it arrives."""
+    case = {"test_case_id": "RL", "title": "rate-limited login", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "#username", "value": "throttled"},
+        {"step_number": 3, "playwright_action": "fill", "selector_key": "#password", "value": "x"},
+        {"step_number": 4, "playwright_action": "click", "selector_key": "#login-btn"},
+        {"step_number": 5, "playwright_action": "navigate", "value": "/shop"},
+        {"step_number": 6, "playwright_action": "assert", "selector_key": "page", "assertion_type": "contains",
+         "assertion_value": "Welcome, demo"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "ERROR" and r.get("throttled"), (r["status"], r.get("error"))

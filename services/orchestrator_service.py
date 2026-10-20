@@ -131,7 +131,8 @@ class OrchestratorService:
             # an empty model so live grounding, the probes and the UI tour can work
             # off the live app. Only a deep code-generation pass truly needs source.
             prog.emit("orchestrate", "info",
-                      f"no code model ({model.error or 'no source'}) — scanning the live app only")
+                      ("no source code to read" if "No source files" in str(model.error or "No source files")
+                       else f"the source could not be read ({model.error})") + " — testing the running app only")
             model = AppModel(root=repo_path)
 
         # 1b) Ground the endpoints in the RUNNING app (rule #1: the running app is
@@ -222,6 +223,9 @@ class OrchestratorService:
                     screenshot_dir=shot_dir, progress=prog)
                 if tour_result.error:
                     prog.emit("orchestrate", "info", f"UI tour skipped: {tour_result.error}")
+                    # a tour that could not run is a gap, not a clean result
+                    ro_skips.append({"probe": "ui-tour", "kind": "error",
+                                     "reason": f"the browser tour could not run: {str(tour_result.error)[:160]}"})
                 else:
                     ui_confirmed = findings_from_tour(tour_result)
                     ui_screens = [s for s in (getattr(tour_result, "screens", []) or [])
@@ -232,7 +236,9 @@ class OrchestratorService:
                     # Visual regression against a saved baseline (first run seeds it).
                     if visual_baseline:
                         try:
-                            from services.visual_regression import visual_findings
+                            from services.visual_regression import compare_images, visual_findings
+                            if compare_images("", "").get("error", "").startswith("No module named"):
+                                raise RuntimeError("Pillow is not installed (pip install 'qax[visual]')")
                             vf = visual_findings(visual_baseline, shot_dir, diff_dir=f"{shot_dir}/diff")
                             ui_confirmed += vf
                             prog.emit("orchestrate", "info",
@@ -240,8 +246,12 @@ class OrchestratorService:
                                       if vf else "visual baseline established / no change")
                         except Exception as exc:
                             logger.warning("visual regression failed: %s", exc)
+                            ro_skips.append({"probe": "visual-regression", "kind": "error",
+                                             "reason": f"not compared: {str(exc)[:160]}"})
             except Exception as exc:
                 logger.warning("UI tour failed: %s", exc)
+                ro_skips.append({"probe": "ui-tour", "kind": "error",
+                                 "reason": f"the browser tour crashed: {str(exc)[:160]}"})
 
         # 4) Generate: functional (per router) + adversarial (red-team) — deep only.
         tests: list[dict] = []

@@ -6,7 +6,7 @@
 # The full set (web UI, test generation and execution extras) is requirements.txt.
 anthropic>=0.40.0
 pydantic>=2.0.0
-python-dotenv>=1.0.0
+python-dotenv>=1.2.4
 jsonschema>=4.23.0
-requests>=2.31.0
+requests>=2.34.2
 flask>=3.0.0

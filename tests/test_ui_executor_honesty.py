@@ -164,3 +164,29 @@ def test_pipeline_passes_its_dry_run_to_the_ui_executor(monkeypatch):
     QAXPipeline(dry_run=True, exec_mode="ui")._run_ui_execution([])
     QAXPipeline(dry_run=False, exec_mode="ui")._run_ui_execution([])
     assert seen == [True, False]
+
+
+def test_a_browser_that_dies_mid_batch_is_relaunched_or_the_rest_is_error_never_fail():
+    """Engineering audit 2026-10-20 (P1): after a crash every remaining case FAILED — and FAILs
+    can be filed as Jira bugs. Relaunch the browser; if that fails, the rest is ERROR."""
+    from execution.action_mapper import _is_browser_gone
+    assert _is_browser_gone(RuntimeError("Target page, context or browser has been closed"))
+    assert not _is_browser_gone(RuntimeError("Timeout 15000ms exceeded"))
+
+    class _Dead(_Runner):
+        async def new_session(self):
+            return False
+
+        async def ensure_alive(self):
+            return False
+    ex = _executor(["PASS"] * 10)
+    cases = [dict(_case(1), test_case_id=f"TC-{i}") for i in range(3)]
+    batch = asyncio.run(ex.execute_batch(cases, _Dead()))
+    assert [r["status"] for r in batch["results"]] == ["PASS", "ERROR", "ERROR"]
+    assert batch["failed"] == 0 and "could not be restarted" in batch["results"][1]["error"]
+
+    class _Revived(_Dead):
+        async def ensure_alive(self):
+            return True
+    batch = asyncio.run(_executor(["PASS"] * 10).execute_batch(cases, _Revived()))
+    assert [r["status"] for r in batch["results"]] == ["PASS", "PASS", "PASS"]

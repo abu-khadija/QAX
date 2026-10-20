@@ -129,6 +129,7 @@ class PlaywrightRunner:
 
         browser_type = (browser_type or os.getenv("QAX_BROWSER", "") or "chromium").strip().lower()
         self.browser_type = browser_type
+        self._headless = headless
         try:
             self._playwright = await async_playwright().start()
 
@@ -219,10 +220,23 @@ class PlaywrightRunner:
         self.context.on("request", _on_request)
         self._throttled = 0
 
+        async def _rate_limit_page(resp):
+            # Healthchecks answers a submitted login with 200 + "Too many attempts" — the message
+            # is gone once the case moves on, so it is caught here, when the answer arrives
+            try:
+                from execution.test_executor import TestExecutor
+                if TestExecutor._THROTTLE_TEXT.search((await resp.text())[:20000]):
+                    self._throttled += 1
+            except Exception:  # noqa: BLE001
+                pass
+
         def _on_response(resp):
             try:
                 if resp.status == 429:
                     self._throttled += 1
+                elif resp.request.method == "POST" and resp.request.resource_type in ("document", "xhr", "fetch"):
+                    import asyncio as _a
+                    _a.ensure_future(_rate_limit_page(resp))
             except Exception:  # noqa: BLE001
                 pass
         self.context.on("response", _on_response)
@@ -369,6 +383,30 @@ class PlaywrightRunner:
         """Return and clear the write requests (method/host/path) sent since the last call."""
         out, self._writes = list(getattr(self, "_writes", []) or []), []
         return out
+
+    async def ensure_alive(self) -> bool:
+        """
+        The browser crashed or was closed mid-batch: launch it again so the remaining cases
+        still run (they used to all FAIL — and could be filed as bugs). Returns True when a
+        working page exists. Never raises.
+        """
+        try:
+            if self.browser is not None and self.browser.is_connected() and self.page is not None \
+                    and not self.page.is_closed():
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        logger.warning("QAX: the browser is gone — launching it again")
+        try:
+            await self.teardown()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await self.setup(headless=getattr(self, "_headless", True), browser_type=getattr(self, "browser_type", ""))
+            return self.page is not None
+        except Exception as e:  # noqa: BLE001
+            logger.error("QAX: could not relaunch the browser: %s", e)
+            return False
 
     async def new_session(self) -> bool:
         """

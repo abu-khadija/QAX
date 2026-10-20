@@ -133,3 +133,38 @@ Other runs this day:
   that the Playwright 1.44 base image ships **Python 3.10** (QAX needs 3.11+). The Dockerfile now uses
   python:3.12-slim with Chromium installed into it: rebuilt, `doctor` reports Python 3.12, and the demo cases run
   in a real browser INSIDE the container (mobile device) with the true verdicts. `docker compose config` validates.
+
+## 2026-10-20 (evening) — the benchmark on every app, scored against truth written before the run
+
+`make bench-functional` (evals/functional_bench.py; manifest evals/data/functional_bench.json; all apps start
+with `~/Downloads/qax-corpus/start-all.sh`, logins from the local `~/Downloads/qax-corpus/.bench.env`, never
+committed). Each app run twice (Beszel three times) on the same versions. Raw JSON: output/bench/.
+
+| App | Cases | Correct | Known defects detected | False failures | Flips between runs | s/case |
+|---|---|---|---|---|---|---|
+| ui-demo (planted bug) | 5 | 5 | 1/1 | 0 | 0 | 5.5 |
+| Spring PetClinic | 9 | 9 | 2/2 (negative controls) | 0 | 0 | 6.0 |
+| PetClinic Angular | 10 | 10 | 2/2 | 0 | 0 | 4.1 |
+| eShopOnWeb | 10 | 10 | 2/2 | 0 | 0 | 5.2 |
+| linkding | 6 | 6 | — | 0 | 0 | 7.7 |
+| Healthchecks | 6 | 6 | — | 0 | 0 | 5.3 |
+| PocketBase | 6 | 6 | — | 0 | 0 | 4.2 |
+| Flaskr | 7 | 7 | — | 0 | 0 | 7.4 |
+| microblog | 7 | 7 | — | 0 | 0 | 6.8 |
+| Memos | 6 | 6 | — | 0 | 0 | 5.8 |
+| Beszel | 7 | 7 | — | 0 | 0 | 12.4 |
+| **Total** | **79** | **79** | **7/7** | **0** | **0** | |
+
+What the benchmark caught on the way (all fixed, with tests):
+1. **A regression introduced earlier the same day**: the generalized card rule renamed Beszel's dialog submit
+   (`add_system_button_2`) → 4 cases could not run. Rule limited to table rows and 3+ repeated cards.
+2. **A false FAIL that flipped between runs** (Beszel): the table renders only visible rows; 36 systems left by
+   earlier runs (no cleanup) pushed the renamed row out of the page — the rename WAS saved (checked in the DB).
+   Cases now filter before asserting and delete what they create; 0 leftovers after 3 runs.
+3. **False FAILs under a rate limit** (Healthchecks): the "Too many attempts" answer to a login was gone by the end
+   of the case, so 3 of 6 cases FAILED instead of ERROR. The answer is now checked when it arrives; with the
+   limit active all 6 are ERROR (rate-limited), none FAIL.
+4. The manifest pointed PocketBase at `/_` (the cases navigate to `/_/` themselves) — a manifest error, not QAX.
+
+Limits: 7 known defects (1 planted + 6 negative controls) — detection on real, unknown bugs is not measured here;
+older apps have no negative controls in their case files; hand-written cases; one machine.

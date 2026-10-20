@@ -24,6 +24,9 @@ git, the output folder and which integrations are configured, and prints the exa
 | `login did not succeed` while reading | Check the test user; QAX fills the app's own login form. Apps with SSO/2FA: log in by hand and run with a session cookie (scan) or a cases file that starts after login. |
 | Runs pass locally, fail on CI | Run with `--trace` and open it with `playwright show-trace`; most cases are timing (QAX waits for a stable page) or data left by an earlier run (use `{{unique}}` in values). |
 | `N request(s) that change data were sent` | Browser runs create real data through the UI. Use a disposable staging app; QAX does not undo it. |
+| A text check fails although the record was saved | Lists that render only the visible rows (virtualized tables) leave older rows out of the page. Filter or search for the record first, and delete what each case creates (`cleanup_steps`) so test data does not pile up. |
+| `the app redirected to … — not followed` | The app sent a request off its own origin. QAX keeps credentials on the target; if the other host is yours (an SSO provider), add it to `QAX_ALLOWED_ORIGINS`. |
+| `A scan is already running` | One scan at a time; wait for it (closing its page stops it). |
 | A case is `SKIP`/`ERROR`, never `PASS` | By design: a step that did not run proves nothing. The reason is on the step. |
 | `Generation failed: … no credit left` | Add credit to the Anthropic account, or load your own test-cases file (Login, project and more inputs → Load a test-cases file). |
 

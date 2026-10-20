@@ -19,6 +19,15 @@
         "8911"
       ],
       "port": 8911
+    },
+    {
+      "name": "vuln-target",
+      "runtimeExecutable": "./.venv-exec/bin/python",
+      "runtimeArgs": [
+        "-c",
+        "import os,runpy; os.environ['PORT']='8920'; runpy.run_path('evals/targets/vuln_jwt_app.py', run_name='__main__')"
+      ],
+      "port": 8920
     }
   ]
 }

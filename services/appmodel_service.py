@@ -91,7 +91,10 @@ class AppModelService:
         if not root.exists():
             return AppModel(root=str(repo_path), error=f"Path not found: {repo_path}")
 
-        prog.emit("appmodel", "start", f"reading {root}")
+        # the web UI scans with an empty temporary folder when no repository was given: say so
+        # in words, not as an internal temp path
+        prog.emit("appmodel", "start", "no source repository given" if "qax_web_" in str(root)
+                  else f"reading the source in {root}")
         files = self._collect_files(root, max_files)
         if not files:
             return AppModel(root=str(root), error="No source files found to model.")

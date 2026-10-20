@@ -63,7 +63,11 @@ def login():
             resp = make_response(redirect("/dashboard"))
             resp.set_cookie("sid", _SESSION, httponly=True, samesite="Lax")
             return resp
-        error = '<p id="error">Invalid username or password</p>'
+        if request.form.get("username") == "throttled":
+            # like Healthchecks: 200 + a rate-limit message, then the user is still logged out
+            error = '<p id="error">Too many attempts, please try later.</p>'
+        else:
+            error = '<p id="error">Invalid username or password</p>'
     return _page("Log in", f"""<h1>Log in</h1>{error}
 <form method="post" action="/login">
   <input id="username" name="username" placeholder="Username">
@@ -295,6 +299,13 @@ def link_away():
     to = html.escape(request.args.get("to", "/"))
     return _page("Elsewhere", f"<a id='out-link' href='{to}'>Leave</a>"
                               f"<iframe id='foreign' src='{to}form'></iframe>")
+
+
+@app.get("/dialog")
+def dialog():
+    """A dialog whose submit repeats its opener's text ("Add item" ×2, like Beszel's Add System)."""
+    return _page("Items", """<button type="button" onclick="document.getElementById('dlg').showModal()">Add item</button>
+<dialog id="dlg"><form method="dialog"><h2>New item</h2><input id="item-name"><button type="submit">Add item</button></form></dialog>""")
 
 
 @app.get("/boom")
