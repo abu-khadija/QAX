@@ -226,6 +226,41 @@ class PlaywrightRunner:
             except Exception:  # noqa: BLE001
                 pass
         self.context.on("response", _on_response)
+        # Off-origin guard: the main frame may only GO to the app under test (and the operator's
+        # QAX_ALLOWED_ORIGINS) — a click or redirect to another site is blocked and reported.
+        # Sub-resources and embedded frames still load.
+        async def _guard(route, request):
+            try:
+                from core.origin_guard import is_allowed
+                fr = request.frame
+                main = fr is not None and fr.page is not None and fr == fr.page.main_frame
+                if request.is_navigation_request() and main and not is_allowed(request.url):
+                    _note("blocked navigation", f"left the app for {request.url[:120]} — refused")
+                    await route.abort("blockedbyclient")
+                    return
+                if request.is_navigation_request() and main and request.method == "GET":
+                    # the app's own redirect to another site (an open redirect): look at the
+                    # answer BEFORE the browser follows it — not even a GET goes out
+                    resp = await route.fetch(max_redirects=0)
+                    loc = resp.headers.get("location", "")
+                    if 300 <= resp.status < 400 and loc:
+                        from urllib.parse import urljoin
+                        target = urljoin(request.url, loc)
+                        if not is_allowed(target):
+                            _note("blocked navigation", f"the app redirected to {target[:120]} — not followed")
+                            await route.fulfill(status=200, content_type="text/html",
+                                                body=f"<title>QAX blocked a redirect</title><p>QAX did not follow a "
+                                                     f"redirect off the app under test.</p>")
+                            return
+                    await route.fulfill(response=resp)
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+            await route.continue_()
+        try:
+            await self.context.route("**/*", _guard)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("origin guard not attached: %s", e)
         # Playwright trace (`--trace`): every action, network call and DOM snapshot of the
         # case, viewable with `playwright show-trace <file>`.
         self._tracing = os.getenv("QAX_TRACE", "false").strip().lower() == "true"
@@ -417,6 +452,10 @@ class PlaywrightRunner:
         """
         if not self.page:
             logger.warning("Cannot navigate — browser is not set up. Call setup() first.")
+            return False
+        from core.origin_guard import is_allowed, refusal
+        if not is_allowed(url):
+            logger.warning("QAX: %s", refusal(url))
             return False
 
         try:

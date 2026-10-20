@@ -14,6 +14,16 @@ import os
 from flask import jsonify, request
 
 
+def _map_locked(*args, **kwargs):
+    """Read the app under the server's browser lock: the reader sets APP_* process variables
+    (login, base URL), so a concurrent browser run must not see them (or vice versa)."""
+    import asyncio
+
+    from core.app_mapper import map_app
+    with _BROWSER_LOCK:
+        return asyncio.run(map_app(*args, **kwargs))
+
+
 def _repo_source(repo: str) -> "tuple[str, str]":
     """
     A source repository for the Understand step: a local folder, or an https Git URL
@@ -28,8 +38,17 @@ def _repo_source(repo: str) -> "tuple[str, str]":
     if not repo:
         return "", ""
     if not repo.startswith(("http://", "https://")):
-        path = Path(repo).expanduser()
+        path = Path(repo).expanduser().resolve()
+        # a folder's files go to the AI provider: never a hidden folder (~/.ssh, ~/.aws …); with
+        # QAX_REPO_ROOTS set, only folders under those roots
+        if any(part.startswith(".") for part in path.parts[1:]):
+            return "", "Hidden folders (e.g. ~/.ssh) are never read as a repository."
+        roots = [Path(r).expanduser().resolve() for r in os.getenv("QAX_REPO_ROOTS", "").split(",") if r.strip()]
+        if roots and not any(path.is_relative_to(r) for r in roots):
+            return "", "That folder is outside QAX_REPO_ROOTS."
         return (str(path), "") if path.is_dir() else ("", f"Repository folder not found: {repo}")
+    if not repo.startswith("https://"):
+        return "", "Use an https:// repository URL (or a local folder)."
     u = urlparse(repo)
     if "@" in u.netloc:
         return "", "Remove the credentials from the repository URL (they would end up in logs)."
@@ -39,7 +58,7 @@ def _repo_source(repo: str) -> "tuple[str, str]":
         return str(dest), ""
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(["git", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never",
+        r = subprocess.run(["git", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "http.followRedirects=false",
                             "clone", "--depth", "1", "--quiet", "--", repo, str(dest)],
                            capture_output=True, text=True, timeout=180,
                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
@@ -100,11 +119,11 @@ def functional_analyze():
         session = None if data.get("username") else state_for(project)
         if session:
             understanding["notes"].append("Using the session you recorded for this project (SSO / 2FA login).")
-        app_map = asyncio.run(map_app(url, username=str(data.get("username", "")),
+        app_map = _map_locked(url, username=str(data.get("username", "")),
                                       password=str(data.get("password", "")),
                                       insecure=_on(data.get("insecure", "")),
                                       explore_actions=_on(data.get("explore_actions", "")),
-                                      storage_state=session))
+                                      storage_state=session)
         if app_map.error:
             understanding["notes"].append(f"Could not read the app: {app_map.error}")
             app_map = None
@@ -170,8 +189,12 @@ def functional_analyze():
     if res.error:
         return jsonify({"understanding": understanding, "tests": [], "error": _ai_error_message(res.error)})
     tests = res.test_cases or []
+    from core.project_overview import save_requirements
+    cov = coverage(tests, criteria)
+    if criteria:
+        save_requirements(project, criteria, cov, story_key)
     return jsonify({"understanding": understanding, "tests": tests, "invalid": len(res.invalid or []),
-                    "summary": res.summary or {}, "coverage": coverage(tests, criteria)})
+                    "summary": res.summary or {}, "coverage": cov})
 
 
 def functional_bugs():
@@ -279,12 +302,12 @@ def map_app_route():
     def _on(v) -> bool:
         return str(v).lower() in ("1", "true", "yes", "on")
     from core.session_state import state_for
-    result = asyncio.run(map_app(url, max_pages=max_pages,
+    result = _map_locked(url, max_pages=max_pages,
                                  username=str(data.get("username", "")),
                                  password=str(data.get("password", "")),
                                  insecure=_on(data.get("insecure", "")),
                                  explore_actions=_on(data.get("explore_actions", "")),
-                                 storage_state=None if data.get("username") else state_for(project)))
+                                 storage_state=None if data.get("username") else state_for(project))
     if result.error:
         return jsonify({"error": result.error}), 502
     save_map(result, project)
@@ -295,12 +318,23 @@ def map_app_route():
         "revealed": sum(len(p.get("opened_by") or {}) for p in result.pages)})
 
 
+def overview_route():
+    """One project's quality from what QAX measured (core.project_overview) — no invented numbers."""
+    from core.app_mapper import CONFIG_DIR
+    from core.project_overview import build_overview
+    project = _clean_project(request.args.get("project", ""))
+    if not project:
+        return jsonify({"error": "Enter a project name."}), 400
+    return jsonify(build_overview(project, CONFIG_DIR, _RUNS_DIR))
+
+
 def register(app, server) -> None:
     """Attach the routes to the server's app, with the server's gates and helpers."""
     g = globals()
-    for name in ("_clean_project", "_target_authorized", "_UNAUTHORIZED_TARGET", "_ai_error_message"):
+    for name in ("_clean_project", "_target_authorized", "_UNAUTHORIZED_TARGET", "_ai_error_message", "_BROWSER_LOCK", "_RUNS_DIR"):
         g[name] = getattr(server, name)
     app.post("/api/functional/analyze")(functional_analyze)
+    app.get("/api/overview")(overview_route)
     app.post("/api/functional/bugs")(functional_bugs)
     app.post("/api/session")(session_route)
     app.post("/api/map")(map_app_route)

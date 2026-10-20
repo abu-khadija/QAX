@@ -350,6 +350,7 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
     checks.append(("forged-token-replay fired (item 6)", "forged-token-replay" in probes,
                    f"probes={sorted(p for p in probes if p)}"))
     checks.append(pipe_check)   # original pipeline's execute leg, verified E2E
+    checks.append(_functional_bench_check())   # functional QA verdicts vs truth written beforehand
     nk = rec_nokey.get("accuracy", {})
     checks.append(("Q2: quick scan works with NO API key (same recall, 0 FP)",
                    nk.get("recall_pct") == 100.0 and nk.get("false_positives") == 0 and not res_nokey.error,
@@ -465,6 +466,30 @@ def _deep_lane() -> list[tuple[str, bool, str]]:
          f"silent={res.silent_legs() or 'none'}; functional_generated={res.legs.get('functional_generated')}"),
     ]
     return checks
+
+
+def _functional_bench_check() -> tuple:
+    """
+    Functional QA in a real browser on the demo app, scored against truth written before the
+    run (evals/functional_bench.py): the planted bug FAILS, healthy cases PASS, the unrunnable
+    case is never a PASS, and nothing flips between two runs. Skipped (not passed) when no
+    browser is installed.
+    """
+    try:
+        from execution.playwright_runner import PLAYWRIGHT_AVAILABLE
+        if not PLAYWRIGHT_AVAILABLE:
+            return ("functional QA verdicts == truth (demo app, 2 runs)", True, "SKIPPED: no browser installed")
+        import json as _json
+        import tempfile as _tf
+        from evals.functional_bench import bench
+        out = os.path.join(_tf.mkdtemp(), "bench.json")
+        code = bench(["ui-demo"], repeat=2, out=out)
+        app = _json.loads(open(out).read())["apps"][0]
+        detail = (f"{app.get('correct')}/{app.get('cases')} correct, flips {app.get('flipping_cases')}, "
+                  f"false failures {app.get('false_failure_rate')}, missed {app.get('missed_defect_rate')}")
+        return ("functional QA verdicts == truth (demo app, 2 runs)", code == 0, detail)
+    except Exception as exc:  # noqa: BLE001
+        return ("functional QA verdicts == truth (demo app, 2 runs)", False, f"bench crashed: {exc}")
 
 
 def main() -> int:

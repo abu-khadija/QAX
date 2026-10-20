@@ -662,6 +662,12 @@ class DOMAnalyzer:
 
         try:
             current_url = playwright_page.url
+            from core.origin_guard import is_allowed
+            if not is_allowed(current_url, self.base_url or None):
+                # a redirect took the browser to another site: never type the operator's
+                # password there (an SSO provider must be listed in QAX_ALLOWED_ORIGINS)
+                logger.warning("QAX: not logging in on %s — not the app under test", current_url[:80])
+                return False
             has_login_url = "/login" in current_url.lower()
 
             # Check for password input on page

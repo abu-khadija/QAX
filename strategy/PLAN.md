@@ -346,4 +346,6 @@ These references support the security and operating principles; review current g
 
 10. (2026-10-20) Whole-company review recorded in `intel/COMPANY_REVIEW_2026-10-20.md`: GO with conditions (prove demand, clear IP). Its action register is the punch list; engineering items are closed in the product-completion phase (decision 8), people/money/external items stay pending with their requirements.
 
+11. (2026-10-20) Full product audit (`intel/PRODUCT_AUDIT_2026-10-20.md`): a P0 (an AI-written test case could take the browser — and a stored secret — to another site) and four P1s fixed with tests; functional verdicts are now benchmarked against truth written before the run and gated. Strategic direction chosen: the change-aware proof loop (story/PR → affected flows + security checks → verdict per criterion with proof). Positioning updated to verified claims only; "every change" and "from your Jira stories" are held back until shown.
+
 **Next action:** Finish product-completion engineering (evidence-backed defects); then run the deferred Phase 0 demos and the human-dependent Phase 1 exit criteria. Do not start hosted SaaS implementation until beta evidence justifies it and the hosted-mode security gate is approved.

@@ -53,3 +53,19 @@ def test_post_stream_still_requires_the_authorization_confirmation(monkeypatch):
     monkeypatch.delenv("QAX_API_TOKEN", raising=False)
     r = _c().post("/api/scan/stream", json={"url": "http://127.0.0.1:9"})
     assert r.status_code == 400 and "authorized" in r.get_json()["error"]
+
+
+def test_the_ui_javascript_parses():
+    """Regression (2026-10-20): an apostrophe in a single-quoted string ("a case's") broke
+    app.js — the whole web UI stopped working while every Python test passed."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+    import pytest
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    js = Path(__file__).resolve().parent.parent / "web" / "static" / "app.js"
+    r = subprocess.run([node, "-e", "new Function(require('fs').readFileSync(process.argv[1],'utf8'))", str(js)],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr[-500:]

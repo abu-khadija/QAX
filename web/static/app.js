@@ -166,7 +166,7 @@ async function analyzeAll(){
       if(url){ $('exurl').value=url; $('exengine').value='ui'; engineHint(); $('exproj').value=(d.understanding||{}).project||''; $('exro').checked=false; $('exauth').checked=$('mapauth').checked; }
     }
   }catch(e){ showErr('Failed: '+e); }
-  finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; $('mappass').value=''; }
+  finally{ btn.disabled=false; btn.textContent=orig; $('scanning').style.display='none'; $('mappass').value=''; loadOverview(); }
 }
 function renderUnderstanding(u){
   window._fqCriteria=u.criteria||[]; window._fqStoryKey=u.story_key||'';
@@ -200,6 +200,24 @@ async function recordSession(forgetIt){
     const d=await r.json();
     out.innerHTML=d.error?('⚠️ '+esc(d.error)):(d.saved?('✅ Session saved '+esc(d.when||'')+' — runs start logged in. <a href="#" onclick="recordSession(true);return false">forget it</a>'):(forgetIt?'Session deleted.':esc(d.message||'Not saved.')));
   }catch(e){ out.textContent='⚠️ '+e; }
+}
+async function loadOverview(){
+  // the project's quality from what QAX measured — every card says where its data comes from
+  const box=$('fqoverview'); const project=($('mapproj').value||$('exproj').value||'').trim();
+  if(!project){ box.innerHTML=''; return; }
+  try{
+    const r=await api('/api/overview?project='+encodeURIComponent(project)); const d=await r.json();
+    if(d.error){ box.innerHTML=''; return; }
+    const go={run:"$('execpanel').scrollIntoView({block:'start'})",analyze:"$('mapurl').focus()",
+              bugs:"($('fqreport')||$('execpanel')).scrollIntoView()",scan:"setMode('scan')"};
+    box.innerHTML='<div class="ovhead"><div class="sec-title" style="margin:0">Project overview · '+esc(d.project)+'</div>'
+      +'<span class="hint" style="margin:0">From saved runs only — nothing estimated</span></div><div class="ovgrid">'
+      +d.cards.map(c=>'<div class="ovcard '+esc(c.state)+'"><h4>'+esc(c.title)+'</h4><div class="v">'+esc(c.value)+'</div>'
+        +(c.rows?'<div class="rq">'+c.rows.slice(0,6).map(x=>'<code>'+esc(x.id)+'</code> <b>'+esc(x.verdict)+'</b> '+esc(x.text).slice(0,48)).join('<br>')+'</div>':'')
+        +'<div class="d">'+esc(c.detail||'')+'</div>'
+        +(c.state==='empty'&&go[c.action]?'<button class="btn2" onclick="'+go[c.action]+'">Start here</button>':'')+'</div>').join('')
+      +'</div>';
+  }catch(e){ box.innerHTML=''; }
 }
 function proveWithScanner(){
   // the same app, the other track: deterministic probes prove access-control and injection risks
@@ -247,7 +265,7 @@ function renderReport(d){
     +(d.changes&&d.changes.runs_before?'<br>Since the last run: <b>'+d.changes.regressions.length+' newly failing</b>'
       +(d.changes.regressions.length?' ('+d.changes.regressions.map(esc).join(', ')+')':'')+' · '+d.changes.fixed.length+' fixed'
       +(d.changes.flaky.length?' · ⚠️ flaky: '+d.changes.flaky.map(esc).join(', '):''):'')
-    +(d.writes_sent?'<br>'+d.writes_sent+' request(s) that change data were sent to the app — only what a case's cleanup steps delete is undone':'')
+    +(d.writes_sent?'<br>'+d.writes_sent+' request(s) that change data were sent to the app — only what a case’s cleanup steps delete is undone':'')
     +(res.some(r=>r.cleanup)?'<br>Cleanup: '+res.filter(r=>r.cleanup).map(r=>esc(r.test_case_id)+' '+(r.cleanup.status==='done'?'✅ undone':'⚠️ incomplete — data left')).join(' · '):'')
     +(res.some(r=>r.visual&&r.visual.status!=='identical')?'<br>Screens: '+res.filter(r=>r.visual&&r.visual.status!=='identical').map(r=>esc(r.test_case_id)+' '
       +(r.visual.status==='baseline_saved'?'baseline saved':(r.visual.status==='changed'?'<b>changed '+r.visual.pct+'%</b> (a lead — open the diff)':esc(r.visual.status)))).join(' · '):'')
@@ -355,6 +373,7 @@ async function runTests(preview){
       });
       renderTests(window._lastTests);
       renderReport(d);
+      loadOverview();
     }
     out.innerHTML=h;
   }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }

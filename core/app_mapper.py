@@ -300,8 +300,9 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                 """After a logout (explore mode) open a session again."""
                 if not (username and password):
                     return
-                saved = {k: os.environ.get(k) for k in ("APP_USERNAME", "APP_PASSWORD")}
+                saved = {k: os.environ.get(k) for k in ("APP_USERNAME", "APP_PASSWORD", "APP_BASE_URL")}
                 os.environ["APP_USERNAME"], os.environ["APP_PASSWORD"] = username, password
+                os.environ["APP_BASE_URL"] = base_url        # the login stays on this app
                 try:
                     # never fill a form on the current page (it may be "add user"): start over
                     await _goto_settled(page, base_url + "/")
@@ -319,8 +320,9 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
 
             try:
                 if username and password:
-                    saved = {k: os.environ.get(k) for k in ("APP_USERNAME", "APP_PASSWORD")}
+                    saved = {k: os.environ.get(k) for k in ("APP_USERNAME", "APP_PASSWORD", "APP_BASE_URL")}
                     os.environ["APP_USERNAME"], os.environ["APP_PASSWORD"] = username, password
+                    os.environ["APP_BASE_URL"] = base_url        # the login stays on this app
                     try:
                         await _goto_settled(page, base_url + "/")
                         if not await page.query_selector("input[type='password']"):
@@ -417,6 +419,12 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                         continue
                     if resp is not None and resp.status >= 400:
                         logger.info("QAX map: %s answered %s — not a page of the app", url, resp.status)
+                        continue
+                    from core.origin_guard import is_allowed
+                    if not is_allowed(page.url, base_url):
+                        # a link or redirect left the app: never read (or log in to) another site
+                        logger.info("QAX map: %s led off the app to %s — skipped", url, page.url[:100])
+                        result.skipped_links.append(f"{url} → {page.url[:80]} (off-origin)")
                         continue
                     landed = _norm(page.url)
                     if is_action and username and re.search(r"log-?out|sign-?out", url, re.I):

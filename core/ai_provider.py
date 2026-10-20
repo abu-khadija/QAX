@@ -100,9 +100,15 @@ class _Messages:
             body["temperature"] = temperature
         headers = {"Content-Type": "application/json"}
         if self._c.api_key:
-            headers["Authorization"] = f"Bearer {self._c.api_key}"
-            headers["api-key"] = self._c.api_key                 # Azure OpenAI
-        r = requests.post(f"{self._c.base_url}/chat/completions", json=body, headers=headers, timeout=300)
+            if os.getenv("QAX_AI_AZURE", "").lower() in ("1", "true", "yes"):
+                headers["api-key"] = self._c.api_key            # Azure OpenAI's header
+            else:
+                headers["Authorization"] = f"Bearer {self._c.api_key}"
+        # never follow a redirect: the key would travel to wherever it points
+        r = requests.post(f"{self._c.base_url}/chat/completions", json=body, headers=headers, timeout=300,
+                          allow_redirects=False)
+        if 300 <= r.status_code < 400:
+            raise RuntimeError(f"Error code: {r.status_code} - the AI endpoint redirected; set QAX_AI_BASE_URL to the final URL")
         if r.status_code >= 400:
             raise RuntimeError(f"Error code: {r.status_code} - {r.text[:300]}")
         data = r.json() or {}
@@ -123,6 +129,11 @@ class OpenAICompatClient:
     def __init__(self) -> None:
         """Read QAX_AI_BASE_URL / QAX_AI_API_KEY (or OPENAI_API_KEY) / QAX_AI_MODEL."""
         self.base_url = os.getenv("QAX_AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        from urllib.parse import urlsplit
+        u = urlsplit(self.base_url)
+        if u.scheme != "https" and (u.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
+            # a story, code and the key over plain http to another machine: refuse
+            raise RuntimeError("QAX_AI_BASE_URL must be https (plain http only for a model on this machine)")
         self.api_key = os.getenv("QAX_AI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
         self.model = os.getenv("QAX_AI_MODEL", "").strip()
         self.messages = _Messages(self)

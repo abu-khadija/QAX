@@ -964,3 +964,97 @@ def test_the_package_metadata_matches_the_code():
     reqs = [l.split("#")[0].strip() for l in (root / "requirements.txt").read_text().splitlines()]
     runtime = {_re.split(r"[<>=!~\[]", r)[0].lower() for r in reqs if r and not r.startswith(("pytest",))}
     assert runtime <= declared, runtime - declared
+
+
+def test_inputs_cannot_reach_secrets_or_leave_safe_channels(tmp_path, monkeypatch):
+    """Security audit 2026-10-20: a repository folder's files go to the AI provider (never a hidden
+    folder such as ~/.ssh); clones are https only; the MCP cases_file stays inside the workspace;
+    the AI endpoint must be https unless it is this machine."""
+    from core.ai_provider import OpenAICompatClient
+    from core.mcp_server import call_tool
+    from web.functional import _repo_source
+    hidden = tmp_path / ".ssh"
+    hidden.mkdir()
+    assert "Hidden" in _repo_source(str(hidden))[1]
+    assert "https" in _repo_source("http://example.com/x.git")[1]
+    monkeypatch.setenv("QAX_REPO_ROOTS", str(tmp_path / "allowed"))
+    (tmp_path / "other").mkdir()
+    assert "outside" in _repo_source(str(tmp_path / "other"))[1]
+    out = tmp_path / "outside.json"
+    out.write_text("[]")
+    monkeypatch.chdir(tmp_path / "other")
+    d, err = call_tool("qax_run_tests", {"url": "http://a", "cases_file": str(out), "authorized": True})
+    assert err and "inside the working folder" in d["error"]
+    monkeypatch.setenv("QAX_AI_BASE_URL", "http://10.0.0.5/v1")
+    with pytest.raises(RuntimeError, match="https"):
+        OpenAICompatClient()
+    monkeypatch.setenv("QAX_AI_BASE_URL", "http://127.0.0.1:11434/v1")
+    assert OpenAICompatClient().base_url.startswith("http://127.0.0.1")
+
+
+def test_zephyr_cloud_uses_the_v2_api_and_server_the_v1_path(monkeypatch):
+    """Audit 2026-10-20: Cloud users were sent to the Server/DC path. Payload shape only —
+    never exercised against a real Zephyr instance."""
+    import requests as _rq
+
+    from core.adapters.zephyr_adapter import ZephyrAdapter
+    calls = []
+
+    class R:
+        ok, status_code = True, 201
+
+        def json(self):
+            return {"key": "QA-T1"}
+    monkeypatch.setattr(_rq, "post", lambda url, **kw: calls.append((url, kw.get("json"))) or R())
+    monkeypatch.setenv("JIRA_BASE_URL", "https://acme.atlassian.net")
+    monkeypatch.setenv("ZEPHYR_API_TOKEN", "t")
+    monkeypatch.setenv("ZEPHYR_PROJECT_KEY", "QA")
+    tc = {"test_case_id": "T1", "title": "Login", "priority": "high",
+          "manual_steps": [{"step_number": 1, "action": "open", "expected_result": "form"}]}
+    ZephyrAdapter().export([tc], dry_run=False)
+    assert calls[0][0] == "https://api.zephyrscale.smartbear.com/v2/testcases" and calls[0][1]["projectKey"] == "QA"
+    assert calls[1][0].endswith("/testcases/QA-T1/teststeps") and calls[1][1]["items"][0]["inline"]["description"] == "open"
+    calls.clear()
+    monkeypatch.setenv("ZEPHYR_SERVER", "true")
+    ZephyrAdapter().export([tc], dry_run=False)
+    assert calls[0][0] == "https://acme.atlassian.net/rest/atm/1.0/testcase"
+
+
+def test_excel_export_writes_a_workbook_people_can_open(tmp_path, monkeypatch):
+    """Advertised on the landing page, never tested before the 2026-10-20 audit."""
+    from openpyxl import load_workbook
+
+    from core.adapters import get_adapter
+    monkeypatch.chdir(tmp_path)
+    tc = {"test_case_id": "TC-QA-0001", "title": "Login works", "priority": "high",
+          "manual_steps": [{"step_number": 1, "action": "Open /login", "expected_result": "Form shown"}]}
+    res = get_adapter("excel").export([tc], project="demo", dry_run=False)
+    path = next(p for p in (res.get("references") or []) + [str(x) for x in tmp_path.rglob("*.xlsx")] if str(p).endswith(".xlsx"))
+    wb = load_workbook(path)
+    text = " ".join(str(c.value) for ws in wb for row in ws.iter_rows() for c in row if c.value)
+    assert "Login works" in text and "Open /login" in text
+
+
+def test_the_project_overview_shows_only_measured_data(client, tmp_path, monkeypatch):
+    """Every card comes from a saved record; with no data a card is EMPTY and says how to get it —
+    never a made-up number."""
+    import core.app_mapper as am
+    from core.project_overview import save_requirements
+    from core.run_history import save_run
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path / "projects")
+    d = client.get("/api/overview?project=shop").get_json()
+    assert {c["id"] for c in d["cards"]} >= {"last_run", "changes", "requirements", "regression", "app_map", "security"}
+    assert all(c["state"] == "empty" for c in d["cards"])
+    save_requirements("shop", [{"id": "AC-1", "text": "add to basket"}, {"id": "AC-2", "text": "checkout"}],
+                      {"by_criterion": {"AC-1": ["T1"], "AC-2": ["T2"]}})
+    save_run("shop", "http://shop.local", [{"test_case_id": "T1", "status": "PASS"}, {"test_case_id": "T2", "status": "PASS"}])
+    import time
+    time.sleep(0.01)
+    save_run("shop", "http://shop.local", [{"test_case_id": "T1", "status": "PASS"}, {"test_case_id": "T2", "status": "FAIL"}])
+    cards = {c["id"]: c for c in client.get("/api/overview?project=shop").get_json()["cards"]}
+    assert cards["last_run"]["value"] == "1 passed · 1 failed · 0 not run" and cards["last_run"]["state"] == "bad"
+    assert "T2" in cards["changes"]["detail"] and cards["changes"]["value"].startswith("1 newly failing")
+    assert cards["requirements"]["value"] == "1/2 criteria passed"
+    assert [r["verdict"] for r in cards["requirements"]["rows"]] == ["PASSED", "FAILED"]
+    assert cards["trend"]["points"] == [100, 50]
+    assert client.get("/api/overview").status_code == 400

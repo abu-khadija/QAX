@@ -93,7 +93,12 @@ def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
         elif name == "qax_run_tests":
             cases = args.get("test_cases")
             if not cases and args.get("cases_file"):
-                with open(args["cases_file"], encoding="utf-8") as fh:
+                from pathlib import Path as _P
+                f = _P(args["cases_file"]).expanduser().resolve()
+                if not (f.suffix == ".json" and (f.is_relative_to(_P.cwd().resolve())
+                                                 or f.is_relative_to(_P(__file__).resolve().parent.parent))):
+                    return {"error": "cases_file must be a .json file inside the working folder or QAX"}, True
+                with open(f, encoding="utf-8") as fh:
                     raw = json.load(fh)
                 cases = raw if isinstance(raw, list) else raw.get("test_cases", [])
             d = _call_route("/api/execute", {"tests": cases or [], "url": args.get("url", ""),

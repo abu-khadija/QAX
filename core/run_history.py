@@ -48,7 +48,8 @@ def history(project: str, limit: int = 10, root: Path | None = None) -> list:
     """The project's last runs, newest first: [{"when", "url", "verdicts"}]."""
     try:
         folder = (root or _root()) / "functional_runs" / _safe(project)
-        files = sorted(folder.glob("*.json"), reverse=True)[:limit]
+        # run records are named by time (20261020T…); other files in the folder are not runs
+        files = sorted((f for f in folder.glob("*.json") if f.name[:1].isdigit()), reverse=True)[:limit]
         return [json.loads(f.read_text()) for f in files]
     except Exception:  # noqa: BLE001
         return []

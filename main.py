@@ -1971,7 +1971,7 @@ def main() -> None:
         dispatch[command]()
     else:
         print(f"\n  Unknown command: '{command}'")
-        print("  Valid commands: analyze, run, execute, feedback, discover, map, check-connection, init-project, cache, pipeline, scan, file-findings, verify-fixes, demo, lint-tests, diff")
+        print("  Valid commands: " + ", ".join(sorted(dispatch)))
         print("  Run 'python main.py --help' for usage.\n")
         sys.exit(1)
 

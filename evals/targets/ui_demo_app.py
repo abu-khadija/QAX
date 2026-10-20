@@ -283,6 +283,20 @@ def shop():
     return _page("Shop", f"<a href='/basket-page'>0</a><div class='grid'>{cards}</div><p id='out'></p>")
 
 
+@app.get("/away")
+def away():
+    """An open redirect (for origin-guard tests): sends the browser to ?to=."""
+    return redirect(request.args.get("to", "/"))
+
+
+@app.get("/link-away")
+def link_away():
+    """A link and an embedded form that belong to another site (?to=)."""
+    to = html.escape(request.args.get("to", "/"))
+    return _page("Elsewhere", f"<a id='out-link' href='{to}'>Leave</a>"
+                              f"<iframe id='foreign' src='{to}form'></iframe>")
+
+
 @app.get("/boom")
 def boom():
     """A server error the page calls in the background."""

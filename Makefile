@@ -1,6 +1,6 @@
 PY := ./.venv-exec/bin/python
 
-.PHONY: eval eval-deep eval-mutants eval-generation test gate install web doctor docker
+.PHONY: eval eval-deep eval-mutants eval-generation bench-functional test gate install web doctor docker
 
 ## Run the full test suite.
 test:
@@ -43,3 +43,7 @@ docker:
 ## Quality of the test cases the AI writes (needs ANTHROPIC_API_KEY with credit; one generation per story)
 eval-generation:
 	$(PY) -m evals.generation_quality
+
+## Functional QA benchmark: verdicts scored against truth written before the run (repeat 2 = repeatability)
+bench-functional:
+	$(PY) -m evals.functional_bench --app all --repeat 2

@@ -45,7 +45,7 @@ MAX_PATTERNS = 5
 
 # ── Claude model to use for pattern extraction ────────────────────────────────
 # Imported lazily inside extract_patterns() to avoid circular imports
-PATTERN_MODEL = "claude-sonnet-4-20250514"
+PATTERN_MODEL = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 PATTERN_MAX_TOKENS = 800
 
 

@@ -1,0 +1,23 @@
+{
+  "_comment": "Functional QA benchmark manifest. Truth = each case's expected_outcome, written by a person BEFORE the run (PASS, FAIL = a known/planted defect or a negative control, SKIP = must not count as a pass). QAX never grades itself. 'start' says how the app was run, so a run can be repeated; an app that is not reachable is NOT RUN, never counted.",
+  "apps": [
+    {"name": "ui-demo", "builtin": true, "project": "uidemo", "cases": "evals/data/ui_demo_cases.json",
+     "start": "built in (evals/targets/ui_demo_app.py, one planted bug)"},
+    {"name": "spring-petclinic", "project": "petclinic", "cases": "evals/data/petclinic_cases.json",
+     "base_url": "http://127.0.0.1:8945",
+     "start": "cd ~/Downloads/qax-corpus/spring-petclinic && ./mvnw -q -DskipTests package && java -jar target/spring-petclinic-*.jar --server.port=8945"},
+    {"name": "petclinic-angular", "project": "petclinic-ng", "cases": "evals/data/petclinic_angular_cases.json",
+     "base_url": "http://127.0.0.1:4210",
+     "start": "spring-petclinic-rest: ./mvnw -q -DskipTests package && java -jar target/spring-petclinic-rest-*.jar (port 9966); spring-petclinic-angular: npm ci && npx ng serve --port 4210 --host 127.0.0.1"},
+    {"name": "eshoponweb", "project": "eshop", "cases": "evals/data/eshop_cases.json",
+     "base_url": "http://127.0.0.1:8960", "needs_env": ["QAX_VAR_ESHOP_USER", "QAX_VAR_ESHOP_PASS"],
+     "start": "cd ~/Downloads/qax-corpus/eShopOnWeb/src/Web && UseOnlyInMemoryDatabase=true ASPNETCORE_URLS=http://127.0.0.1:8960 DOTNET_ROLL_FORWARD=Major dotnet run -c Release (seeded demo user: demouser@microsoft.com, password from src/ApplicationCore/Constants)"},
+    {"name": "linkding", "project": "linkding", "cases": "evals/data/linkding_cases.json", "base_url": "", "start": "NOT RECORDED in the 2026-10-19 run — fill in base_url and start before using"},
+    {"name": "healthchecks", "project": "healthchecks", "cases": "evals/data/healthchecks_cases.json", "base_url": "", "start": "NOT RECORDED — fill in"},
+    {"name": "pocketbase", "project": "pocketbase", "cases": "evals/data/pocketbase_cases.json", "base_url": "", "start": "NOT RECORDED — fill in"},
+    {"name": "flaskr", "project": "flaskr", "cases": "evals/data/flaskr_cases.json", "base_url": "", "start": "NOT RECORDED — fill in"},
+    {"name": "microblog", "project": "microblog", "cases": "evals/data/microblog_cases.json", "base_url": "", "start": "NOT RECORDED — fill in"},
+    {"name": "memos", "project": "memos", "cases": "evals/data/memos_cases.json", "base_url": "", "start": "NOT RECORDED — fill in"},
+    {"name": "beszel", "project": "beszel", "cases": "evals/data/beszel_cases.json", "base_url": "", "start": "NOT RECORDED — fill in"}
+  ]
+}

@@ -774,8 +774,12 @@ def export():
 def scan_stream():
     """
     Live scan as Server-Sent Events. The UI POSTs a JSON body (a session cookie, tokens and a CSRF nonce must never
-    travel in a URL: they would land in logs and history). GET still works for curl and old callers.
+    travel in a URL: they would land in logs and history). GET still works for curl and old callers — but never
+    from a browser page: an <img src> on any localhost page is "same-site" and sends no Origin, so a browser GET
+    must come from QAX's own page (Sec-Fetch-Site: same-origin) or from no page at all (none / absent).
     """
+    if request.method == "GET" and request.headers.get("Sec-Fetch-Site", "none").lower() not in ("same-origin", "none"):
+        return jsonify({"error": "starting a scan with a GET from another page is refused — POST JSON"}), 403
     url, repo, auth, read_only, spec_url, extras = _inputs()
     if not url:
         return jsonify({"error": "Please enter the URL of your running app."}), 400

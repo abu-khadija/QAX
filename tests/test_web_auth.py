@@ -62,3 +62,12 @@ def test_files_serves_screenshots_only(tmp_path, monkeypatch):
     assert c.get("/files/report.json").status_code == 404
     assert c.get("/files/repos/x/a.png").status_code == 404
     assert c.get("/files/shot.png").status_code == 200
+
+
+def test_a_page_on_another_localhost_port_cannot_start_a_scan_with_a_get(monkeypatch):
+    """An <img src> on any localhost page is 'same-site' and sends no Origin: GET must be refused."""
+    monkeypatch.delenv("QAX_API_TOKEN", raising=False)
+    r = _c().get("/api/scan/stream?url=http://127.0.0.1:9&authorized=true", headers={"Sec-Fetch-Site": "same-site"})
+    assert r.status_code == 403
+    r = _c().get("/api/scan/stream?url=http://127.0.0.1:9")            # curl: no browser headers → old behaviour
+    assert r.status_code == 400 and "authorized" in r.get_json()["error"]

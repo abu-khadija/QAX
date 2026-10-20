@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # ── Model for prompt optimization (can use a faster/cheaper model here) ────────
-OPTIMIZER_MODEL = "claude-sonnet-4-20250514"
+OPTIMIZER_MODEL = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 OPTIMIZER_MAX_TOKENS = 1000
 
 

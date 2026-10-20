@@ -743,9 +743,13 @@ class ActionMapper:
 
         try:
             if action_type == "navigate":
+                from core.origin_guard import is_allowed, join, refusal
                 url = self._extract_url(action_text)
-                base_url = _os.getenv("APP_BASE_URL", "http://localhost")
-                full_url = url if url.startswith("http") else f"{base_url}{url}"
+                full_url = join(url)
+                if not is_allowed(full_url):
+                    base_result.update({"status": "ERROR", "actual_result": f"Navigation to {full_url} refused",
+                                        "error": refusal(full_url)})
+                    return base_result
                 await page.goto(full_url, wait_until="load", timeout=30_000)
                 current_url = page.url
                 base_result.update({
@@ -924,12 +928,46 @@ class ActionMapper:
                 raise _UnresolvedSelector(selector_key)
             return selector
 
+        if action not in ("navigate", "goto", "open", "visit", "wait", "pause"):
+            # a click or a redirect may have left the app: no step acts on another site's page
+            from core.origin_guard import is_allowed, refusal
+            try:
+                here = page.url
+            except Exception:  # noqa: BLE001
+                here = ""
+            if here and not is_allowed(here):
+                try:
+                    await page.goto("about:blank")
+                except Exception:  # noqa: BLE001
+                    pass
+                return {**base_result, "status": "ERROR", "actual_result": f"The browser left the app ({here[:80]})",
+                        "error": refusal(here)}
         try:
             if action in ("navigate", "goto", "open", "visit"):
+                from core.origin_guard import is_allowed, join, refusal
                 target = value or assertion_val
-                base_url = _os.getenv("APP_BASE_URL", "http://localhost")
-                full_url = target if target.startswith("http") else f"{base_url}{target}"
+                full_url = join(target)
+                if not is_allowed(full_url):
+                    # a test (perhaps AI-written from untrusted text) wants to leave the app
+                    base_result.update({"status": "ERROR", "actual_result": f"Navigation to {full_url} refused",
+                                        "error": refusal(full_url)})
+                    return base_result
                 await page.goto(full_url, wait_until="load", timeout=30_000)
+                try:
+                    blocked = await page.title() == "QAX blocked a redirect"
+                except Exception:  # noqa: BLE001
+                    blocked = False
+                if blocked:
+                    base_result.update({"status": "ERROR", "actual_result": f"{full_url} redirects off the app — not followed",
+                                        "error": refusal("a redirect target outside the app")})
+                    return base_result
+                if not is_allowed(page.url):
+                    # a redirect took the browser off the app: leave that page at once
+                    landed = page.url
+                    await page.goto("about:blank")
+                    base_result.update({"status": "ERROR", "actual_result": f"{full_url} redirected to {landed}",
+                                        "error": refusal(landed)})
+                    return base_result
                 banner = await _dismiss_cookie_banner(page)
                 base_result.update({
                     "status": "PASS",
@@ -956,6 +994,16 @@ class ActionMapper:
                 selector = await _resolve_selector()
                 base_result["selector_used"] = selector
                 real_value, from_env = resolve_step_value(value)
+                if from_env:
+                    # a secret goes only to the app under test — never to a page (or an
+                    # embedded frame) another origin controls
+                    from core.origin_guard import is_allowed, refusal
+                    frame = getattr(page, "_frame", None)
+                    where = frame.url if frame is not None else page.url
+                    if not is_allowed(where):
+                        base_result.update({"status": "ERROR", "actual_result": f"Refused to type {from_env} here",
+                                            "error": refusal(where)})
+                        return base_result
                 await page.fill(selector, real_value, timeout=15_000)
                 is_password = False
                 try:

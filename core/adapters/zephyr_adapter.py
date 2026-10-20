@@ -1,8 +1,13 @@
 """
 core/adapters/zephyr_adapter.py — Zephyr Scale Export Adapter
 ==============================================================
-Pushes test cases to Zephyr Scale (Atlassian Marketplace) using the
-Zephyr Scale REST API v2.
+Pushes test cases to Zephyr Scale (Atlassian Marketplace).
+
+Zephyr Scale CLOUD (the default): REST API v2 at https://api.zephyrscale.smartbear.com/v2
+— POST /testcases, then POST /testcases/{key}/teststeps. Zephyr Scale SERVER / Data Center
+(ZEPHYR_SERVER=true): POST {JIRA_BASE_URL}/rest/atm/1.0/testcase. The adapter used to send
+Cloud users to the Server path (audit 2026-10-20). Neither has been exercised against a
+real Zephyr instance yet: check the first export by hand.
 
 Required env vars:
     ZEPHYR_API_TOKEN    — API token from Jira → Apps → Zephyr Scale → API Keys
@@ -10,8 +15,8 @@ Required env vars:
     JIRA_BASE_URL       — Base Jira URL (e.g. "https://org.atlassian.net")
 
 API reference:
-    POST /rest/atm/1.0/testcase
-    https://support.smartbear.com/zephyr-scale-cloud/api-docs/
+    Cloud  https://support.smartbear.com/zephyr-scale-cloud/api-docs/
+    Server POST /rest/atm/1.0/testcase
 
 Usage:
     adapter = ZephyrAdapter()
@@ -110,15 +115,24 @@ class ZephyrAdapter(BaseExportAdapter):
         exported: list[str] = []
         failed_count = 0
 
+        server = os.getenv("ZEPHYR_SERVER", "false").lower() in ("1", "true", "yes")
+        cloud_api = os.getenv("ZEPHYR_API_URL", "https://api.zephyrscale.smartbear.com/v2").rstrip("/")
         for tc in test_cases:
             payload = self._build_payload(tc, proj)
             try:
-                resp = requests.post(
-                    f"{base_url}/rest/atm/1.0/testcase",
-                    json=payload,
-                    headers=headers,
-                    timeout=30,
-                )
+                if server:
+                    resp = requests.post(f"{base_url}/rest/atm/1.0/testcase", json=payload,
+                                         headers=headers, timeout=30)
+                else:
+                    resp = requests.post(f"{cloud_api}/testcases", json=self._cloud_payload(tc, proj),
+                                         headers=headers, timeout=30)
+                    if resp.ok and resp.json().get("key"):
+                        items = [{"inline": {"description": st["description"], "testData": "",
+                                             "expectedResult": st["expectedResult"]}}
+                                 for st in payload.get("testScript", {}).get("steps", [])]
+                        if items:
+                            requests.post(f"{cloud_api}/testcases/{resp.json()['key']}/teststeps",
+                                          json={"mode": "OVERWRITE", "items": items}, headers=headers, timeout=30)
                 if resp.ok:
                     key = resp.json().get("key", "")
                     exported.append(key)
@@ -142,6 +156,18 @@ class ZephyrAdapter(BaseExportAdapter):
         return self._success_result(len(exported), failed_count, exported)
 
     # ── Internal helpers ───────────────────────────────────────────────────────
+
+    def _cloud_payload(self, tc: dict, project_key: str) -> dict:
+        """The Zephyr Scale Cloud v2 test-case body (steps are added in a second call)."""
+        pri = str(tc.get("priority") or "").capitalize()
+        body = {"projectKey": project_key, "name": str(tc.get("title", "Untitled"))[:255],
+                "objective": tc.get("description", ""),
+                "precondition": "\n".join(tc.get("preconditions") or []) if isinstance(tc.get("preconditions"), list)
+                else str(tc.get("preconditions") or ""),
+                "labels": [x for x in ["qax", tc.get("test_type")] if x]}
+        if pri in ("High", "Normal", "Low"):
+            body["priorityName"] = pri
+        return body
 
     def _build_payload(self, tc: dict, project_key: str) -> dict:
         """

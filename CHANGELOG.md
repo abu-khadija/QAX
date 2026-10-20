@@ -7,6 +7,10 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- `make bench-functional`: functional verdicts scored against truth written before the run (detection,
+  false failures, missed defects, first-run success, repeatability); the demo-app lane is in the merge gate.
+- Project overview (`/api/overview`, cards in Functional QA): last run, changes since the run before,
+  pass-rate trend, per-criterion verdicts, regression suite, app knowledge, last security scan — measured data only.
 - **Functional QA track** (web: one of two tracks; CLI: `pipeline`, `execute`): generate test cases from a story or
   code — or load a cases file — review them, preview the run, run them in a real browser (Playwright) or over HTTP,
   get PASS / FAIL with step evidence and a screenshot of every failure, and send results to Xray as one Test
@@ -57,6 +61,13 @@ Every scan written with `--out` records the exact version and commit that produc
 - `pyproject.toml` (`qax`, `qax-web` commands).
 
 ### Security
+- **Origin guard (P0):** a test case — possibly AI-written from prompt-injected text — could take the
+  browser to another site or a cloud-metadata address and type a `{{env:QAX_VAR_*}}` secret there.
+  Navigation and secret typing now stay on the app's origin (+ `QAX_ALLOWED_ORIGINS`); redirects off the
+  app are inspected before they are followed; steps on a foreign page are refused. The app reader skips
+  off-origin pages and never logs in elsewhere. Traces of cases that type a secret are not kept (0600
+  otherwise). A GET from another localhost page can no longer start a scan. The AI provider sends one
+  header, follows no redirects, needs https off-machine. Repo input refuses hidden folders; https clones only.
 - The local web API refused nothing from other web pages: a page the operator visited could start scans,
   browser runs or git clones through it. Now: cross-site (Sec-Fetch-Site / Origin) requests are refused,
   writes must be JSON, only a loopback Host is served without `QAX_API_TOKEN`, security headers are set,

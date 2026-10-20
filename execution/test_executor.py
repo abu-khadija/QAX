@@ -486,7 +486,21 @@ class TestExecutor:
             if hasattr(runner, "stop_trace"):
                 trace = await runner.stop_trace(str(tc.get("test_case_id", "case")))
                 if trace:
-                    result["trace"] = trace
+                    import json as _json
+                    if "{{env:" in _json.dumps(tc, default=str):
+                        # a trace records every typed value: a case that types a secret keeps none
+                        try:
+                            os.remove(trace)
+                        except OSError:
+                            pass
+                        result["trace_note"] = ("trace not kept: this case types a secret ({{env:…}}), "
+                                                "and a Playwright trace stores typed values in plain text")
+                    else:
+                        try:
+                            os.chmod(trace, 0o600)
+                        except OSError:
+                            pass
+                        result["trace"] = trace
             # What this case sent that can change data on the target (form posts, deletes…).
             # QAX does not undo data created through the UI — it says what it sent.
             result["writes"] = runner.take_writes() if hasattr(runner, "take_writes") else []

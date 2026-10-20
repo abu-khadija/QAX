@@ -86,7 +86,7 @@ class ClaudeHealer:
         (healing will return None for all calls).
         """
         self._api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        self._model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+        self._model = os.getenv("CLAUDE_MODEL") or os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 
         if not self._api_key:
             logger.warning(

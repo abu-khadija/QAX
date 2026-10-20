@@ -19,11 +19,9 @@
   </header>
 
   <section class="hero">
-    <h1>Generate the tests.<br><span class="grad">Prove the bugs. Ship to Jira.</span></h1>
-    <p>One platform for software quality: QAX <b>scans your running app</b> and proves the security
-       bugs others miss, and <b>tests it end to end</b>: from its URL, repository and user stories it
-       writes test cases traced to the acceptance criteria, <b>runs them</b> in a real browser and files
-       the bugs it finds in <b>Jira</b> — cases export or go to <b>Xray</b> too.</p>
+    <h1>Test your running app. <span class="grad">Report only what you can prove.</span></h1>
+    <p>Pick a track: <b>Functional QA</b> runs your user flows end to end in a real browser;
+       <b>Scan</b> probes the API for security bugs. Both run on this machine, and every result carries its evidence.</p>
   </section>
 
   <div class="modes">
@@ -101,6 +99,7 @@
   </div>
 
   <div class="panel" id="panel-func" style="display:none">
+    <div id="fqoverview"></div>
     <div class="steps4">
       <span><b>1</b> Inputs</span><span><b>2</b> Understand</span><span><b>3</b> Test cases · review · export</span>
       <span><b>4</b> Run end to end</span><span><b>5</b> Report · bugs → Jira</span>
@@ -125,7 +124,7 @@
         <button class="btn2" type="button" onclick="recordSession()">🔐 Log in in a browser window (SSO / 2FA)</button>
         <span class="hint" id="sessstate"></span></div>
       <div class="field"><label for="mapproj">Project name</label>
-        <input id="mapproj" oninput="this.dataset.touched=1" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
+        <input id="mapproj" oninput="this.dataset.touched=1" onchange="loadOverview()" placeholder="myapp" autocomplete="off" spellcheck="false"></div>
       <div class="field"><label for="code">Source code (optional — paste a function or module)</label>
         <textarea id="code" rows="5" placeholder="// paste a function, endpoint, or module"></textarea></div>
       <div class="field"><label for="tcfile">Load a test-cases file (JSON) — start from your own cases, skips writing them</label>
@@ -229,9 +228,10 @@
   </section>
 </div>
 
-<footer>QAX runs locally against an app you control. The <b>confirmed</b> block is deterministic and
-zero-false-positive — re-run and you get the same list. <b>Leads</b> (AI findings + dependency
-hygiene) are higher-recall but may vary — shown separately, on purpose.</footer>
+<footer>QAX runs locally against an app you control. The scan's <b>confirmed</b> block is deterministic:
+re-run and you get the same list, and each finding is proven against a control request (0 false positives
+measured on the gate target and 10 open-source apps — a small sample, not a guarantee). <b>Leads</b> (AI findings,
+dependency hygiene) may vary between runs — shown separately, on purpose.</footer>
 
 <script src="/app.js"></script>
 </body>

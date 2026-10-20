@@ -1,9 +1,10 @@
 # QAX
 
-**QAX proves what your running app actually does.** It attacks your API (and tours your UI),
-keeps only the bugs it can prove with a real request and response — checked against a control
-request — explains the fix, and drafts the Jira bug for you. It also generates test cases from
-source code. Runs locally. Built for QA teams.
+**QAX tests your running app and reports only what it can prove.** It runs your user flows end
+to end in a real browser (PASS / FAIL per step, with screenshots — a case that did not fully run is
+never a pass) and probes the API for security bugs, keeping only the ones a control request proves.
+Every finding comes with its evidence and a Jira bug ready to file. Runs on your own machine.
+Built for product teams that ship web apps without a large QA automation team.
 
 ---
 
