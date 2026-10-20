@@ -10,11 +10,50 @@ page was (time to first byte, DOM ready, load, Largest Contentful Paint, layout 
 Deterministic, in the page, no extra dependency and no AI. These are OBSERVATIONS: they
 never change a case's verdict, and they are not a full accessibility audit (no screen
 reader, no keyboard-trap or focus-order check) — the report says so. Never raises.
+
+QAX_A11Y=axe runs Deque's axe-core instead (core/vendor/axe-core, MPL-2.0, unmodified — about
+100 WCAG 2.0/2.1/2.2 A/AA rules). If axe cannot run on a page, the basic checks run and
+the page says which engine produced its list.
 """
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from urllib.parse import urlparse
+
+AXE_PATH = Path(__file__).resolve().parent / "vendor" / "axe-core" / "axe.min.js"
+AXE_VERSION = "4.13.0"
+_axe_src: "str | None" = None
+
+# axe tags → only WCAG A/AA rules (no "best-practice" opinions, no experimental rules)
+_AXE_RUN_JS = r"""async () => {
+  const r = await axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']},
+                                      resultTypes: ['violations']});
+  const sc = (tags) => { const t = (tags || []).find(x => /^wcag\d{3,5}$/.test(x)); if (!t) return ''; const d = t.slice(4); return d[0] + '.' + d[1] + '.' + d.slice(2); };
+  return r.violations.slice(0, 60).map(v => ({rule: v.help, wcag: sc(v.tags), impact: v.impact || '',
+    target: ((v.nodes[0] || {}).target || []).join(' ') + (v.nodes.length > 1 ? ' (+' + (v.nodes.length - 1) + ' more)' : ''),
+    note: v.id}));
+}"""
+
+
+def _a11y_engine() -> str:
+    """'axe' when asked for (QAX_A11Y=axe) and the vendored file is there, else 'basic'."""
+    return "axe" if os.getenv("QAX_A11Y", "basic").strip().lower() == "axe" and AXE_PATH.is_file() else "basic"
+
+
+async def _axe(page) -> "list | None":
+    """axe-core violations on the page, or None when axe could not run."""
+    global _axe_src
+    try:
+        if _axe_src is None:
+            _axe_src = AXE_PATH.read_text(encoding="utf-8")
+        if not await page.evaluate("() => typeof window.axe === 'object'"):
+            await page.evaluate(_axe_src)
+        out = await page.evaluate(_AXE_RUN_JS)
+        return out if isinstance(out, list) else None
+    except Exception:  # noqa: BLE001
+        return None
 
 _A11Y_JS = r"""() => {
   const out = [];
@@ -104,12 +143,21 @@ async def check_page(page) -> dict:
         url = page.url
         if not isinstance(url, str) or not url or url.startswith(("about:", "data:")):
             return {}
-        a11y = await page.evaluate(_A11Y_JS)
+        engine, a11y = _a11y_engine(), None
+        if engine == "axe":
+            a11y = await _axe(page)
+            if a11y is None:
+                engine = "basic (axe-core could not run on this page)"
+            else:
+                engine = f"axe-core {AXE_VERSION}"
+        if a11y is None:
+            a11y = await page.evaluate(_A11Y_JS)
         perf = await page.evaluate(_PERF_JS)
         a11y = a11y if isinstance(a11y, list) else []
         perf = perf if isinstance(perf, dict) else {}
         slow = [k for k, lim in _BUDGET.items() if isinstance(perf.get(k), (int, float)) and perf[k] > lim]
-        return {"url": urlparse(url).path or "/", "accessibility": a11y or [], "performance": perf or {}, "slow": slow}
+        return {"url": urlparse(url).path or "/", "accessibility": a11y or [], "a11y_engine": engine,
+                "performance": perf or {}, "slow": slow}
     except Exception:  # noqa: BLE001
         return {}
 

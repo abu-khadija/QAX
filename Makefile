@@ -47,3 +47,8 @@ eval-generation:
 ## Functional QA benchmark: verdicts scored against truth written before the run (repeat 2 = repeatability)
 bench-functional:
 	$(PY) -m evals.functional_bench --app all --repeat 2
+
+## Known vulnerabilities in the installed Python packages and requirements.txt (needs network; pip-audit from the dev extra)
+audit-deps:
+	$(PY) -m pip_audit --progress-spinner off
+	$(PY) -m pip_audit --progress-spinner off -r requirements.txt

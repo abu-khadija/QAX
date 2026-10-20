@@ -328,9 +328,9 @@ function renderReport(d){
       +qlist.map(p=>{ const pf=p.performance||{};
         return '<b>'+esc(p.url)+'</b> — LCP '+fmt(pf.lcp_ms)+' ms · load '+fmt(pf.load_ms)+' ms · CLS '+fmt(pf.cls)
           +(p.slow.length?' · <b style="color:var(--p2)">slow: '+p.slow.map(esc).join(', ')+'</b>':'')
-          +(p.accessibility.length?'<br>'+p.accessibility.slice(0,8).map(i=>'• '+esc(i.rule)+' <span style="color:var(--muted)">(WCAG '+esc(i.wcag)+') '+esc(i.target)+'</span>').join('<br>')
-            +(p.accessibility.length>8?'<br>… '+(p.accessibility.length-8)+' more':''):'<br>no accessibility problem among the basic checks'); }).join('<br><br>')
-      +'<br><span style="color:var(--muted)">Basic automated checks only — not a full accessibility audit (no screen reader, keyboard or focus-order testing).</span></div>';
+          +(p.accessibility.length?'<br>'+p.accessibility.slice(0,8).map(i=>'• '+esc(i.rule)+' <span style="color:var(--muted)">(WCAG '+esc(i.wcag)+(i.impact?' · '+esc(i.impact):'')+') '+esc(i.target)+'</span>').join('<br>')
+            +(p.accessibility.length>8?'<br>… '+(p.accessibility.length-8)+' more':''):'<br>no accessibility problem found by '+esc(p.a11y_engine||'the basic checks')); }).join('<br><br>')
+      +'<br><span style="color:var(--muted)">Automated checks ('+esc((qlist[0]||{}).a11y_engine||'basic')+') — not a full accessibility audit (no screen reader, keyboard or focus-order testing). QAX_A11Y=axe runs axe-core.</span></div>';
   }
   // what to do next, from the verdicts (rules, in the order a QA lead would act)
   const nxt=[];

@@ -534,6 +534,29 @@ def test_each_page_a_case_visits_gets_accessibility_and_performance_basics(ui_ap
     assert q["issues"] >= 5
 
 
+def test_axe_core_finds_the_planted_accessibility_problems_when_asked(ui_app, monkeypatch):
+    """QAX_A11Y=axe: the vendored axe-core (unmodified, MPL-2.0) audits the same page — the planted
+    problems are found with their WCAG criterion and impact, and the case still PASSES (observations)."""
+    from core import page_quality
+    assert page_quality.AXE_PATH.is_file()
+    monkeypatch.setenv("QAX_A11Y", "axe")
+    case = {"test_case_id": "AXE", "title": "signup page", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/a11y"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": "#icon-btn"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS"
+    page = next(p for p in r["quality"]["pages"] if p["url"] == "/a11y")
+    assert page["a11y_engine"] == f"axe-core {page_quality.AXE_VERSION}"
+    ids = {i["note"] for i in page["accessibility"]}
+    for expected in ("image-alt", "button-name", "color-contrast", "html-has-lang"):
+        assert expected in ids, ids
+    # a placeholder-only field is named under ARIA rules: axe does not call it a WCAG failure
+    # (the basic checks still note it as "form field without a label")
+    assert "label" not in ids
+    contrast = next(i for i in page["accessibility"] if i["note"] == "color-contrast")
+    assert contrast["wcag"] == "1.4.3" and contrast["impact"]
+
+
 def test_a_coding_agent_can_run_qax_over_mcp(ui_app, monkeypatch):
     """`main.py mcp`: the protocol handshake, the tool list, the authorization gate, and a real
     browser run of the demo cases — the planted bug FAILS, the unrunnable step is not a PASS."""

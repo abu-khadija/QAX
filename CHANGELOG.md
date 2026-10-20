@@ -12,6 +12,10 @@ Every scan written with `--out` records the exact version and commit that produc
 - **Per-run cost**: each functional run records its duration and AI calls (≈ USD), each generation its AI usage;
   a scoped meter keeps a run's numbers its own. Non-Claude providers are counted, not priced.
 - **Overview cards**: "Last change → cases run", "Evidence of the last run", "Cost".
+- **axe-core 4.13.0** (Deque, MPL-2.0, unmodified, `core/vendor/axe-core/`): `QAX_A11Y=axe` audits every page a
+  case visits against WCAG 2.0/2.1/2.2 A/AA; the report names the engine per page. THIRD_PARTY_NOTICES.md.
+- **`make audit-deps`** (pip-audit, dev extra): known vulnerabilities in the environment and requirements.txt —
+  first run 2026-10-20: none found.
 - **Interfaces and data contracts** for every stage: strategy/intel/PRODUCT_AUDIT_2026-10-20.md §4b.
 
 ### Changed

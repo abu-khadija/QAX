@@ -303,3 +303,19 @@ def test_a_moved_element_is_healed_and_the_pass_is_marked(monkeypatch, tmp_path)
     case = {"test_case_id": "TC-1", "title": "t", "automation_steps": [{"playwright_action": "click"}]}
     out = asyncio.run(ex.execute_test_case(case, _R()))
     assert out["healed_steps"] == 1 and "AI healing" in out["verdict_note"]
+
+
+# ── 7 · vendored axe-core stays unmodified (MPL-2.0 file-level obligations) ──
+
+
+def test_the_vendored_axe_core_is_the_published_file_with_its_licences():
+    import hashlib
+
+    from core import page_quality
+    folder = page_quality.AXE_PATH.parent
+    digest = hashlib.sha256(page_quality.AXE_PATH.read_bytes()).hexdigest()
+    assert digest == "c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1", \
+        "axe.min.js changed — MPL-2.0 then requires publishing the change; re-vendor the published file instead"
+    assert "Mozilla Public License" in (folder / "LICENSE").read_text()
+    assert (folder / "LICENSE-3RD-PARTY.txt").is_file()
+    assert page_quality.AXE_VERSION in page_quality.AXE_PATH.read_text()[:40]

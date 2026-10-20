@@ -92,7 +92,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | E4 | P2 | a failed UI tour / visual comparison looked like a clean result (Pillow not installed → every comparison errored silently) | listed under not-tested; `visual` extra | — (path covered by gate scans) |
 | E5 | P2 | Jira duplicate check failed open (429 → duplicate filed); Xray re-authenticated per case after a failure (minutes of blocking) | fail closed with retries; stop after first auth failure | duplicate test |
 | E6 | P2 | non-atomic map/selector/run writes; map saved outside the lock; run ids collided within a second; one bad file emptied the history | atomic writes, lock, microsecond ids, tolerant reader | history test |
-| E7 | P2 | `pip install .` could resolve to requests/dotenv versions with known advisories; Pillow/PyYAML/urllib3 undeclared | floors = audited versions; extras `visual`, `yaml`; urllib3 declared | package metadata test |
+| E7 | P2 | `pip install .` could resolve to requests/dotenv versions with known advisories; Pillow/PyYAML/urllib3 undeclared | floors = audited versions; extras `visual`, `yaml`; urllib3 declared. **Fresh scan 2026-10-20: pip-audit 2.7.3 on the installed environment (70 packages) and on requirements.txt → no known vulnerabilities.** `make audit-deps` | package metadata test |
 | E8 | P3 | API runner: timeouts = FAIL (false regressions); unreadable expected_status = PASS | ERROR for both; "2xx" supported | redirect/egress test |
 | E9 | P3 | page reader quadratic on large pages; NL fill path echoed passwords | memoized queries; masked | browser tests |
 | R2 | P2 | **a regression I introduced today**: the generalized card rule renamed a dialog's submit (Beszel `add_system_button_2`), breaking its cases — caught by the 10-app benchmark | rule limited to table rows and 3+ repeated cards | dialog test |
@@ -102,6 +102,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | E11 | P2 | Jira/Xray writes failed on the first 429/503; the Xray token was never renewed (24 h expiry) | core/http_retry.py: retries 429/503 and never-sent connections with Retry-After/backoff; a create is NOT re-sent after 5xx or a read timeout (could duplicate); Xray token renewed after 23 h and once after a 401 | retry + token tests |
 | E12 | P2 | a request waiting for the browser lock waited without limit behind a run of minutes | lock with a wait (QAX_BROWSER_WAIT, default 5 s) → 409 "busy — try again" | busy test |
 | E13 | P1 (AI) | the grounding check only flagged cases that use an element not on the app — they still ran and failed for the wrong reason | executor gate: such a case is SKIP (cause test) until `"reviewed": true` or QAX_ALLOW_UNMAPPED=true; the run preview lists it as not run | gate tests |
+| E15 | P1 (packaging) | **the pip wheel ships no non-Python files**: no `web/static` (the web UI), no `config/` (system prompt, schema). `pip install .` then `qax-web` cannot serve the UI — found while packaging axe-core | **open** — only axe-core is packaged so far (`[tool.setuptools.package-data]`); Docker is unaffected (copies the tree) | wheel listing |
 | E14 | P1 (AI) | AI healing could turn a failed check into a pass (heal an assertion onto another element "with the right text") | healing only for locating failures of actions; never assertions or outcome checks; a healed pass carries `verdict_note` | fake-model healing tests |
 
 **Finding details for E1–E14 (impact · reproduction before the fix · acceptance):**
@@ -114,7 +115,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | E4 | "clean" result while checks silently did not run | uninstall Pillow, run a visual check | the check is listed under not tested |
 | E5 | duplicate Jira bug on a 429; minutes blocked by repeated Xray logins | 429 from search; bad Xray secret with 20 cases | fail closed (UNVERIFIED, not filed); one auth attempt per run |
 | E6 | lost or corrupt map/history after a crash or two clicks | kill during a write; two runs in the same second | atomic writes; microsecond ids; one bad file does not hide others |
-| E7 | installing QAX pulls versions with known advisories | `pip install .` in a clean venv | floors = audited versions (DEPENDENCY_AUDIT.md, 2026-10-09); no new CVE scan this round (pip-audit not installed) |
+| E7 | installing QAX pulls versions with known advisories | `pip install .` in a clean venv | floors = audited versions; pip-audit 2026-10-20: 0 known vulnerabilities (environment + requirements.txt); repeat with `make audit-deps` (needs network) |
 | E8 | false regressions on slow APIs; unreadable expectation counted as PASS | an endpoint that times out; `expected_status: "ok"` | both ERROR; "2xx" understood |
 | E9 | slow reads of large pages; a password echoed in a log | a 5,000-element page; NL fill of a password | memoized queries; masked |
 | E10 | internal paths/credentials shown to whoever sees the UI | make an export raise with a path in its message | UI text cleaned; detail in the log under the same ref |
@@ -218,7 +219,7 @@ internal agents is not justified by any measured gap today — each would add co
 | Failure triage classifier (rules first) | core engine | stop wasting time on environment failures | low | P1 |
 | HAR / network log per failed case | tool (Playwright record_har) | evidence for API-level root cause | low | P1 |
 | Live verification of Jira story in / bugs out, Xray | integration | the promised loop | needs a Jira+Xray trial | P1 (founder) |
-| axe-core | tool | full WCAG audit (basics exist) | licence review (MPL-2.0) | P2 |
+| axe-core | tool | full WCAG audit (basics exist) | ✅ vendored 4.13.0 unmodified (MPL-2.0, THIRD_PARTY_NOTICES.md); `QAX_A11Y=axe`; tested in a real browser | done |
 | Appium | tool | native mobile | high; new runtime | P3 — not before web is sold |
 | More AI agents | skill | — | adds cost and variance; no measured gap needs it | **not now** |
 
@@ -374,7 +375,7 @@ S1–S4, B1 — see §3/§3a. Rollback: each is a guard; disabling it re-opens t
 | 3 | ✅ DONE — Project home (both tracks), coverage-gaps / critical-findings / readiness cards | one place to decide | overview (exists) | cards per §7 from real data only | 3 |
 | 4 | ✅ DONE — Flaky quarantine | stop flaky cases blocking | history (exists) | a flaky case is marked, not counted as FAIL, listed | 1 |
 | 5 | ✅ DONE — Per-run cost for functional runs | budget | usage tracking | run duration + AI calls/≈USD per run and per generation (scoped meter; non-Claude providers counted, not priced); Cost card | 1 |
-| 6 | axe-core | full WCAG audit | licence review (MPL-2.0) | axe results as observations | 1 |
+| 6 | ✅ DONE — axe-core | full WCAG audit | licence noted (MPL-2.0, unmodified) | axe results as observations, engine named per page | 1 |
 
 ### P3 — later
 Native mobile (Appium), agent-run exploratory charters under the same verification rules, hosted
@@ -392,13 +393,13 @@ Later the same day: failure triage, HAR, settings/setup panel, project home card
 (+ seeded-change benchmark), adaptive settle wait, quarantine, the 10-app benchmark (79/79), and the hardening
 round E10–E14 (public errors, Jira/Xray retries + token renewal, browser busy, grounding gate, healing rules,
 per-run cost, evidence and change cards). Full results: commit messages and §3/§3b. **Not done:** everything
-marked ⛔ in §2, and: a fresh dependency CVE scan (pip-audit not installed — needs approval to download), axe-core
-(licence review + download), a team-defined readiness rule, the human baseline.
+marked ⛔ in §2, and: a team-defined readiness rule, the human baseline, and E15 (the pip wheel lacks the web UI
+and config files). Done since: pip-audit scan (0 known vulnerabilities), axe-core 4.13.0 behind `QAX_A11Y=axe`.
 
 ## 13. Next actions
 
 1. Founder: AI credit or a local model → `make eval-generation` (the single most important unknown).
 2. Founder: Jira trial + Xray trial → live story-in / bug-out run on one corpus app.
-3. Eng (needs approval to download): pip-audit CVE scan; axe-core after the licence review.
+3. Eng: E15 — ship web/static and config/ in the wheel and test `pip install .` + `qax-web` in a clean venv.
 4. Eng: more seeded-change apps for selection (eShop, Angular) to move beyond n = 3 on one app.
 5. Founder: 3 Phase-0 sessions using the new positioning; record which message lands.
