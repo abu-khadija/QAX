@@ -796,7 +796,8 @@ Examples:
 
         if answer == "y":
             try:
-                prompt_path = Path(__file__).parent / "config" / "system_prompt.md"
+                from core.paths import config_file
+                prompt_path = config_file("system_prompt.md")
                 timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 appendix = (
                     f"\n\n---\n## Auto-Optimization Suggestions ({timestamp})\n\n"

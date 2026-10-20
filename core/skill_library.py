@@ -30,7 +30,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Default skills file location ──────────────────────────────────────────────
-DEFAULT_SKILLS_PATH = Path(__file__).parent.parent / "config" / "skills.json"
+from core.paths import config_file  # noqa: E402 — repo config/ or the installed qax_config copy
+DEFAULT_SKILLS_PATH = config_file("skills.json")
 
 # ── How many top skills to include in the prompt context ──────────────────────
 TOP_SKILLS_LIMIT = 5

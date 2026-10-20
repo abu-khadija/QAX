@@ -25,6 +25,9 @@ Every scan written with `--out` records the exact version and commit that produc
   read timeout. The Xray token is renewed after 23 h and once after a 401.
 - A request that cannot get the browser within `QAX_BROWSER_WAIT` seconds (default 5) gets 409 "busy".
 
+### Fixed
+- **Wheel install works** (E15): `pip install .` now ships the web UI (`web/static`), `config/` system prompt, schema and skills, the `configs/` run templates and the demo/gate targets, so `qax-web` serves the UI and `qax demo` runs outside a checkout. Per-user `config/projects/*` is never packaged. `core/paths.py` prefers the repo copy.
+
 ### Security
 - Error text shown in the web UI and MCP is cleaned (no internal paths, credentials in URLs, tokens); the full
   exception is logged under a reference shown with the message.

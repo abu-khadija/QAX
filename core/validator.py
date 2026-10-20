@@ -19,7 +19,8 @@ from jsonschema import ValidationError
 logger = logging.getLogger(__name__)
 
 # ── Path to the schema file (relative to this file's location) ────────────────
-SCHEMA_PATH = Path(__file__).parent.parent / "config" / "xray_schema.json"
+from core.paths import config_file  # noqa: E402 — repo config/ or the installed qax_config copy
+SCHEMA_PATH = config_file("xray_schema.json")
 
 # ── Allowed Playwright action types (mirrors xray_schema.json enum) ───────────
 VALID_PLAYWRIGHT_ACTIONS = {"click", "fill", "navigate", "assert", "select", "upload", "wait", "hover"}

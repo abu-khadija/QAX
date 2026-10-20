@@ -36,9 +36,23 @@ qax-web = "web.server:serve"
 
 [tool.setuptools]
 py-modules = ["main"]
+# Explicit list (tests/test_packaging.py checks it against every __init__.py) so the two
+# data-only packages below can map onto the repo's config/ and configs/ folders.
+packages = [
+    "core", "core.adapters", "core.input_adapters",
+    "services", "execution", "web", "cli", "evals", "evals.targets",
+    "qax_config", "qax_configs",
+]
 
-[tool.setuptools.packages.find]
-include = ["core*", "services*", "execution*", "web*", "cli*", "evals*"]
+[tool.setuptools.package-dir]
+qax_config = "config"     # read via core/paths.py when there is no repo root (wheel install)
+qax_configs = "configs"
 
+# Everything a shipped command reads at runtime. Never config/projects/ (per-user app maps,
+# selectors) or anything secret — those stay in the checkout.
 [tool.setuptools.package-data]
 core = ["vendor/axe-core/*"]   # axe-core 4.13.0, MPL-2.0, unmodified — with its LICENSE files
+web = ["static/*.html", "static/*.js", "static/*.css", "static/img/*"]
+evals = ["truth/*.json", "data/*.json", "data/*.jsonl"]   # qax demo + the gate
+qax_config = ["system_prompt.md", "xray_schema.json", "skills.json"]
+qax_configs = ["*.json"]

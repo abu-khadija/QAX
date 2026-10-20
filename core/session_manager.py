@@ -106,7 +106,8 @@ class SessionManager:
             Keys starting with "_" in the JSON (like "_comment") are stripped
             from the returned config — they are documentation only.
         """
-        path = Path(config_path)
+        from core.paths import configs_template
+        path = configs_template(str(config_path))  # "configs/x.json" also resolves to the shipped template
 
         if not path.exists():
             logger.warning(

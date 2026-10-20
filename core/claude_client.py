@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 # ── Path constants ────────────────────────────────────────────────────────────
 CONFIG_DIR = Path(__file__).parent.parent / "config"
-SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.md"
+from core.paths import config_file  # noqa: E402 — repo config/ or the installed qax_config copy
+SYSTEM_PROMPT_PATH = config_file("system_prompt.md")
 
 # ── Model configuration ───────────────────────────────────────────────────────
 CLAUDE_MODEL_HEAVY = os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")

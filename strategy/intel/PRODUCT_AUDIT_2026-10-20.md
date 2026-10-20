@@ -102,7 +102,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | E11 | P2 | Jira/Xray writes failed on the first 429/503; the Xray token was never renewed (24 h expiry) | core/http_retry.py: retries 429/503 and never-sent connections with Retry-After/backoff; a create is NOT re-sent after 5xx or a read timeout (could duplicate); Xray token renewed after 23 h and once after a 401 | retry + token tests |
 | E12 | P2 | a request waiting for the browser lock waited without limit behind a run of minutes | lock with a wait (QAX_BROWSER_WAIT, default 5 s) → 409 "busy — try again" | busy test |
 | E13 | P1 (AI) | the grounding check only flagged cases that use an element not on the app — they still ran and failed for the wrong reason | executor gate: such a case is SKIP (cause test) until `"reviewed": true` or QAX_ALLOW_UNMAPPED=true; the run preview lists it as not run | gate tests |
-| E15 | P1 (packaging) | **the pip wheel ships no non-Python files**: no `web/static` (the web UI), no `config/` (system prompt, schema). `pip install .` then `qax-web` cannot serve the UI — found while packaging axe-core | **open** — only axe-core is packaged so far (`[tool.setuptools.package-data]`); Docker is unaffected (copies the tree) | wheel listing |
+| E15 | P1 (packaging) | **the pip wheel ships no non-Python files**: no `web/static` (the web UI), no `config/` (system prompt, schema). `pip install .` then `qax-web` cannot serve the UI — found while packaging axe-core | ✅ **done 2026-10-20** — `pyproject.toml` ships `web/static/*`, `config/*.md`, `config/*.json` (as data package `qax_config`), `configs/*.json` (`qax_configs`), the demo/gate targets and eval data; `core/paths.py` reads the repo copy first, the installed copy otherwise; `config/projects/*` and secrets are never shipped. Clean venv (scratchpad): `pip install` the wheel → `qax --help` exit 0, `qax-web` GET /app 200 (16 051 B), /app.js 200, /app.css 200, / 200; schema and system prompt resolve to `site-packages/qax_config/` | tests/test_wheel_contents.py (builds the wheel, asserts UI + config present and no projects/.env) |
 | E14 | P1 (AI) | AI healing could turn a failed check into a pass (heal an assertion onto another element "with the right text") | healing only for locating failures of actions; never assertions or outcome checks; a healed pass carries `verdict_note` | fake-model healing tests |
 
 **Finding details for E1–E14 (impact · reproduction before the fix · acceptance):**
@@ -393,13 +393,12 @@ Later the same day: failure triage, HAR, settings/setup panel, project home card
 (+ seeded-change benchmark), adaptive settle wait, quarantine, the 10-app benchmark (79/79), and the hardening
 round E10–E14 (public errors, Jira/Xray retries + token renewal, browser busy, grounding gate, healing rules,
 per-run cost, evidence and change cards). Full results: commit messages and §3/§3b. **Not done:** everything
-marked ⛔ in §2, and: a team-defined readiness rule, the human baseline, and E15 (the pip wheel lacks the web UI
-and config files). Done since: pip-audit scan (0 known vulnerabilities), axe-core 4.13.0 behind `QAX_A11Y=axe`.
+marked ⛔ in §2, and: a team-defined readiness rule, the human baseline. Done since: E15 (the wheel ships the web UI and config; clean-venv `qax-web` check), pip-audit scan (0 known vulnerabilities), axe-core 4.13.0 behind `QAX_A11Y=axe`.
 
 ## 13. Next actions
 
 1. Founder: AI credit or a local model → `make eval-generation` (the single most important unknown).
 2. Founder: Jira trial + Xray trial → live story-in / bug-out run on one corpus app.
-3. Eng: E15 — ship web/static and config/ in the wheel and test `pip install .` + `qax-web` in a clean venv.
+3. ~~Eng: E15 — ship web/static and config/ in the wheel~~ ✅ done 2026-10-20 (tests/test_wheel_contents.py).
 4. Eng: more seeded-change apps for selection (eShop, Angular) to move beyond n = 3 on one app.
 5. Founder: 3 Phase-0 sessions using the new positioning; record which message lands.
