@@ -20,6 +20,8 @@ import contextlib
 import json
 import sys
 
+from core.public_error import public_error
+
 PROTOCOL = "2025-06-18"
 _MAX = 60_000          # characters of JSON per tool answer
 
@@ -122,7 +124,7 @@ def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
             return {"error": f"Unknown tool: {name}"}, True
         return d, bool(d.get("error")) and not (d.get("tests") or d.get("results") or d.get("pages"))
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"QAX tool failed: {str(exc)[:300]}"}, True
+        return {"error": public_error("QAX tool failed", exc)}, True
 
 
 def handle(msg: dict) -> "dict | None":
@@ -152,7 +154,7 @@ def handle(msg: dict) -> "dict | None":
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Unknown method: {method}"}}
         return {"jsonrpc": "2.0", "id": mid, "result": result}
     except Exception as exc:  # noqa: BLE001
-        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": str(exc)[:300]}}
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": public_error("QAX internal error", exc)}}
 
 
 def serve(stdin=None, stdout=None) -> None:

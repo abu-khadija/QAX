@@ -7,6 +7,25 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- **Grounding gate**: a generated case that uses an element QAX did not find on the app is not run (SKIP, cause
+  test) until reviewed (`"reviewed": true`) or `QAX_ALLOW_UNMAPPED=true`; the run preview lists it as not run.
+- **Per-run cost**: each functional run records its duration and AI calls (≈ USD), each generation its AI usage;
+  a scoped meter keeps a run's numbers its own. Non-Claude providers are counted, not priced.
+- **Overview cards**: "Last change → cases run", "Evidence of the last run", "Cost".
+- **Interfaces and data contracts** for every stage: strategy/intel/PRODUCT_AUDIT_2026-10-20.md §4b.
+
+### Changed
+- AI healing (opt-in) only repairs a moved or renamed element: assertions, outcome checks and failures that are
+  not a missing element are never healed; a pass that needed healing carries a `verdict_note`.
+- Jira/Xray calls retry 429/503 with backoff (Retry-After honoured); a create is never re-sent after a 5xx or a
+  read timeout. The Xray token is renewed after 23 h and once after a 401.
+- A request that cannot get the browser within `QAX_BROWSER_WAIT` seconds (default 5) gets 409 "busy".
+
+### Security
+- Error text shown in the web UI and MCP is cleaned (no internal paths, credentials in URLs, tokens); the full
+  exception is logged under a reference shown with the message.
+
+### Added
 - **Change-based selection** (`execute --changed-since REF --repo PATH`, web, MCP): the git diff → the pages it can
   affect → only the cases that visit them, each with its reason; shared files and changes QAX cannot place run
   everything. `evals/change_bench.py`: three seeded, built and run changes to PetClinic — 0 regressions missed.

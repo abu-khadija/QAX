@@ -543,7 +543,7 @@ class GenerationService:
             summary["unmapped_cases"] = check_cases(valid, opts.app_map)
             if summary["unmapped_cases"]:
                 prog.emit("validate", "warn", f"{summary['unmapped_cases']} case(s) use an element "
-                          "that is not on the app map — marked needs_review")
+                          "that is not on the app map — they will not run until reviewed")
 
         return GenerationResult(
             test_cases=valid,

@@ -662,7 +662,8 @@ def check_cases(cases: list, app_map: AppMap | None) -> int:
     Flag generated steps that use an element the map does not have.
 
     Each case gets `unmapped_elements` (list) and, when not empty, needs_review=True —
-    an AI-proposed step on a non-existent element would fail for the wrong reason.
+    an AI-proposed step on a non-existent element would fail for the wrong reason. The executor
+    holds such cases back (SKIP, cause "test") until reviewed — see test_executor.grounding_block.
 
     Returns:
         int: Number of cases flagged. 0 when there is no map. Never raises.

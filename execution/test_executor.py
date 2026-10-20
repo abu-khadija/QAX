@@ -57,6 +57,52 @@ def ai_assist_enabled() -> bool:
     return os.getenv("QAX_AI_HEAL", "false").strip().lower() == "true"
 
 
+
+_ASSERT_ACTIONS = ("assert", "verify", "check", "expect")
+_LOCATE_FAILURE = re.compile(r"not found|no element|waiting for (locator|selector)|resolved to 0|"
+                             r"strict mode violation|not visible|not attached|unknown element|"
+                             r"timeout \d+ ?ms exceeded", re.I)
+
+
+def _not_healable(step: dict, result: dict) -> str:
+    """
+    Why a failed step must NOT be sent to AI healing ("" = it may).
+
+    Healing exists for one problem: the element moved or was renamed. It must never turn a
+    real regression into a pass, so it is refused when
+      * the step is an assertion (a different element "with the right text" proves nothing);
+      * the step checks an outcome (assertion_type) — the element was found, the outcome failed;
+      * the failure is not a locating failure (the element was found and the action or the
+        expected result failed — that is the app's answer, not a stale selector).
+    """
+    act = str(step.get("playwright_action") or step.get("action_type") or result.get("action_type") or "").lower()
+    if act in _ASSERT_ACTIONS or act == "assert":
+        return "an assertion is never healed — a different element passing would hide a regression"
+    if step.get("assertion_type") and not _LOCATE_FAILURE.search(str(result.get("error") or "")):
+        return "the element was found and the expected outcome did not hold — that is the app's answer"
+    if not _LOCATE_FAILURE.search(str(result.get("error") or "")):
+        return "the failure is not a missing element — healing only repairs a moved or renamed element"
+    return ""
+
+def grounding_block(test_case: dict) -> str:
+    """
+    The reason a case must not run yet, or "" when it may.
+
+    A case the generator flagged with `unmapped_elements` (elements not on the app map) is held
+    back unless a person marked it `"reviewed": true`, or QAX_ALLOW_UNMAPPED=true is set for the
+    run. Never raises.
+    """
+    try:
+        missing = [str(x) for x in (test_case.get("unmapped_elements") or []) if str(x).strip()]
+        if not missing or test_case.get("reviewed") is True:
+            return ""
+        if os.getenv("QAX_ALLOW_UNMAPPED", "false").strip().lower() == "true":
+            return ""
+        return ("not run — uses element(s) QAX did not find on the app: " + ", ".join(missing[:5])
+                + ". Re-read the app (map), fix the case, or set \"reviewed\": true on it after checking.")
+    except Exception:  # noqa: BLE001
+        return ""
+
 class TestExecutor:
     """
     Orchestrates Playwright execution of EXAMPLE QA test cases.
@@ -164,6 +210,17 @@ class TestExecutor:
                 }
             except AttributeError:   # a mapper without per-case variables
                 pass
+
+        # ── Gate: grounding ────────────────────────────────────────────────
+        # An AI-proposed step on an element the app map does not have would fail for the
+        # wrong reason (or, worse, act on a look-alike). Such a case is not run until a
+        # person reviews it: re-read the app, fix the case, or mark it "reviewed": true.
+        blocked = grounding_block(test_case)
+        if blocked:
+            res = self._error_result(tc_id, title, start_ts, blocked)
+            res.update(status="SKIP", cause="test", cause_why="not run: needs review (grounding gate)",
+                       not_run_reason=blocked)
+            return res
 
         # ── Guard: execution not available ─────────────────────────────────
         if not _EXECUTION_AVAILABLE or not self.action_mapper:
@@ -364,6 +421,9 @@ class TestExecutor:
             "screenshot":        failure_screenshot,
             "html_snapshot":     html_snapshot_path,
             "healed_steps":      healed_count,
+            # a pass that needed AI healing is shown as such, never as a plain pass
+            "verdict_note":      (f"passed only after AI healing changed {healed_count} selector(s) — "
+                                  "check the healed steps before trusting it") if healed_count else "",
             "error":             case_error,
             "risk_level":        risk_level,
             "bug_key":           bug_key,
@@ -658,6 +718,13 @@ class TestExecutor:
                 logger.info("[%s] Step %s FAILED — AI healing off (QAX_AI_HEAL=true / --ai-heal "
                             "to send the page HTML to the AI provider for a selector fix)",
                             tc_id, step_num)
+                return result
+
+            # ── Healing may only find a moved element, never change a verdict ──
+            why_not = _not_healable(step, result)
+            if why_not:
+                logger.info("[%s] Step %s FAILED — not healed: %s", tc_id, step_num, why_not)
+                result["not_healed"] = why_not
                 return result
 
             # ── Step failed — attempt AI healing ───────────────────────────

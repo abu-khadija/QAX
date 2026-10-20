@@ -200,6 +200,59 @@ def build_overview(project: str, config_dir: Path, runs_dir: str, url: str = "")
                       "rows": crit[:8], "detail": "Functional failures caused by the app (last run) and proven "
                                                   "P1/P2 security bugs (last scan).", "action": "bugs"})
 
+    # 12 · The change → the cases it selected (a change-based run), with the reasons
+    sel = (hist[0].get("selection") if hist else None) or None
+    if sel:
+        cards.append({"id": "change_selection", "title": "Last change → cases run",
+                      "state": "warn" if sel.get("run_all") else "ok",
+                      "value": ("all cases (" + str(len(sel.get("selected") or [])) + ")" if sel.get("run_all")
+                                else f"{len(sel.get('selected') or [])} run · {len(sel.get('skipped') or [])} skipped"),
+                      "rows": [{"id": pg, "text": "a changed file can affect this page", "verdict": "AFFECTED"}
+                               for pg in (sel.get("pages") or [])[:8]],
+                      "detail": f"{sel.get('files', 0)} changed file(s): {sel.get('why', '')}. A file QAX cannot place, "
+                                "or a shared one, runs everything; smoke cases always run.", "action": "run"})
+    elif hist:
+        cards.append({"id": "change_selection", "title": "Last change → cases run", "state": "empty",
+                      "value": "Every case ran",
+                      "detail": "Give the app's local checkout and a base commit (Run step → only what a change can "
+                                "break): QAX runs the cases a change can affect and says why.", "action": "run"})
+
+    # 13 · Evidence — can each non-passing case be checked by someone else?
+    ev = (hist[0].get("evidence") if hist else None) or {}
+    if ev:
+        need = ("steps", "screenshot", "reason")
+        full = [k for k, e in ev.items() if all(e.get(x) for x in need)]
+        rows = [{"id": k, "text": "missing: " + ", ".join(x for x in need if not e.get(x))
+                 + ("" if e.get("network") else " · no network log"), "verdict": "INCOMPLETE"}
+                for k, e in ev.items() if k not in full]
+        cards.append({"id": "evidence", "title": "Evidence of the last run",
+                      "state": "ok" if len(full) == len(ev) else "warn",
+                      "value": f"{len(full)}/{len(ev)} non-passing case(s) fully evidenced",
+                      "rows": rows[:8],
+                      "detail": "Fully evidenced = the steps, a screenshot and the observed result or error. The "
+                                "network log (HAR) is attached to browser failures; a trace when tracing is on.",
+                      "action": "run"})
+
+    # 14 · Cost — measured, for the last run and the last generation (AI cost is approximate)
+    gen = _read(_root() / "functional_runs" / p / "generation_cost.json")
+    run_cost = (hist[0].get("cost") if hist else None) or None
+    if run_cost or gen:
+        def _usd(c):
+            if not c or not c.get("calls"):
+                return "no AI calls"
+            usd = f"≈ ${c.get('estimated_cost_usd', 0):.4f}"
+            return f"{c['calls']} AI call(s) · {usd}" + (f" (+{c['unpriced_calls']} unpriced)" if c.get("unpriced_calls") else "")
+        parts = []
+        if run_cost:
+            parts.append(f"Last run: {run_cost.get('cases', '?')} case(s) in {run_cost.get('duration_s', '?')} s · {_usd(run_cost)}")
+        if gen:
+            parts.append(f"Last generation: {gen.get('cases', '?')} case(s) · {_usd(gen)}")
+        total = (run_cost or {}).get("estimated_cost_usd", 0) + (gen or {}).get("estimated_cost_usd", 0)
+        cards.append({"id": "cost", "title": "Cost", "state": "ok",
+                      "value": f"≈ ${total:.4f} AI" + (f" · {run_cost['duration_s']} s run" if run_cost else ""),
+                      "detail": " · ".join(parts) + ". AI cost is an estimate from token counts and a price table; "
+                                "running cases uses no AI unless healing is on.", "action": "run"})
+
     # 11 · Release readiness — a rule over the cards above (not a guarantee)
     if hist:
         blockers = []

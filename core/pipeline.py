@@ -376,7 +376,7 @@ class QAXPipeline:
         print(f"  Runnable:   api {plan['api_executable']} / ui {plan['ui_executable']}")
         if plan.get("app_map_pages"):
             print(f"  App map:    {plan['app_map_pages']} page(s) — cases grounded in the real app"
-                  + (f"; {plan['unmapped_cases']} case(s) use an element not on the map (needs review)"
+                  + (f"; {plan['unmapped_cases']} case(s) use an element not on the map — held back until reviewed"
                      if plan.get("unmapped_cases") else ""))
         print(f"  Export:     {plan['export']}  |  live writes: {plan['live_writes']}")
         for w in plan["writes"]:

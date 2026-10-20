@@ -41,11 +41,11 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | Jira story input, PR input | ⛔ code only, never exercised | no test, no live run |
 | Xray export/results, Zephyr | ⛔ mocked only (Zephyr Cloud path fixed today, unverified) | — |
 | Excel export | ✅ now tested (was untested) | test_excel_export_writes_a_workbook… |
-| AI healing | ⛔ never exercised (opt-in) | — |
-| Change-based test selection | ❌ missing | risk only shapes prompts |
-| Failure triage app-bug vs environment vs test | 🟡 FAIL vs ERROR (a fail after an unrunnable step is ERROR), throttling → ERROR; no environment classifier | test_executor.py |
-| Flaky detection | 🟡 run history (web UI) | run_history.py |
-| Evidence: screenshots, traces, page errors, a11y/perf | ✅ (HAR ❌) | tests |
+| AI healing | 🟡 opt-in; the safety rules are tested with a fake model (assertions/outcome failures never healed, a healed pass is marked); never run against a live model | tests/test_hardening_round.py |
+| Change-based test selection | ✅ first version | core/change_selection.py; evals/change_bench.py: 3 seeded PetClinic changes, 0 missed; UI + MCP + overview card |
+| Failure triage app-bug vs environment vs test | ✅ rules (core/triage.py): every non-pass carries `cause`; test/environment never filed as bugs | tests/test_triage.py |
+| Flaky detection | ✅ run history + quarantine (still run, never filed, not blocking readiness) | run_history.py |
+| Evidence: screenshots, traces, page errors, a11y/perf, HAR on failure (secrets redacted) | ✅ | tests; evidence-completeness card |
 | CI | 🟡 `execute --yes --junit` tested; workflow files never run on a real CI | — |
 | Native mobile (Appium) | ❌ missing | emulation only |
 | Packaging: pip, Docker | ✅ verified this week | pip in clean venv; image runs a browser job |
@@ -98,8 +98,33 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | R2 | P2 | **a regression I introduced today**: the generalized card rule renamed a dialog's submit (Beszel `add_system_button_2`), breaking its cases — caught by the 10-app benchmark | rule limited to table rows and 3+ repeated cards | dialog test |
 | T1 | — | Beszel's systems table renders only visible rows; leftover test data (36 systems) pushed a renamed row out of the page → a false FAIL that FLIPPED between runs | cases filter before asserting and delete what they create (cleanup_steps); leftovers removed | benchmark: 7/7 ×3, 0 leftovers |
 
-Not changed (documented): the per-action settle wait (load → networkidle ≤2 s → DOM stable) is the main cost per
-step (~4–8 s per case on the corpus); an adaptive network-idle wait is a P2 performance item.
+| E10 | P2 | raw exception text reached the UI in 9 places (scan, plan, execute, export, bug filing, clone, AI errors, MCP) — internal paths, URLs with credentials, tokens | core/public_error.py: cleaned message + a reference; full detail only in the log | ui-error tests (paths, user:pass@, token=, Bearer) |
+| E11 | P2 | Jira/Xray writes failed on the first 429/503; the Xray token was never renewed (24 h expiry) | core/http_retry.py: retries 429/503 and never-sent connections with Retry-After/backoff; a create is NOT re-sent after 5xx or a read timeout (could duplicate); Xray token renewed after 23 h and once after a 401 | retry + token tests |
+| E12 | P2 | a request waiting for the browser lock waited without limit behind a run of minutes | lock with a wait (QAX_BROWSER_WAIT, default 5 s) → 409 "busy — try again" | busy test |
+| E13 | P1 (AI) | the grounding check only flagged cases that use an element not on the app — they still ran and failed for the wrong reason | executor gate: such a case is SKIP (cause test) until `"reviewed": true` or QAX_ALLOW_UNMAPPED=true; the run preview lists it as not run | gate tests |
+| E14 | P1 (AI) | AI healing could turn a failed check into a pass (heal an assertion onto another element "with the right text") | healing only for locating failures of actions; never assertions or outcome checks; a healed pass carries `verdict_note` | fake-model healing tests |
+
+**Finding details for E1–E14 (impact · reproduction before the fix · acceptance):**
+
+| # | Impact | Reproduction (before) | Acceptance (met) |
+|---|---|---|---|
+| E1 | a session cookie / auth header sent to a third party | API case on an endpoint that 302s to another host; a recording server logs the header | the second server receives nothing; case = ERROR "redirect off the app" |
+| E2 | a browser crash files N false bugs; a crashed worker loses a whole batch | kill the browser mid-batch | remaining cases ERROR (environment), never FAIL; other workers' results kept |
+| E3 | wrong AI-cost numbers; scans piling up; a closed tab keeps attacking | start two scans; close the stream tab | second scan 409; closing the stream cancels |
+| E4 | "clean" result while checks silently did not run | uninstall Pillow, run a visual check | the check is listed under not tested |
+| E5 | duplicate Jira bug on a 429; minutes blocked by repeated Xray logins | 429 from search; bad Xray secret with 20 cases | fail closed (UNVERIFIED, not filed); one auth attempt per run |
+| E6 | lost or corrupt map/history after a crash or two clicks | kill during a write; two runs in the same second | atomic writes; microsecond ids; one bad file does not hide others |
+| E7 | installing QAX pulls versions with known advisories | `pip install .` in a clean venv | floors = audited versions (DEPENDENCY_AUDIT.md, 2026-10-09); no new CVE scan this round (pip-audit not installed) |
+| E8 | false regressions on slow APIs; unreadable expectation counted as PASS | an endpoint that times out; `expected_status: "ok"` | both ERROR; "2xx" understood |
+| E9 | slow reads of large pages; a password echoed in a log | a 5,000-element page; NL fill of a password | memoized queries; masked |
+| E10 | internal paths/credentials shown to whoever sees the UI | make an export raise with a path in its message | UI text cleaned; detail in the log under the same ref |
+| E11 | exports/bug filing fail under normal Jira throttling; long runs fail after 24 h | 429 on create; a token older than 24 h | create succeeds after a 429; a 500 is not re-sent; token renewed |
+| E12 | the UI hangs for minutes with no explanation | start a browser run, then press Understand | 409 within QAX_BROWSER_WAIT with a clear sentence |
+| E13 | wasted runs, misleading FAILs from invented elements | a generated case with `selector_key` not on the map | not run, reason names the element; runs after review |
+| E14 | a real regression reported as PASS | assert step fails; fake healer suggests another element | healer not called; FAIL stands |
+
+Performance (done since): the settle wait races the action's own requests against network idle
+(adaptive); measured 79/79 correct with ~8 % less time overall (strategy/evidence, last section).
 
 ## 4. AI intelligence assessment
 
@@ -157,6 +182,26 @@ on navigate = environment; unknown selector = test; assertion mismatch with page
  LEARN ─────── run history (regressions/fixes/flaky), map refresh keeps names, feedback store (human-
                accepted only); every model/prompt change re-measured by eval-generation + bench + gate
 ```
+
+### 4b. Interfaces and data contracts (what each stage takes and returns — as implemented)
+
+Every stage is a function or service with a plain-JSON contract, so each can be tested, replaced or run by
+MCP/CLI/web alike. A stage never raises across its boundary: failures come back as data (`error`, `cause`).
+
+| Stage | Interface (code) | Input | Output (contract) | Trust rule |
+|---|---|---|---|---|
+| Understand · app | `core.app_mapper.map_app(url, username, password, max_pages, storage_state)` | URL (+ login or recorded session) | `AppMap{base_url, login_ok, pages:[{path, title, elements:{key: selector}, forms}], skipped_links, explored_actions, writes, error}` → `config/projects/<p>/app_map.json`, `selectors.json` | origin-guarded; selectors checked unique; off-app pages skipped |
+| Understand · story | `core.traceability` (criteria numbering), Jira input adapter | story text / Jira key | `criteria:[{id: "AC-n", text}]` → `requirements.json` | deterministic numbering; story text is data, never instructions |
+| Understand · repo | `web.functional._repo_source`, `core.code_reader` | https repo / allowed local root | file inventory + optional AI summary | hidden folders refused; QAX_REPO_ROOTS |
+| Propose | `services.generation_service.GenerationService.generate(source, options)` | `GenerationOptions{user_story, content, app_map, repo_context, test_type}` | `GenerationResult{test_cases, invalid, summary, error}`; each case per `config/xray_schema.json` (required: test_case_id, title, …, manual_steps, automation_steps[{step_number, playwright_action, selector_key, value, assertion_type, assertion_value}], confidence_score, needs_review) + optional `cleanup_steps`, `api_steps`, `covers` | **untrusted output** |
+| Gates | schema validator · `app_mapper.check_cases` → `unmapped_elements` · `test_executor.grounding_block` · `origin_guard.is_allowed` · `{{env:QAX_VAR_*}}` only | proposed cases | cases + `unmapped_elements`, `needs_review`; ungrounded cases held back | deterministic; AI cannot bypass |
+| Select | `core.change_selection.select(cases, files, repo, project_dir)` | cases + `git diff --name-only` | `{selected:[{id, reasons}], skipped:[{id, reason}], run_all, why, affected_pages, unplaced_files}` | unknown impact or shared file → run all; smoke always |
+| Execute | `TestExecutor.execute_batch(cases, runner)` · `api_runner` · scan orchestrator | runnable cases + target | batch `{total, passed, failed, errors, skipped, causes, writes_sent, results:[result]}` | origin guard, read-only, browser lock (409 busy), timeouts |
+| Verify | assertions in `action_mapper`, `api_runner._status_matches`, scan control requests | page / response | step `{status: PASS\|FAIL\|ERROR\|SKIP\|HEALED, actual_result, error}` | a step that did not run ≠ PASS; healing never on assertions |
+| Triage | `core.triage.classify(result)` | result | `cause ∈ {app, test, environment, unclear}` + `cause_why` | rules only; AI may explain, never relabel |
+| Evidence | executor + `core.network_log.save` | run | result `{screenshot, steps[].screenshot, trace?, network_log?, page_errors, verdict_note}` | secrets redacted; trace dropped if a secret was typed |
+| Decide | `core.traceability.requirement_verdicts`, `core.jira_bugs.functional_result_to_bug`, `JiraBugFiler.file/link/comment` | results + criteria | `[{id, text, verdict: PASSED\|FAILED\|NOT COVERED\|NOT FULLY RUN, cases}]`; bug `{title, steps, expected, actual, evidence, fingerprint}` | live writes only with operator OK + QAX_ALLOW_LIVE_EXPORT; duplicate check fails closed; retries never duplicate a create |
+| Learn | `core.run_history.save_run(project, url, results, cost=, selection=)` | results | run record `{when, url, verdicts, causes, titles, evidence, cost?, selection?}`; quarantine; regression suite | only human-accepted feedback; every model/prompt change re-measured |
 
 **Where AI is allowed:** understanding text, proposing cases, explaining a failure. **Where it is not:**
 deciding PASS/FAIL, confirming a bug or vulnerability, choosing to write to Jira, navigating anywhere
@@ -222,13 +267,13 @@ internal agents is not justified by any measured gap today — each would add co
 
 | Card | Value | Needs | Priority |
 |---|---|---|---|
-| Coverage gaps | criteria with no case → write one | already in requirements.json — card only | P2, small |
-| Flaky tests (quarantine) | stop flaky cases from blocking | history (exists) + a quarantine flag | P2 |
-| Release readiness | one go/no-go per release | the team's own rule over the cards above | P2 |
-| Recent changes → affected cases | what to run for this PR | change → test selection (missing) | P2 (top) |
-| Cost per run | budget AI spend | persist usage for functional runs (scans have it) | P2 |
-| Evidence completeness | can a finding be verified independently? | computable from results | P3 |
-| Critical findings (cross-track) | one list of P1s from both tracks | both stores (exist) | P2 |
+| Coverage gaps | criteria with no case → write one | ✅ built | — |
+| Flaky tests (quarantine) | stop flaky cases from blocking | ✅ built | — |
+| Release readiness | one go/no-go per release | ✅ built (QAX's rule; a team-defined rule is still open) | — |
+| Recent changes → affected cases | what to run for this PR | ✅ built ("Last change → cases run") | — |
+| Cost per run | budget AI spend | ✅ built (run + generation, measured) | — |
+| Evidence completeness | can a finding be verified independently? | ✅ built (steps + screenshot + observed result per non-pass) | — |
+| Critical findings (cross-track) | one list of P1s from both tracks | ✅ built | — |
 
 **Deliberately not built:** "time saved", "AI confidence", "quality score" — no trustworthy measurement exists; a number there would be invented. Layout: the overview sits at the top of Functional QA; P2 moves it to a project home that both tracks open into.
 
@@ -280,7 +325,7 @@ incumbents), a managed QA service (people business, not product).
 | Security recall / FP / reproducibility | ✅ `make eval` (gate) | golden target + secure twin |
 | Generated-case quality (coverage, traceability, grounding, detection) | ✅ built, ⛔ not run | `make eval-generation` needs AI credit |
 | Time per case | ✅ recorded | bench JSON |
-| Cost per run | 🟡 scans only | persist AI usage per functional run |
+| Cost per run | ✅ scans + functional runs and generation (approximate USD) | scoped meter, run record |
 | Investigation time, maintenance effort | ❌ | needs people: Phase-0 sessions with a stopwatch |
 | Baseline comparison | ❌ | same stories, (a) a QA engineer by hand, (b) Playwright test agents / a coding agent with Playwright MCP — same app versions, same time box |
 
@@ -319,6 +364,7 @@ S1–S4, B1 — see §3/§3a. Rollback: each is a guard; disabling it re-opens t
 | 5 | ✅ DONE — HAR on failure | no network evidence (§2) | API-level root cause | — | `record_har` per failing case, secrets redacted | a failing case links a HAR without Authorization/cookies | trace-like secret test | size → keep only for failures | evidence completeness | 1 |
 | 6 | ✅ DONE — Settings screen (status only) | Jira/AI config only in .env (§6 step 4) | onboarding | — | read-only status of AI/Jira/Xray/live-export, never values; how to enable | a newcomer sees why filing is dry-run | UI test | never echo secrets | Quickstart time (Phase 0) | 1 |
 | 7 | Dead code | re-checked: nothing to remove (§2) | — | — | — | — | — | — | — | done (no change) |
+| 8 | ✅ DONE 2026-10-20 — Hardening round E10–E14 | §3b | trust | — | see §3b | see §3b | tests/test_hardening_round.py | each is a guard; no flag | — | 1 |
 
 ### P2 — differentiation
 | # | Item | Value | Depends | Acceptance | Effort |
@@ -327,7 +373,7 @@ S1–S4, B1 — see §3/§3a. Rollback: each is a guard; disabling it re-opens t
 | 2 | PR comment with per-criterion verdicts + CI on a real repo | the loop in the developer's tool | pushable repo (founder), P2-1 | one real PR shows the comment | 2 |
 | 3 | ✅ DONE — Project home (both tracks), coverage-gaps / critical-findings / readiness cards | one place to decide | overview (exists) | cards per §7 from real data only | 3 |
 | 4 | ✅ DONE — Flaky quarantine | stop flaky cases blocking | history (exists) | a flaky case is marked, not counted as FAIL, listed | 1 |
-| 5 | Per-run cost for functional runs | budget | usage tracking | cost shown per run | 1 |
+| 5 | ✅ DONE — Per-run cost for functional runs | budget | usage tracking | run duration + AI calls/≈USD per run and per generation (scoped meter; non-Claude providers counted, not priced); Cost card | 1 |
 | 6 | axe-core | full WCAG audit | licence review (MPL-2.0) | axe results as observations | 1 |
 
 ### P3 — later
@@ -342,12 +388,17 @@ refusal; mapper lock; AI-provider, repo and MCP hardening; Zephyr Cloud v2; core
 + /api/overview + overview cards; evals/functional_bench.py + manifest + gate check; UI header,
 consent text, footer, landing hero, README; fixes B1–B4. New tests: origin guard (attacker server),
 reader origin, traces, GET scan, inputs hardening, Zephyr, Excel, overview, JS parse.
-Full results: see the commit message and §3. **Not done:** everything marked ⛔ in §2.
+Later the same day: failure triage, HAR, settings/setup panel, project home cards, change-based selection
+(+ seeded-change benchmark), adaptive settle wait, quarantine, the 10-app benchmark (79/79), and the hardening
+round E10–E14 (public errors, Jira/Xray retries + token renewal, browser busy, grounding gate, healing rules,
+per-run cost, evidence and change cards). Full results: commit messages and §3/§3b. **Not done:** everything
+marked ⛔ in §2, and: a fresh dependency CVE scan (pip-audit not installed — needs approval to download), axe-core
+(licence review + download), a team-defined readiness rule, the human baseline.
 
 ## 13. Next actions
 
 1. Founder: AI credit or a local model → `make eval-generation` (the single most important unknown).
 2. Founder: Jira trial + Xray trial → live story-in / bug-out run on one corpus app.
-3. Eng: triage rules + HAR (P1-3), recorded starts for the older corpus apps (P1-4).
-4. Eng: change → test selection prototype on the PetClinic apps (P2-1), measured with seeded changes.
+3. Eng (needs approval to download): pip-audit CVE scan; axe-core after the licence review.
+4. Eng: more seeded-change apps for selection (eShop, Angular) to move beyond n = 3 on one app.
 5. Founder: 3 Phase-0 sessions using the new positioning; record which message lands.

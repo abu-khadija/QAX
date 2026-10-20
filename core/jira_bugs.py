@@ -29,6 +29,8 @@ import re
 
 import requests
 
+from core import http_retry
+
 logger = logging.getLogger(__name__)
 
 _SEV_TO_PRIORITY = {"P1": "Highest", "P2": "High", "P3": "Medium", "P4": "Low"}
@@ -540,10 +542,11 @@ class JiraBugFiler:
             if not self.configured():
                 res["error"] = "Jira credentials are not configured (JIRA_BASE_URL/EMAIL/API_TOKEN/PROJECT_KEY)."
                 return res
-            r = self.session.post(f"{self.base_url}/rest/api/3/issue", json=payload,
+            r = http_retry.send(lambda: self.session.post(f"{self.base_url}/rest/api/3/issue", json=payload,
                                   auth=(self.email, self.token),
                                   headers={"Accept": "application/json",
-                                           "Content-Type": "application/json"}, timeout=30)
+                                           "Content-Type": "application/json"}, timeout=30),
+                                what="Jira create issue")
             if r.status_code in (200, 201):
                 key = (r.json() or {}).get("key")
                 res.update(success=True, jira_key=key)
@@ -569,10 +572,11 @@ class JiraBugFiler:
         if not self.configured():
             return {"success": False, "error": "Jira credentials are not configured."}
         try:
-            r = self.session.post(f"{self.base_url}/rest/api/3/issueLink", json=payload,
+            r = http_retry.send(lambda: self.session.post(f"{self.base_url}/rest/api/3/issueLink", json=payload,
                                   auth=(self.email, self.token),
                                   headers={"Accept": "application/json", "Content-Type": "application/json"},
-                                  timeout=20)
+                                  timeout=20),
+                                what="Jira link")
             return {"success": r.status_code in (200, 201)} if r.status_code in (200, 201) else \
                 {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
         except Exception as exc:  # noqa: BLE001
@@ -589,10 +593,11 @@ class JiraBugFiler:
         if not self.configured():
             return {"success": False, "error": "Jira credentials are not configured."}
         try:
-            r = self.session.post(f"{self.base_url}/rest/api/3/issue/{key}/comment", json=payload,
+            r = http_retry.send(lambda: self.session.post(f"{self.base_url}/rest/api/3/issue/{key}/comment", json=payload,
                                   auth=(self.email, self.token),
                                   headers={"Accept": "application/json", "Content-Type": "application/json"},
-                                  timeout=20)
+                                  timeout=20),
+                                what="Jira comment")
             return {"success": r.status_code in (200, 201)} if r.status_code in (200, 201) else \
                 {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
         except Exception as exc:  # noqa: BLE001
@@ -604,11 +609,12 @@ class JiraBugFiler:
         fails the filing; the caller sees `attachment: False`). Never raises.
         """
         try:
-            r = self.session.post(
+            r = http_retry.send(lambda: self.session.post(
                 f"{self.base_url}/rest/api/3/issue/{key}/attachments",
                 files={"file": (filename, str(text).encode("utf-8"), "text/plain")},
                 auth=(self.email, self.token),
-                headers={"X-Atlassian-Token": "no-check", "Accept": "application/json"}, timeout=30)
+                headers={"X-Atlassian-Token": "no-check", "Accept": "application/json"}, timeout=30),
+                                what="Jira attach evidence")
             return r.status_code in (200, 201)
         except Exception as exc:
             logger.warning("QAX JiraBugFiler: could not attach evidence to %s: %s", key, exc)

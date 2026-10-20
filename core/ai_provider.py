@@ -115,6 +115,12 @@ class _Messages:
         choice = (data.get("choices") or [{}])[0]
         text = ((choice.get("message") or {}).get("content")) or ""
         usage = data.get("usage") or {}
+        try:   # counted like Claude calls (services.usage), but not priced: QAX has no price table for it
+            from services import usage as _usage
+            _usage.note(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+                        "other:" + str(data.get("model", body["model"])))
+        except Exception:  # noqa: BLE001
+            pass
         return SimpleNamespace(
             content=[SimpleNamespace(type="text", text=text)],
             stop_reason="max_tokens" if choice.get("finish_reason") == "length" else "end_turn",

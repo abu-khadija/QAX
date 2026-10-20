@@ -28,9 +28,24 @@ def _safe(project: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "-", project or "default").strip("-") or "default"
 
 
-def save_run(project: str, url: str, results: list, root: Path | None = None) -> str:
+def _evidence(r: dict) -> dict:
+    """What a non-passing result carries for someone to check it independently."""
+    steps = r.get("steps") or []
+    return {"steps": bool(steps),
+            "screenshot": bool(r.get("screenshot") or any(s.get("screenshot") for s in steps)),
+            "network": bool(r.get("network_log")), "trace": bool(r.get("trace")),
+            "reason": bool(r.get("error") or r.get("case_error") or any(s.get("error") or s.get("actual_result")
+                                                                         for s in steps))}
+
+
+def save_run(project: str, url: str, results: list, root: Path | None = None, *,
+             cost: dict | None = None, selection: dict | None = None) -> str:
     """
     Save one run's verdicts. Returns the file path ("" on failure).
+
+    Also kept, for the overview: what evidence each non-passing case carries, the run's
+    measured duration and AI usage (`cost`), and — for a change-based run — which cases the
+    change selected and why (`selection`).
     """
     try:
         folder = (root or _root()) / "functional_runs" / _safe(project)
@@ -40,7 +55,16 @@ def save_run(project: str, url: str, results: list, root: Path | None = None) ->
         rec = {"when": ts, "url": url, "verdicts": {str(r.get("test_case_id")): r.get("status") for r in rs},
                # why a case did not pass and what it is called — for the overview's critical list
                "causes": {str(r.get("test_case_id")): r.get("cause") for r in rs if r.get("cause")},
-               "titles": {str(r.get("test_case_id")): str(r.get("title") or "")[:120] for r in rs}}
+               "titles": {str(r.get("test_case_id")): str(r.get("title") or "")[:120] for r in rs},
+               "evidence": {str(r.get("test_case_id")): _evidence(r) for r in rs if r.get("status") != "PASS"}}
+        if cost:
+            rec["cost"] = cost
+        if selection:
+            rec["selection"] = {"run_all": bool(selection.get("run_all")), "why": str(selection.get("why", ""))[:300],
+                                "selected": [x.get("id") for x in selection.get("selected") or []],
+                                "skipped": [x.get("id") for x in selection.get("skipped") or []],
+                                "pages": sorted(k for k in (selection.get("affected_pages") or {}) if k != "*")[:20],
+                                "files": int(selection.get("files") or 0)}
         path = folder / f"{ts}.json"
         tmp = folder / f".{ts}.tmp"
         tmp.write_text(json.dumps(rec, indent=2))
@@ -48,6 +72,19 @@ def save_run(project: str, url: str, results: list, root: Path | None = None) ->
         return str(path)
     except Exception:  # noqa: BLE001
         return ""
+
+
+def save_generation_cost(project: str, usage: dict, root: Path | None = None) -> None:
+    """Keep the last generation's measured AI usage (calls, tokens, approximate USD). Never raises."""
+    try:
+        folder = (root or _root()) / "functional_runs" / _safe(project)
+        folder.mkdir(parents=True, exist_ok=True)
+        rec = dict(usage or {}, when=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+        tmp = folder / ".generation_cost.tmp"
+        tmp.write_text(json.dumps(rec, indent=2))
+        os.replace(tmp, folder / "generation_cost.json")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def history(project: str, limit: int = 10, root: Path | None = None) -> list:

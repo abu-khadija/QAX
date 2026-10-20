@@ -120,8 +120,12 @@ def test_positive_control_the_ai_detector_sees_a_call_when_healing_is_opted_in(u
         raise RuntimeError("blocked in test")
     monkeypatch.setattr(anthropic, "Anthropic", record)
     monkeypatch.setenv("QAX_AI_HEAL", "true")
-    bug = next(c for c in _cases() if c["expected_outcome"].startswith("FAIL"))
-    assert _run([bug])["results"][0]["status"] == "FAIL"     # healing failed → still FAIL
+    # a locating failure (the only kind healing may touch): a dashboard button clicked on the login page.
+    # An assertion failure is never sent to healing (tests/test_hardening_round.py).
+    moved = {"test_case_id": "TC-MOVED", "title": "element not on this page", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": "add_note_button"}]}
+    assert _run([moved])["results"][0]["status"] == "FAIL"   # healing failed → still FAIL
     assert calls, "the detector did not see the opted-in AI call"
 
 

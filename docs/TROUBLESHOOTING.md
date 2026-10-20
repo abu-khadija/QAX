@@ -65,3 +65,15 @@ git, the output folder and which integrations are configured, and prints the exa
 |---|---|
 | The agent gets `Confirm you own this app …` | The tool needs `authorized: true`; the agent must ask you first. |
 | Nothing happens / the agent shows a JSON error | Run `python main.py mcp` by hand and type `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`: you should get the tool list. QAX writes logs to stderr only. |
+
+## "QAX is already using the browser…" (409)
+Another browser run or app read is in progress; QAX runs one browser job at a time. Wait for it to finish, or
+raise `QAX_BROWSER_WAIT` (seconds) to queue a little longer.
+
+## A case says "not run — uses element(s) QAX did not find on the app"
+The case was generated with an element name that is not on the app map. Re-read the app (Understand / `map`),
+fix the case, or — after checking it — set `"reviewed": true` on the case. `QAX_ALLOW_UNMAPPED=true` lifts the
+gate for a whole run.
+
+## An error ends with "(ref 1a2b3c4d — full detail in the QAX log)"
+The UI shows a cleaned message; the full exception is in the server log under that reference.

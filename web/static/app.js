@@ -252,7 +252,7 @@ async function loadOverview(){
     const go={run:"$('execpanel').scrollIntoView({block:'start'})",analyze:"$('mapurl').focus()",
               bugs:"($('fqreport')||$('execpanel')).scrollIntoView()",scan:"setMode('scan')"};
     box.innerHTML='<div class="ovhead"><div class="sec-title" style="margin:0">Project overview · '+esc(d.project)+'</div>'
-      +'<span class="hint" style="margin:0">From saved runs only — nothing estimated</span></div><div class="ovgrid">'
+      +'<span class="hint" style="margin:0">From saved runs only — nothing invented (AI cost is an estimate from token counts)</span></div><div class="ovgrid">'
       +d.cards.map(c=>'<div class="ovcard '+esc(c.state)+'"><h4>'+esc(c.title)+'</h4><div class="v">'+esc(c.value)+'</div>'
         +(c.rows?'<div class="rq">'+c.rows.slice(0,8).map(x=>'<code>'+esc(x.id)+'</code> <b>'+esc(x.verdict)+'</b> '+esc(x.text).slice(0,60)
             +(c.id==='flaky'?' <a href="#" onclick="setQuarantine(\''+esc(x.id)+'\','+(!x.quarantined)+');return false">'+(x.quarantined?'release':'quarantine')+'</a>':'')).join('<br>')+'</div>':'')
@@ -312,6 +312,7 @@ function renderReport(d){
       +(d.changes.regressions.length?' ('+d.changes.regressions.map(esc).join(', ')+')':'')+' · '+d.changes.fixed.length+' fixed'
       +(d.changes.flaky.length?' · ⚠️ flaky: '+d.changes.flaky.map(esc).join(', '):''):'')
     +(d.writes_sent?'<br>'+d.writes_sent+' request(s) that change data were sent to the app — only what a case’s cleanup steps delete is undone':'')
+    +(d.cost?'<br>Took '+esc(String(d.cost.duration_s))+' s · '+(d.cost.calls?esc(String(d.cost.calls))+' AI call(s), ≈ $'+Number(d.cost.estimated_cost_usd||0).toFixed(4):'no AI calls'):'')
     +(res.some(r=>r.cleanup)?'<br>Cleanup: '+res.filter(r=>r.cleanup).map(r=>esc(r.test_case_id)+' '+(r.cleanup.status==='done'?'✅ undone':'⚠️ incomplete — data left')).join(' · '):'')
     +(res.some(r=>r.visual&&r.visual.status!=='identical')?'<br>Screens: '+res.filter(r=>r.visual&&r.visual.status!=='identical').map(r=>esc(r.test_case_id)+' '
       +(r.visual.status==='baseline_saved'?'baseline saved':(r.visual.status==='changed'?'<b>changed '+r.visual.pct+'%</b> (a lead — open the diff)':esc(r.visual.status)))).join(' · '):'')

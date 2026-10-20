@@ -30,6 +30,8 @@ from services.progress import ProgressReporter
 
 logger = logging.getLogger("qax.web")
 
+from core.public_error import clean, public_error  # noqa: E402
+
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app = Flask(__name__, static_folder=_STATIC, static_url_path="")
 
@@ -247,7 +249,7 @@ def plan():
     try:
         plan = _scan_plan(url, auth, read_only, spec_url, extras)
     except Exception as exc:
-        return jsonify({"error": f"Could not build a plan: {exc}"}), 502
+        return jsonify({"error": public_error("Could not build a plan", exc, logger)}), 502
     return jsonify(plan)
 
 
@@ -402,7 +404,7 @@ def _run_scan_inner(url: str, repo: str, auth, *, read_only: bool = False, spec_
     try:
         ctx = QAXContext.from_env()
     except Exception as exc:
-        return {"error": f"Config error: {exc}"}
+        return {"error": public_error("Config error", exc, logger)}
     from urllib.parse import urlparse
     host = (urlparse(url).netloc or "app").replace(":", "_").replace(".", "-")
     visual_baseline = os.path.join("output", "tour_baseline", host)  # seeded on 1st scan, diffed after
@@ -419,7 +421,7 @@ def _run_scan_inner(url: str, repo: str, auth, *, read_only: bool = False, spec_
                                               visual_baseline=visual_baseline,
                                               progress=progress)
     except Exception as exc:
-        return {"error": f"Scan failed: {exc}"}
+        return {"error": public_error("Scan failed", exc, logger)}
     if result.error:
         return {"error": result.error}
     rec = scorecard.score_run(result, repo=repo, url=url, mode="quick",
@@ -525,7 +527,7 @@ def generate():
             res = GenerationService(ctx).generate(source, options=opts,
                                                   progress=NullProgressReporter())
         except QAXConfigError as exc:
-            return jsonify({"error": str(exc)}), 400
+            return jsonify({"error": clean(str(exc))}), 400
     except Exception as exc:
         return jsonify({"error": _ai_error_message(exc)}), 502
     if res.error:
@@ -555,10 +557,19 @@ def _ai_error_message(err) -> str:
         return "Generation failed: the AI provider is overloaded — try again shortly." + hint
     import logging
     logging.getLogger(__name__).warning("QAX generation error: %s", raw[:500])
-    return f"Generation failed: {raw[:300]}"
+    return "Generation failed: " + clean(raw, 300)
 
 
 _SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _grounding_block(tc: dict) -> str:
+    """The executor's grounding gate, for the plan preview (no Playwright import needed)."""
+    try:
+        from execution.test_executor import grounding_block
+        return grounding_block(tc)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _execute_plan(tests: list, url: str, read_only: bool, engine: str = "api") -> dict:
@@ -583,6 +594,9 @@ def _execute_plan(tests: list, url: str, read_only: bool, engine: str = "api") -
             elif read_only:
                 not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
                                 "reason": "read-only is on: the browser engine clicks and submits forms — untick read-only to run it (staging only)"})
+            elif _grounding_block(tc):
+                not_run.append({"test_case_id": tc["test_case_id"], "title": tc.get("title", ""),
+                                "reason": _grounding_block(tc)})
             else:
                 runnable.append(tc)
             continue
@@ -640,6 +654,7 @@ def execute_tests():
         if err:
             return jsonify({"error": f"Could not read the change: {err}"}), 400
         selection = select(tests, files, str(_P(repo_dir).expanduser()), CONFIG_DIR / (project or "_none_"))
+        selection["files"] = len(files)
         keep = {x["id"] for x in selection["selected"]}
         tests = [t for t in tests if str(t.get("test_case_id", "?")) in keep]
     plan = _execute_plan(tests, url, read_only, engine)
@@ -653,6 +668,10 @@ def execute_tests():
     if not cases:
         return jsonify({"plan": plan, "results": [], "total": 0, "passed": 0, "failed": 0,
                         "not_run": len(plan["not_run"])})
+    from services import usage as _usage
+    _t0 = time.monotonic()
+    _meter_cm = _usage.measure()
+    _meter = _meter_cm.__enter__()
     try:
         from services.execution_service import ExecutionService
         if engine == "ui":
@@ -669,14 +688,20 @@ def execute_tests():
             token = str(data.get("token", "")).strip()
             res = ExecutionService().execute(cases, mode="api", base_url=url,
                                              auth={"token": token} if token else None)
+    except BrowserBusy:
+        raise
     except Exception as exc:
-        return jsonify({"error": f"Execution failed: {exc}", "plan": plan}), 502
+        return jsonify({"error": public_error("Execution failed", exc, logger), "plan": plan}), 502
+    finally:
+        _meter_cm.__exit__(None, None, None)
+    # measured for this run only: wall time and AI calls (healing is off in the UI, so normally 0)
+    cost = {"duration_s": round(time.monotonic() - _t0, 1), "cases": len(cases), **_meter}
     raw = res.raw or {}
     out = {"plan": plan, "results": raw.get("results", []), "total": raw.get("total", 0),
            "passed": raw.get("passed", 0), "failed": raw.get("failed", 0),
            "skipped": raw.get("skipped", 0), "errors": raw.get("errors", 0),
            "not_run": len(plan["not_run"]), "writes_sent": raw.get("writes_sent", 0),
-           "error": res.error}
+           "error": res.error, "cost": cost}
     if out["results"] and not res.error:
         # per-project memory: what changed since the last run (regressions, fixes, flaky cases)
         from core.run_history import compare, history, save_run
@@ -687,11 +712,44 @@ def execute_tests():
             if str(r.get("test_case_id")) in quarantined:
                 r["quarantined"] = True      # still run and shown — never filed as a bug
         out["changes"] = compare(history(hist_project), out["results"])
-        save_run(hist_project, url, out["results"])
+        save_run(hist_project, url, out["results"], cost=cost, selection=selection)
     return (jsonify(out), 502) if res.error else jsonify(out)
 
 
 _BROWSER_LOCK = __import__("threading").Lock()
+
+
+class BrowserBusy(Exception):
+    """Another browser job (a run or an app read) holds the browser for longer than the wait."""
+
+
+def _browser_wait() -> float:
+    """Seconds a request waits for the browser before answering 409 busy (QAX_BROWSER_WAIT, default 5)."""
+    try:
+        return max(0.0, min(float(os.getenv("QAX_BROWSER_WAIT", "5")), 600.0))
+    except ValueError:
+        return 5.0
+
+
+@__import__("contextlib").contextmanager
+def _browser_lock():
+    """
+    Hold the browser lock, waiting at most QAX_BROWSER_WAIT seconds. A request that cannot get it
+    gets a clear 409 ("busy — try again") instead of hanging behind a run that can take minutes.
+    """
+    if not _BROWSER_LOCK.acquire(timeout=_browser_wait()):
+        raise BrowserBusy()
+    try:
+        yield
+    finally:
+        _BROWSER_LOCK.release()
+
+
+@app.errorhandler(BrowserBusy)
+def _browser_busy(_exc):
+    """409 with a sentence the user can act on."""
+    return jsonify({"error": "QAX is already using the browser for another run or app read — "
+                             "try again when it finishes.", "busy": True}), 409
 
 
 def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
@@ -705,7 +763,7 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
     from services.execution_service import ExecutionService
     keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT", "QAX_INSECURE",
             "QAX_SLOW_MO_MS", "QAX_STEP_SCREENSHOTS", "QAX_TRACE", "QAX_BROWSER", "QAX_DEVICE", "QAX_WORKERS", "QAX_VISUAL")
-    with _BROWSER_LOCK:
+    with _browser_lock():
         saved = {k: os.environ.get(k) for k in keys}
         try:
             os.environ["APP_BASE_URL"] = url
@@ -816,7 +874,7 @@ def export():
             result = JiraBugFiler(dry_run=dry_run, project_key=project).file_many(bugs)
         except Exception as exc:
             result = {"success": False, "exported_count": 0, "failed_count": len(bugs),
-                      "references": [], "error": f"Bug filing failed: {exc}"}
+                      "references": [], "error": public_error("Bug filing failed", exc, logger)}
         result = dict(result or {})
         result.update({"dry_run": dry_run, "target": "jira", "kind": "findings"})
         return jsonify(result)
@@ -828,7 +886,7 @@ def export():
         from core.adapters import get_adapter
         result = get_adapter(target).export(items, project=project, dry_run=dry_run)
     except Exception as exc:
-        return jsonify({"error": f"Export failed: {exc}"}), 502
+        return jsonify({"error": public_error("Export failed", exc, logger)}), 502
     result = dict(result or {})
     result.update({"dry_run": dry_run, "target": target, "kind": "tests"})
     return jsonify(result)
@@ -862,7 +920,7 @@ def scan_stream():
         except ScanCancelled:
             logger.info("QAX: scan of %s stopped — the viewer left", url)
         except Exception as exc:
-            q.put({"type": "error", "error": str(exc)})
+            q.put({"type": "error", "error": public_error("Scan failed", exc, logger)})
         finally:
             _SCAN_LOCK.release()
             q.put({"type": "done"})

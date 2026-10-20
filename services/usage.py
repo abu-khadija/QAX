@@ -16,6 +16,8 @@ approximate; they are a signal for "is the deep scan burning credits", not billi
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import threading
 
 # Approximate USD per 1,000,000 tokens (input, output). Update as prices change.
@@ -28,11 +30,17 @@ _PRICES = {
 _lock = threading.Lock()
 _state: dict = {"input": 0, "output": 0, "calls": 0, "by_model": {}}
 _patched = False
+# Scoped meters (measure()): each counts the calls made in its own context — a functional run's
+# usage is then its own, even while a scan runs in another thread. Calls made in a worker thread
+# that did not copy the context are counted globally only (measure() reports them as untracked).
+_meter: "contextvars.ContextVar[dict | None]" = contextvars.ContextVar("qax_usage_meter", default=None)
 
 
 def _model_key(model: str) -> str:
-    """Map a full model id to a price bucket, defaulting to sonnet."""
+    """Map a full model id to a price bucket, defaulting to sonnet ("other" for a non-Claude provider)."""
     m = (model or "").lower()
+    if m.startswith("other:"):
+        return "other"
     for k in _PRICES:
         if k in m:
             return k
@@ -41,6 +49,18 @@ def _model_key(model: str) -> str:
 
 def note(input_tokens: int, output_tokens: int, model: str = "") -> None:
     """Record one LLM call's token usage. Safe to call from any thread."""
+    m = _meter.get()
+    if m is not None:
+        with _lock:
+            m["input_tokens"] += int(input_tokens or 0)
+            m["output_tokens"] += int(output_tokens or 0)
+            m["calls"] += 1
+            pin, pout = _PRICES.get(_model_key(model), (None, None))
+            if pin is None:
+                m["unpriced_calls"] += 1
+            else:
+                m["estimated_cost_usd"] = round(m["estimated_cost_usd"] + int(input_tokens or 0) / 1e6 * pin
+                                                + int(output_tokens or 0) / 1e6 * pout, 4)
     with _lock:
         _state["input"] += int(input_tokens or 0)
         _state["output"] += int(output_tokens or 0)
@@ -125,3 +145,20 @@ def track() -> bool:
         return False
     _patched = True
     return True
+
+
+@contextlib.contextmanager
+def measure():
+    """
+    Count the LLM calls made inside the block (this context only) and yield the live totals:
+    {"calls", "input_tokens", "output_tokens", "estimated_cost_usd", "unpriced_calls"}.
+    Cost is APPROXIMATE (the price table above); calls to a non-Claude provider are counted
+    but not priced (unpriced_calls). Installs the SDK wrapper on first use.
+    """
+    track()
+    m = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0, "unpriced_calls": 0}
+    tok = _meter.set(m)
+    try:
+        yield m
+    finally:
+        _meter.reset(tok)

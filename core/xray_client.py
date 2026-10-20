@@ -12,16 +12,21 @@ Docs: https://docs.getxray.app/display/XRAYCLOUD/REST+API
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
 from dotenv import load_dotenv
+
+from core import http_retry
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 
 # ── Xray Cloud API endpoints ──────────────────────────────────────────────────
 XRAY_AUTH_URL = "https://xray.cloud.getxray.app/api/v2/authenticate"
+# Xray Cloud tokens live 24 h; renew an hour early so a long run never sends an expired one
+TOKEN_MAX_AGE = 23 * 3600
 XRAY_GRAPHQL_URL = "https://xray.cloud.getxray.app/api/v2/graphql"
 XRAY_REST_URL = "https://xray.cloud.getxray.app/api/v2"
 
@@ -110,8 +115,8 @@ class XrayClient:
         """
         Authenticate with Xray Cloud and return a Bearer token.
 
-        Caches the token for the session lifetime (tokens expire after 24h,
-        but we don't track that — re-instantiate the client if needed).
+        Caches the token and renews it before Xray's 24-hour expiry (after
+        TOKEN_MAX_AGE seconds), and after a 401 (see _xray_post).
 
         Returns:
             str: Bearer token for Xray API requests.
@@ -119,8 +124,9 @@ class XrayClient:
         Raises:
             requests.HTTPError: If authentication fails.
         """
-        if self._auth_token:
+        if self._auth_token and time.monotonic() - getattr(self, "_auth_token_at", 0.0) < TOKEN_MAX_AGE:
             return self._auth_token
+        self._auth_token = None
         if getattr(self, "_auth_error", None):
             # authentication already failed in this run: do not wait 30 s per remaining case
             raise self._auth_error
@@ -128,12 +134,12 @@ class XrayClient:
         logger.debug("Authenticating with Xray Cloud...")
 
         try:
-            response = requests.post(
+            response = http_retry.send(lambda: requests.post(
                 XRAY_AUTH_URL,
                 json={"client_id": self.client_id, "client_secret": self.client_secret},
                 headers={"Content-Type": "application/json"},
                 timeout=30,
-            )
+            ), idempotent=True, what="Xray authenticate")
             response.raise_for_status()
         except Exception as exc:
             self._auth_error = exc
@@ -142,9 +148,31 @@ class XrayClient:
         # Xray returns the token as a quoted string in the response body
         token = response.text.strip().strip('"')
         self._auth_token = token
+        self._auth_token_at = time.monotonic()
 
         logger.debug("Xray authentication successful")
         return token
+
+    def _xray_post(self, url: str, *, json_body: dict, timeout: int, what: str,
+                   idempotent: bool = False):
+        """
+        POST to Xray with the Bearer token: bounded retries on 429/503 (core.http_retry) and one
+        re-authentication when Xray answers 401 (an expired or revoked token).
+
+        Returns:
+            requests.Response: the last response (callers keep their raise_for_status()).
+        """
+        def call():
+            token = self._get_auth_token()
+            return requests.post(url, headers={"Authorization": f"Bearer {token}",
+                                               "Content-Type": "application/json"},
+                                 json=json_body, timeout=timeout)
+        response = http_retry.send(call, idempotent=idempotent, what=what)
+        if getattr(response, "status_code", 0) == 401:
+            logger.info("QAX: Xray token rejected — authenticating again")
+            self._auth_token = None
+            response = http_retry.send(call, idempotent=idempotent, what=what)
+        return response
 
     # ─────────────────────────────────────────────────────────────────────────
     # Push Single Test Case
@@ -182,19 +210,9 @@ class XrayClient:
             # Convert our schema to Jira/Xray API format
             jira_payload = self._build_jira_payload(test_case)
 
-            token = self._get_auth_token()
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            }
-
             # Create the test issue in Jira
-            response = requests.post(
-                f"{XRAY_REST_URL}/import/test",
-                headers=headers,
-                json=jira_payload,
-                timeout=30,
-            )
+            response = self._xray_post(f"{XRAY_REST_URL}/import/test", json_body=jira_payload,
+                                       timeout=30, what="Xray import test")
             response.raise_for_status()
 
             result_data = response.json()
@@ -721,13 +739,13 @@ class XrayClient:
         }
 
         try:
-            response = requests.post(
+            response = http_retry.send(lambda: requests.post(
                 url,
                 auth=(self.jira_email, self.jira_api_token),
                 json={"body": adf_body},
                 headers={"Content-Type": "application/json"},
                 timeout=15,
-            )
+            ), what="Jira execution comment")
             response.raise_for_status()
 
             logger.info(
@@ -778,17 +796,13 @@ class XrayClient:
                  "{ results { jira(fields: [\"key\"]) steps { action data result } } } }")
         steps_by_key: dict = {}
         try:
-            token = self._get_auth_token()
             for i in range(0, len(keys), 100):
                 chunk = keys[i:i + 100]
                 jql = "key in (" + ",".join(f'"{k}"' for k in chunk) + ")"
-                response = requests.post(
+                response = self._xray_post(
                     XRAY_GRAPHQL_URL,
-                    headers={"Authorization": f"Bearer {token}",
-                             "Content-Type": "application/json"},
-                    json={"query": query, "variables": {"jql": jql, "limit": len(chunk)}},
-                    timeout=30,
-                )
+                    json_body={"query": query, "variables": {"jql": jql, "limit": len(chunk)}},
+                    timeout=30, what="Xray read steps", idempotent=True)
                 response.raise_for_status()
                 body = response.json() or {}
                 if body.get("errors"):
@@ -856,14 +870,8 @@ class XrayClient:
             out["error"] = "XRAY_CLIENT_ID / XRAY_CLIENT_SECRET not set"
             return out
         try:
-            token = self._get_auth_token()
-            response = requests.post(
-                f"{XRAY_REST_URL}/import/execution",
-                headers={"Authorization": f"Bearer {token}",
-                         "Content-Type": "application/json"},
-                json=payload,
-                timeout=60,
-            )
+            response = self._xray_post(f"{XRAY_REST_URL}/import/execution", json_body=payload,
+                                       timeout=60, what="Xray import execution")
             response.raise_for_status()
             data = response.json() if response.content else {}
             out["key"] = (data or {}).get("key")

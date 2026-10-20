@@ -13,6 +13,8 @@ import os
 
 from flask import jsonify, request
 
+from core.public_error import clean, public_error
+
 
 def _map_locked(*args, **kwargs):
     """Read the app under the server's browser lock: the reader sets APP_* process variables
@@ -20,7 +22,7 @@ def _map_locked(*args, **kwargs):
     import asyncio
 
     from core.app_mapper import map_app
-    with _BROWSER_LOCK:
+    with _browser_lock():
         return asyncio.run(map_app(*args, **kwargs))
 
 
@@ -63,10 +65,10 @@ def _repo_source(repo: str) -> "tuple[str, str]":
                            capture_output=True, text=True, timeout=180,
                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
         if r.returncode != 0:
-            return "", f"Could not clone the repository: {(r.stderr or '').strip()[:200]}"
+            return "", "Could not clone the repository: " + clean(r.stderr or "")
         return str(dest), ""
     except Exception as exc:  # noqa: BLE001
-        return "", f"Could not clone the repository: {str(exc)[:200]}"
+        return "", public_error("Could not clone the repository", exc)
 
 
 def functional_analyze():
@@ -128,7 +130,7 @@ def functional_analyze():
             understanding["notes"].append(f"Could not read the app: {app_map.error}")
             app_map = None
         else:
-            with _BROWSER_LOCK:       # a browser run may be reading selectors.json
+            with _browser_lock():       # a browser run may be reading selectors.json
                 save_map(app_map, project)
             understanding.update(
                 pages=[{"path": p["path"], "elements": len(p.get("elements") or {})} for p in app_map.pages],
@@ -180,11 +182,15 @@ def functional_analyze():
         opts = GenerationOptions(user_story=story, content=code or story, app_map=app_map,
                                  repo_context=ctx, test_type=str(data.get("test_type") or "") or None)
         try:
-            res = GenerationService(QAXContext.from_env()).generate(
-                "code://web-input" if code else "story://web-input", options=opts,
-                progress=NullProgressReporter())
+            from services import usage as _usage
+            with _usage.measure() as ai_usage:      # this generation's AI calls only
+                res = GenerationService(QAXContext.from_env()).generate(
+                    "code://web-input" if code else "story://web-input", options=opts,
+                    progress=NullProgressReporter())
         except QAXConfigError as exc:
-            return jsonify({"understanding": understanding, "tests": [], "error": str(exc)})
+            return jsonify({"understanding": understanding, "tests": [], "error": clean(str(exc))})
+    except BrowserBusy:
+        raise
     except Exception as exc:  # noqa: BLE001
         return jsonify({"understanding": understanding, "tests": [], "error": _ai_error_message(exc)})
     if res.error:
@@ -194,8 +200,10 @@ def functional_analyze():
     cov = coverage(tests, criteria)
     if criteria:
         save_requirements(project, criteria, cov, story_key)
+    from core.run_history import save_generation_cost
+    save_generation_cost(project, dict(ai_usage, cases=len(tests)))
     return jsonify({"understanding": understanding, "tests": tests, "invalid": len(res.invalid or []),
-                    "summary": res.summary or {}, "coverage": cov})
+                    "summary": res.summary or {}, "coverage": cov, "ai_usage": ai_usage})
 
 
 def functional_bugs():
@@ -235,7 +243,7 @@ def functional_bugs():
             text = verdict_comment(verdicts, url, [r.get("jira_key") for r in out.get("results", []) if r.get("jira_key")])
             out["story_comment"] = dict(filer.comment(story_key, text), story_key=story_key, text=text)
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"Bug filing failed: {exc}"}), 502
+        return jsonify({"error": public_error("Bug filing failed", exc)}), 502
     out["dry_run"] = dry_run
     if bugs and not dry_run:
         # every bug filed becomes a regression case: re-checked on every later run
@@ -313,7 +321,7 @@ def map_app_route():
                                  storage_state=None if data.get("username") else state_for(project))
     if result.error:
         return jsonify({"error": result.error}), 502
-    with _BROWSER_LOCK:
+    with _browser_lock():
         save_map(result, project)
     return jsonify({"project": project, "pages": [
         {"path": p["path"], "elements": len(p.get("elements") or {})} for p in result.pages],
@@ -347,7 +355,7 @@ def quarantine_route():
 def register(app, server) -> None:
     """Attach the routes to the server's app, with the server's gates and helpers."""
     g = globals()
-    for name in ("_clean_project", "_target_authorized", "_UNAUTHORIZED_TARGET", "_ai_error_message", "_BROWSER_LOCK", "_RUNS_DIR"):
+    for name in ("_clean_project", "_target_authorized", "_UNAUTHORIZED_TARGET", "_ai_error_message", "_BROWSER_LOCK", "_browser_lock", "BrowserBusy", "_RUNS_DIR"):
         g[name] = getattr(server, name)
     app.post("/api/functional/analyze")(functional_analyze)
     app.get("/api/overview")(overview_route)
