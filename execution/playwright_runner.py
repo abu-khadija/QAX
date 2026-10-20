@@ -104,7 +104,7 @@ class PlaywrightRunner:
     async def setup(
         self,
         headless: bool = True,
-        browser_type: str = "chromium",
+        browser_type: str = "",
     ) -> None:
         """
         Launch the Playwright browser, create a context and page.
@@ -127,6 +127,8 @@ class PlaywrightRunner:
             logger.warning("Cannot setup browser — Playwright is not installed")
             return
 
+        browser_type = (browser_type or os.getenv("QAX_BROWSER", "") or "chromium").strip().lower()
+        self.browser_type = browser_type
         try:
             self._playwright = await async_playwright().start()
 
@@ -162,6 +164,28 @@ class PlaywrightRunner:
             logger.error("Failed to launch browser: %s", e)
             await self.teardown()  # Clean up anything partially created
 
+    _DEVICES = {"mobile": "Pixel 7", "mobile-ios": "iPhone 13", "tablet": "iPad (gen 7)"}
+
+    def _device_options(self) -> dict:
+        """
+        Screen and device for the run (QAX_DEVICE / `--device`): desktop (1440×900, the
+        default), mobile (Pixel 7: touch, mobile user agent, 412×915), mobile-ios
+        (iPhone 13), tablet (iPad). Firefox has no mobile emulation — it gets the
+        viewport and touch only. Never raises.
+        """
+        device = os.getenv("QAX_DEVICE", "desktop").strip().lower()
+        name = self._DEVICES.get(device)
+        if not name:
+            return {"viewport": {"width": 1440, "height": 900}}
+        try:
+            opts = dict(self._playwright.devices[name])
+            opts.pop("default_browser_type", None)
+            if getattr(self, "browser_type", "chromium") == "firefox":
+                opts.pop("is_mobile", None)
+            return opts
+        except Exception:  # noqa: BLE001
+            return {"viewport": {"width": 390, "height": 844}, "has_touch": True}
+
     async def _open_context(self) -> None:
         """
         Open a fresh context + page. TLS certificates are verified unless the
@@ -171,9 +195,13 @@ class PlaywrightRunner:
         what it sent to the target (see take_writes()).
         """
         insecure = os.getenv("QAX_INSECURE", "false").strip().lower() == "true"
+        # a session the operator recorded by hand (SSO / 2FA apps): start logged in
+        from core.session_state import state_for
+        storage = state_for(os.getenv("DEFAULT_PROJECT", ""))
         self.context = await self.browser.new_context(
-            viewport={"width": 1440, "height": 900},
+            **self._device_options(),
             ignore_https_errors=insecure,
+            **({"storage_state": storage} if storage else {}),
         )
         self.context.set_default_timeout(DEFAULT_TIMEOUT_MS)
         self._writes = []

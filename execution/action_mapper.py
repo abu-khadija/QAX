@@ -149,6 +149,48 @@ async def _click_through_obstacles(page, selector: str) -> str:
             raise first
 
 
+class _InFrame:
+    """
+    A page whose element methods run inside one iframe (click, fill, query_selector,
+    locator, evaluate …) while the page-level ones stay on the page (url, goto, keyboard,
+    mouse, screenshots) — so a step on an embedded form reads like any other step.
+    """
+
+    _PAGE_LEVEL = {"url", "goto", "keyboard", "mouse", "screenshot", "context", "on", "is_closed",
+                   "frames", "main_frame", "reload", "go_back", "wait_for_load_state", "title"}
+
+    def __init__(self, page, frame) -> None:
+        """Wrap page and the frame its element calls go to."""
+        self._page, self._frame = page, frame
+
+    def __getattr__(self, name):
+        """Page-level names → the page; everything else → the frame."""
+        return getattr(self._page if name in self._PAGE_LEVEL else self._frame, name)
+
+
+async def _frame_target(page, selector: str):
+    """
+    Where a selector lives: "iframe#x >>> #inner" enters that iframe; a plain selector
+    absent from the page but present in exactly one child frame is used there.
+    Returns (page_or_frame_proxy, selector_inside_it). Never raises.
+    """
+    from core.dom_analyzer import FRAME_SEP
+    try:
+        if FRAME_SEP in selector:
+            fsel, inner = selector.split(FRAME_SEP, 1)
+            handle = await page.query_selector(fsel)
+            frame = await handle.content_frame() if handle else None
+            return (_InFrame(page, frame), inner) if frame else (page, selector)
+        if await page.locator(selector).count() > 0:
+            return page, selector
+        hits = [f for f in page.frames[1:] if await f.locator(selector).count() > 0]
+        if len(hits) == 1:
+            return _InFrame(page, hits[0]), selector
+    except Exception:  # noqa: BLE001
+        pass
+    return page, selector
+
+
 async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
     """
     After a click/submit: let a navigation it started load, and give background
@@ -444,7 +486,8 @@ class ActionMapper:
                 if _api_key and _opted_in:
                     screenshot_bytes = await playwright_page.screenshot()
                     screenshot_b64 = base64.b64encode(screenshot_bytes).decode()
-                    client = _anthropic.Anthropic(api_key=_api_key)
+                    from core.ai_provider import make_ai_client
+                    client = make_ai_client(api_key=_api_key)
                     response = client.messages.create(
                         model=_model,
                         max_tokens=100,
@@ -848,6 +891,14 @@ class ActionMapper:
             }
 
         async def _resolve_selector() -> str:
+            """Resolve selector_key → CSS via override, then the 3-level fallback; an element
+            inside an iframe switches this step's page to that frame."""
+            nonlocal page
+            sel = await _resolve_selector_main()
+            page, sel = await _frame_target(page, sel)
+            return sel
+
+        async def _resolve_selector_main() -> str:
             """Resolve selector_key → CSS via override, then the 3-level fallback."""
             # Do not act while the page is re-rendering: a list that re-sorts after a
             # create reuses its row elements for OTHER records, and a click located a

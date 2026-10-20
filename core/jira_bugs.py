@@ -212,9 +212,29 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
 
 _PRIORITY_TO_SEV = {"critical": "P1", "high": "P2", "medium": "P3", "low": "P4"}
 
+# Bug headings per language (the case's own text stays as written)
+_BUG_WORDS = {
+    "en": {"summary": "Summary", "severity": "Severity: ", "sev_note": "from the test case priority",
+           "env": "Environment: ", "req": "Requirement: ", "repro": "Reproducibility: ",
+           "repro_text": "Failed 1/1 {tool}run on {env}. Repeat the steps to confirm.",
+           "steps": "Steps to Reproduce", "expected": "Expected Result", "actual": "Actual Result",
+           "problems": "Page problems seen", "evidence": "Evidence", "fails_at": "fails at step",
+           "open": "Open", "as_stated": "As stated by the test case.", "see_evidence": "See the attached evidence.",
+           "step_failed": "The step failed", "t_steps": "Steps", "t_exp": "Expected", "t_act": "Actual"},
+    "ar": {"summary": "الملخص", "severity": "الخطورة: ", "sev_note": "من أولوية حالة الاختبار",
+           "env": "البيئة: ", "req": "المتطلب: ", "repro": "إمكانية التكرار: ",
+           "repro_text": "فشل في 1 من 1 تشغيل {tool}على {env}. أعد الخطوات للتأكيد.",
+           "steps": "خطوات إعادة الحدوث", "expected": "النتيجة المتوقعة", "actual": "النتيجة الفعلية",
+           "problems": "مشاكل ظهرت في الصفحة", "evidence": "الأدلة", "fails_at": "يفشل عند الخطوة",
+           "open": "افتح", "as_stated": "كما في حالة الاختبار.", "see_evidence": "راجع الأدلة المرفقة.",
+           "step_failed": "فشلت الخطوة", "t_steps": "الخطوات", "t_exp": "النتيجة المتوقعة",
+           "t_act": "النتيجة الفعلية"},
+}
+
 
 def functional_result_to_bug(result: dict, case: dict | None = None, *, base_url: str = "",
-                             environment: str | None = None, client_safe: bool = False) -> dict:
+                             environment: str | None = None, client_safe: bool = False,
+                             lang: str = "en") -> dict:
     """
     A failed functional (E2E) test case as a Jira Bug in the ISTQB defect-report shape:
     title, severity, environment, the requirement it breaks, steps to reproduce (the
@@ -228,8 +248,10 @@ def functional_result_to_bug(result: dict, case: dict | None = None, *, base_url
         base_url (str): The app under test (step 1 gets a real URL).
         environment (str | None): Where it ran (defaults to base_url).
         client_safe (bool): No tool name in the text or labels.
+        lang (str): "en" or "ar" — the language of the bug's headings.
     """
     import re as _re
+    w = _BUG_WORDS.get(lang, _BUG_WORDS["en"])
     case = case or {}
     title_case = str(case.get("title") or result.get("title") or "Functional test failed")
     sev = _PRIORITY_TO_SEV.get(str(case.get("priority") or "medium").lower(), "P3")
@@ -251,41 +273,49 @@ def functional_result_to_bug(result: dict, case: dict | None = None, *, base_url
             if act:
                 repro_steps.append(act if not a else f"{a}: {act}"[:200])
     if base_url and repro_steps:
-        repro_steps[0] = f"Open {base_url} — {repro_steps[0]}"
+        repro_steps[0] = f"{w['open']} {base_url} — {repro_steps[0]}"
 
     expected = str(case.get("expected_result") or "")
     for st in case.get("manual_steps") or []:
         if st.get("step_number") == failing.get("step_number") and st.get("expected_result"):
             expected = str(st["expected_result"])
-    actual = str(failing.get("actual_result") or result.get("error") or "The step failed")
+    if not expected:
+        # an automated case: the failing step's own assertion is the expected result
+        autos = case.get("automation_steps") or []
+        n = failing.get("step_number")
+        st = next((a for a in autos if a.get("step_number") == n), None) or \
+            (autos[n - 1] if isinstance(n, int) and 0 < n <= len(autos) else {})
+        if st.get("assertion_type"):
+            where = st.get("selector_key") or "the page"
+            expected = f"{st.get('assertion_type')} check on {where}: {st.get('assertion_value', '')}".strip()
+    actual = str(failing.get("actual_result") or result.get("error") or w["step_failed"])
     if failing.get("error"):
         actual += f" — {failing['error']}"
     evidence = [p for p in (failing.get("screenshot"), result.get("screenshot"),
                             result.get("trace")) if p]
     problems = [f"{e.get('kind')}: {e.get('text')}" for e in (result.get("page_errors") or [])][:8]
 
-    summary = f"{title_case} — fails at step {failing.get('step_number', '?')}"
+    summary = f"{title_case} — {w['fails_at']} {failing.get('step_number', '?')}"
     tool = "" if client_safe else "QAX "
     blocks = [
-        ("h", "Summary"), ("p", [(summary, False)]),
-        ("p", [("Severity: ", True), (f"{sev} / {_SEV_NAME.get(sev, '')} — from the test case priority", False)]),
-        ("p", [("Environment: ", True), (env, False)]),
+        ("h", w["summary"]), ("p", [(summary, False)]),
+        ("p", [(w["severity"], True), (f"{sev} / {_SEV_NAME.get(sev, '')} — {w['sev_note']}", False)]),
+        ("p", [(w["env"], True), (env, False)]),
     ]
     if requirement:
-        blocks.append(("p", [("Requirement: ", True), (requirement, False)]))
-    blocks += [("p", [("Reproducibility: ", True),
-                      (f"Failed 1/1 {tool}run on {env}. Repeat the steps to confirm.", False)]),
-               ("h", "Steps to Reproduce"), ("ol", repro_steps or ["See the attached evidence."]),
-               ("h", "Expected Result"), ("p", [(expected or "As stated by the test case.", False)]),
-               ("h", "Actual Result"), ("p", [(actual, False)])]
+        blocks.append(("p", [(w["req"], True), (requirement, False)]))
+    blocks += [("p", [(w["repro"], True), (w["repro_text"].format(tool=tool, env=env), False)]),
+               ("h", w["steps"]), ("ol", repro_steps or [w["see_evidence"]]),
+               ("h", w["expected"]), ("p", [(expected or w["as_stated"], False)]),
+               ("h", w["actual"]), ("p", [(actual, False)])]
     if problems:
-        blocks += [("h", "Page problems seen"), ("ol", problems)]
+        blocks += [("h", w["problems"]), ("ol", problems)]
     if evidence:
-        blocks += [("h", "Evidence"), ("ol", evidence)]
-    text = "\n".join([summary, f"Severity: {sev}", f"Environment: {env}"]
-                     + ([f"Requirement: {requirement}"] if requirement else [])
-                     + ["Steps:"] + [f"{n}. {t}" for n, t in enumerate(repro_steps, 1)]
-                     + [f"Expected: {expected}", f"Actual: {actual}"] + problems + evidence)
+        blocks += [("h", w["evidence"]), ("ol", evidence)]
+    text = "\n".join([summary, f"{w['severity']}{sev}", f"{w['env']}{env}"]
+                     + ([f"{w['req']}{requirement}"] if requirement else [])
+                     + [w["t_steps"] + ":"] + [f"{n}. {t}" for n, t in enumerate(repro_steps, 1)]
+                     + [f"{w['t_exp']}: {expected}", f"{w['t_act']}: {actual}"] + problems + evidence)
     fp = fingerprint(title_case, base_url, client_safe=client_safe)
     labels = ["functional", "e2e"] + ([] if client_safe else ["qax"])
     return {
@@ -508,6 +538,47 @@ class JiraBugFiler:
             res["error"] = str(exc)
         return res
 
+    def link(self, bug_key: str, story_key: str) -> dict:
+        """
+        Link a filed bug to the story it breaks ("Relates"). Dry run: preview only.
+        Returns {"success", "preview"?, "error"?}. Never raises.
+        """
+        payload = {"type": {"name": "Relates"}, "inwardIssue": {"key": bug_key},
+                   "outwardIssue": {"key": story_key}}
+        if self.dry_run:
+            return {"success": True, "preview": payload}
+        if not self.configured():
+            return {"success": False, "error": "Jira credentials are not configured."}
+        try:
+            r = self.session.post(f"{self.base_url}/rest/api/3/issueLink", json=payload,
+                                  auth=(self.email, self.token),
+                                  headers={"Accept": "application/json", "Content-Type": "application/json"},
+                                  timeout=20)
+            return {"success": r.status_code in (200, 201)} if r.status_code in (200, 201) else \
+                {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": str(exc)[:200]}
+
+    def comment(self, key: str, text: str) -> dict:
+        """
+        Add a comment to an issue (the requirement verdicts on the story). Dry run:
+        preview only. Returns {"success", "preview"?, "error"?}. Never raises.
+        """
+        payload = {"body": _adf(text)}
+        if self.dry_run:
+            return {"success": True, "preview": text}
+        if not self.configured():
+            return {"success": False, "error": "Jira credentials are not configured."}
+        try:
+            r = self.session.post(f"{self.base_url}/rest/api/3/issue/{key}/comment", json=payload,
+                                  auth=(self.email, self.token),
+                                  headers={"Accept": "application/json", "Content-Type": "application/json"},
+                                  timeout=20)
+            return {"success": r.status_code in (200, 201)} if r.status_code in (200, 201) else \
+                {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": str(exc)[:200]}
+
     def _attach(self, key: str, filename: str, text: str) -> bool:
         """
         Attach a text evidence file to an issue (best-effort — a failed attachment never
@@ -525,8 +596,20 @@ class JiraBugFiler:
             return False
 
     def file_many(self, bugs: list) -> dict:
-        """File a batch. Adapter-shaped result plus per-bug detail (never raises)."""
-        results = [self.file(b) for b in (bugs or []) if isinstance(b, dict)]
+        """File a batch. Adapter-shaped result plus per-bug detail (never raises).
+        A bug carrying "story_key" is linked to that story once filed (or previewed)."""
+        results = []
+        for b in (bugs or []):
+            if not isinstance(b, dict):
+                continue
+            r = self.file(b)
+            story = str(b.get("story_key") or "").strip()
+            if story and r.get("success") and r.get("jira_key"):
+                lk = self.link(r["jira_key"], story)
+                r["linked_to"] = story if lk.get("success") else None
+                if lk.get("error"):
+                    r["link_error"] = lk["error"]
+            results.append(r)
         ok = [r for r in results if r.get("success")]
         return {
             "success": bool(results) and len(ok) == len(results),

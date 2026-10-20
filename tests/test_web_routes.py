@@ -23,13 +23,13 @@ def test_scan_requires_authorized_target(monkeypatch):
 def test_app_page_wires_plan_preview_history_and_readonly():
     """Regression for 'built but not connected': the page must actually call /api/plan and /api/runs,
     send read_only, and show Not tested. (They shipped in the backend a commit before the UI used them.)"""
-    html = _c().get("/app").get_data(as_text=True)
+    html = "".join(_c().get(u).get_data(as_text=True) for u in ("/app", "/app.js", "/app.css"))
     for needle in ("/api/plan", "/api/runs", "read_only", "previewPlan()", "notTestedHTML", 'id="readonly"'):
         assert needle in html, f"app.html is missing {needle!r}"
 
 
 def test_stream_is_posted_not_put_in_a_url_and_secrets_never_in_a_query_string():
-    html = _c().get("/app").get_data(as_text=True)
+    html = "".join(_c().get(u).get_data(as_text=True) for u in ("/app", "/app.js", "/app.css"))
     # api() is the token-aware fetch wrapper (adds X-QAX-Token as a header, never in a URL)
     assert "EventSource" not in html and "api('/api/scan/stream'" in html and "method:'POST'" in html
     assert "async function api(path, opts)" in html and "let r=await fetch(path, opts)" in html

@@ -112,6 +112,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger("qax")
 
+# ── Commands that live in cli/ (re-exported: `main.<name>` keeps working) ─────────
+from cli.run_flags import (  # noqa: E402,F401
+    _add_seeing_flags,
+    _add_browser_flags,
+    _apply_browser_flags,
+    _apply_seeing_flags,
+    _print_writes_sent,
+)
+from cli.execute_cmd import (  # noqa: E402,F401
+    run_execute_command,
+    _collect_test_cases_for_execute,
+    _issues_to_executable_cases,
+)
+from cli.scan_cmd import (  # noqa: E402,F401
+    scan_needs_key,
+    _load_examples_file,
+    _load_endpoints_file,
+    run_scan_command,
+)
+from cli.app_cmds import (  # noqa: E402,F401
+    run_map_command,
+    run_login_command,
+    run_mcp_command,
+    run_doctor_command,
+)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ANALYZE COMMAND
@@ -843,314 +869,16 @@ Examples:
 # EXECUTE COMMAND
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_execute_command() -> None:
-    """
-    Handle the 'execute' subcommand.
-
-    Fetches one or more test cases (by ID, suite tag, or output JSON file),
-    shows the list to the user, asks for confirmation, then runs them through
-    the Playwright browser execution engine.
-
-    Flow:
-      1. Parse CLI args
-      2. Collect test cases (--test-case / --suite / --file)
-      3. Print list and ask confirmation
-      4. PlaywrightRunner.setup()
-      5. TestExecutor.execute_batch()
-      6. ResultsReporter.generate_console_summary()
-      7. ResultsReporter.generate_html_report()
-      8. Optional: ResultsReporter.report_to_xray() (if --upload)
-      9. Save session
-      10. PlaywrightRunner.teardown()
-
-    Called when sys.argv[1] == "execute".
-    """
-    import asyncio
-
-    parser = argparse.ArgumentParser(
-        prog="qax execute",
-        description="Run test cases in a Playwright browser.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    # ── Source: what to execute ────────────────────────────────────────────
-    source_group = parser.add_mutually_exclusive_group()
-    source_group.add_argument(
-        "--test-case",
-        metavar="ID",
-        help="Execute a single test case by Jira/Xray ID (e.g. PROJ-501).",
-    )
-    source_group.add_argument(
-        "--suite",
-        choices=["smoke", "regression"],
-        metavar="NAME",
-        help="Execute all tests tagged 'smoke' or 'regression' in Xray.",
-    )
-    source_group.add_argument(
-        "--file",
-        metavar="PATH",
-        help="Execute test cases from a local JSON output file.",
-    )
-
-    # ── Execution options ──────────────────────────────────────────────────
-    parser.add_argument(
-        "--headless",
-        default="true",
-        choices=["true", "false"],
-        help="Run browser in headless mode. Default: true. "
-             "Set 'false' to watch the browser run (useful for debugging).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=None,
-        help="Override DRY_RUN for this run (never uploads to Xray). "
-             "Default: reads DRY_RUN from .env.",
-    )
-    parser.add_argument(
-        "--upload",
-        action="store_true",
-        default=False,
-        help="Upload execution results to Xray after completion. "
-             "Ignored when DRY_RUN=true.",
-    )
-    parser.add_argument(
-        "--stop-on-fail",
-        action="store_true",
-        default=False,
-        help="Stop execution after the first FAIL result.",
-    )
-    parser.add_argument(
-        "--ai-heal",
-        action="store_true",
-        default=False,
-        help="Let QAX send the page HTML / a screenshot to the AI provider to repair a "
-             "failing selector (off by default: nothing leaves the machine).",
-    )
-    parser.add_argument(
-        "--insecure",
-        action="store_true",
-        default=False,
-        help="Do not verify the target's TLS certificate (self-signed staging only).",
-    )
-    parser.add_argument(
-        "--output",
-        metavar="PATH",
-        default=None,
-        help="Path for the HTML report. Default: output/reports/execution_report_<ts>.html",
-    )
-    parser.add_argument(
-        "--project",
-        type=str,
-        default=None,
-        help="Project name for selectors (e.g. example, example2, example3). "
-             "Default: read from DEFAULT_PROJECT in .env."
-    )
-    _add_seeing_flags(parser)
-
-    args = parser.parse_args(sys.argv[2:])
-    _apply_seeing_flags(args)
-    if args.watch:
-        args.headless = "false"
-    if args.ai_heal:
-        os.environ["QAX_AI_HEAL"] = "true"
-    if args.insecure:
-        os.environ["QAX_INSECURE"] = "true"
-
-    # ── Set project env so ActionMapper can resolve the correct selectors ──
-    if args.project:
-        os.environ["DEFAULT_PROJECT"] = args.project
-
-    # ── Enforce DRY_RUN override ───────────────────────────────────────────
-    if args.dry_run:
-        os.environ["DRY_RUN"] = "true"
-    dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
-
-    # ── Import execution layer ─────────────────────────────────────────────
-    try:
-        from execution.playwright_runner import PlaywrightRunner, PLAYWRIGHT_AVAILABLE
-        from execution.test_executor import TestExecutor
-        from execution.results_reporter import ResultsReporter
-    except ImportError as e:
-        logger.error(
-            "Execution layer not available: %s\n"
-            "Install with: pip install playwright==1.44.0 && playwright install chromium",
-            e
-        )
-        sys.exit(1)
-
-    if not PLAYWRIGHT_AVAILABLE:
-        print("\n  ✗ Playwright is not installed.")
-        print("    Install with:")
-        print("      pip install playwright==1.44.0")
-        print("      playwright install chromium")
-        print("    Requires Python 3.11 or 3.12.\n")
-        sys.exit(1)
-
-    # ── Collect test cases ─────────────────────────────────────────────────
-    test_cases = _collect_test_cases_for_execute(args)
-    if not test_cases:
-        print("\n  No test cases found. Check your --test-case / --suite / --file args.\n")
-        sys.exit(0)
-
-    # ── Show list and confirm ──────────────────────────────────────────────
-    print(f"\n  Found {len(test_cases)} test case(s) to execute:")
-    for i, tc in enumerate(test_cases, 1):
-        tc_id = tc.get("test_case_id", tc.get("id", "?"))
-        title = tc.get("title", "Untitled")[:55]
-        print(f"    {i:>3}. [{tc_id}] {title}")
-
-    print()
-    if dry_run:
-        print("  DRY_RUN=true — no results will be uploaded to Xray.")
-    try:
-        confirm = input("  Proceed with execution? (y/n): ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print("\n  Cancelled.")
-        sys.exit(0)
-
-    if confirm != "y":
-        print("  Execution cancelled.\n")
-        sys.exit(0)
-
-    # ── Run the async execution pipeline ──────────────────────────────────
-    headless = args.headless.lower() != "false"
-
-    async def _run_pipeline() -> dict:
-        """Async execution pipeline: setup → execute → report → teardown."""
-        runner   = PlaywrightRunner()
-        # Auto-filed bugs on FAIL are live only with --upload (the operator's explicit OK).
-        executor = TestExecutor(dry_run=dry_run or not args.upload)
-        reporter = ResultsReporter()
-
-        await runner.setup(headless=headless)
-
-        try:
-            batch_results = await executor.execute_batch(
-                test_cases=test_cases,
-                runner=runner,
-                stop_on_fail=args.stop_on_fail,
-            )
-        finally:
-            await runner.teardown()
-
-        return batch_results, reporter
-
-    print(f"\n  Starting Playwright ({('headless' if headless else 'headed')})...")
-    start_ts = time.time()
-
-    try:
-        batch_results, reporter = asyncio.run(_run_pipeline())
-    except Exception as e:
-        logger.error("Execution pipeline failed: %s", e)
-        print(f"\n  ✗ Execution failed: {e}\n")
-        sys.exit(1)
-
-    # ── Console summary ────────────────────────────────────────────────────
-    reporter.generate_console_summary(batch_results)
-    _print_writes_sent(batch_results)
-    traces = [r.get("trace") for r in (batch_results.get("results") or []) if r.get("trace")]
-    if traces:
-        print(f"  Traces ({len(traces)}): open one with  playwright show-trace {traces[0]}")
-    if batch_results.get("throttled"):
-        print(f"  ⚠️  {batch_results['throttled']} case(s) hit the app's rate limit — reported as ERROR, "
-              "not FAIL. Wait and re-run, or raise the limit on staging.")
-
-    # ── HTML report ────────────────────────────────────────────────────────
-    report_folder = str(Path(args.output).parent) if args.output else "output/reports"
-    html_path = reporter.generate_html_report(batch_results, output_folder=report_folder)
-    if html_path:
-        print(f"  HTML report : {html_path}")
-
-    # ── Xray upload ────────────────────────────────────────────────────────
-    if args.upload:
-        if dry_run:
-            print("  DRY_RUN=true — skipping Xray upload (would upload results).")
-        else:
-            print("  Uploading results to Xray...")
-            try:
-                xray = XrayClient(dry_run=False)
-                key_map = {tc.get("test_case_id", ""): tc.get("jira_key")
-                           for tc in test_cases if tc.get("jira_key")}
-                upload_summary = asyncio.run(
-                    reporter.report_to_xray(batch_results, xray, key_map=key_map)
-                )
-                print(
-                    f"  Xray upload : {upload_summary['uploaded']} uploaded"
-                    f" (Test Execution {upload_summary.get('test_execution_key') or '-'}), "
-                    f"{upload_summary['failed']} failed, "
-                    f"{upload_summary.get('unmapped', 0)} without a Jira key"
-                )
-                if upload_summary.get("error"):
-                    print(f"  ✗ {upload_summary['error']}")
-            except Exception as e:
-                logger.error("Xray upload failed: %s", e)
-                print(f"  ✗ Xray upload failed: {e}")
-
-    # ── Save session ───────────────────────────────────────────────────────
-    try:
-        sm = SessionManager()
-        sm.save_session(
-            mode="execute",
-            config={
-                "suite": args.suite,
-                "test_case": args.test_case,
-                "headless": headless,
-                "upload": args.upload,
-            },
-            results={
-                "total": batch_results.get("total", 0),
-                "passed": batch_results.get("passed", 0),
-                "failed": batch_results.get("failed", 0),
-                "pass_rate": batch_results.get("pass_rate", 0.0),
-                "html_report": html_path,
-                "duration_seconds": round(time.time() - start_ts, 1),
-            },
-        )
-    except Exception as e:
-        logger.debug("Could not save session: %s", e)
-
-    # ── Exit code ──────────────────────────────────────────────────────────
-    if batch_results.get("failed", 0) > 0 or batch_results.get("errors", 0) > 0:
-        sys.exit(1)
 
 
-def _add_seeing_flags(parser) -> None:
-    """--watch / --trace / --screenshots for the browser engine (execute, pipeline)."""
-    parser.add_argument("--watch", action="store_true", default=False,
-                        help="Open a visible, slowed-down browser so you can watch every step "
-                             "(also takes a screenshot after every step).")
-    parser.add_argument("--trace", action="store_true", default=False,
-                        help="Record a Playwright trace per case (actions, network, DOM): "
-                             "open with `playwright show-trace <file>`.")
-    parser.add_argument("--screenshots", choices=["failures", "all"], default="failures",
-                        help="Screenshot after every step (all) or only at a failure (default).")
 
 
-def _apply_seeing_flags(args) -> None:
-    """Turn the seeing flags into the settings the browser runner reads."""
-    if getattr(args, "watch", False):
-        os.environ["QAX_SLOW_MO_MS"] = os.getenv("QAX_SLOW_MO_MS") or "400"
-        os.environ["QAX_STEP_SCREENSHOTS"] = "true"
-    if getattr(args, "screenshots", "failures") == "all":
-        os.environ["QAX_STEP_SCREENSHOTS"] = "true"
-    if getattr(args, "trace", False):
-        os.environ["QAX_TRACE"] = "true"
 
 
-def _print_writes_sent(batch: dict) -> None:
-    """Say what a browser run sent that can change data on the target (QAX does not undo it)."""
-    writes = [w for r in (batch.get("results") or []) for w in (r.get("writes") or [])]
-    if not writes:
-        return
-    seen: dict = {}
-    for w in writes:
-        k = f"{w.get('method')} {w.get('path')}"
-        seen[k] = seen.get(k, 0) + 1
-    print(f"  Writes sent to the target: {len(writes)} — QAX does not undo data created "
-          "through the UI; remove test data yourself if needed:")
-    for k, n in list(seen.items())[:10]:
-        print(f"    {n}× {k}")
+
+
+
+
 
 
 def _confirm_live_push(count: int, assume_yes: bool) -> bool:
@@ -1177,66 +905,8 @@ def _confirm_live_push(count: int, assume_yes: bool) -> bool:
     return answer.strip().lower() == "y"
 
 
-def _collect_test_cases_for_execute(args) -> list[dict]:
-    """
-    Resolve the test cases to execute from --test-case, --suite, or --file.
-
-    For --test-case / --suite: fetches from Xray via XrayClient.
-    For --file: loads from a local JSON output file.
-
-    Falls back to an empty list on any error.
-
-    Args:
-        args: Parsed argparse namespace with attributes:
-                test_case (str | None), suite (str | None), file (str | None).
-
-    Returns:
-        list[dict]: Test case dicts ready for TestExecutor.execute_batch().
-    """
-    # ── Load from local file ───────────────────────────────────────────────
-    if args.file:
-        file_path = Path(args.file)
-        if not file_path.exists():
-            logger.error("File not found: %s", args.file)
-            return []
-        try:
-            with open(file_path, encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict) and "test_cases" in data:
-                return data["test_cases"]
-            logger.error("Unexpected JSON structure in %s", args.file)
-            return []
-        except (json.JSONDecodeError, IOError) as e:
-            logger.error("Cannot read %s: %s", args.file, e)
-            return []
-
-    # ── Fetch from Xray ────────────────────────────────────────────────────
-    try:
-        # Reads only: fetching tests and their steps never writes, so it is not
-        # gated by DRY_RUN (the upload of results is, separately).
-        xray = XrayClient(dry_run=False)
-
-        if args.test_case:
-            tc = xray.fetch_test_by_id(args.test_case)
-            issues = [tc] if tc else []
-        elif args.suite:
-            issues = xray.fetch_tests_by_tag(args.suite)
-        else:
-            return []
-        return _issues_to_executable_cases(issues, xray.fetch_test_steps(
-            [i.get("key", "") for i in issues]))
-
-    except Exception as e:
-        logger.error("Could not fetch test cases from Xray: %s", e)
-        return []
 
 
-def _issues_to_executable_cases(issues: list[dict], steps_by_key: dict) -> list[dict]:
-    """Jira Test issues + Xray steps → executable cases (see core.xray_client.issues_to_cases)."""
-    from core.xray_client import issues_to_cases
-    return issues_to_cases(issues, steps_by_key)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1275,7 +945,8 @@ def run_check_connection_command() -> None:
     else:
         try:
             import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
+            from core.ai_provider import make_ai_client
+            client = make_ai_client(api_key=api_key)
             # Minimal call to verify credentials
             resp = client.messages.create(
                 model="claude-sonnet-4-5",
@@ -2075,6 +1746,9 @@ def show_help() -> None:
     print("Commands — functional QA:")
     print("  pipeline         Input → generate → plan → export → execute → report → Xray results")
     print("  map              Read a running app from its URL (pages, elements) for generation")
+    print("  doctor           Check this machine is ready (Python, browser, git, integrations)")
+    print("  mcp              Serve QAX to coding agents over MCP (stdio)")
+    print("  login            Log in by hand once (SSO / 2FA); runs reuse the session")
     print("  analyze          Generate test cases from source code")
     print("  run              Config-driven pipeline with session tracking")
     print("  execute          Run test cases with Playwright browser")
@@ -2181,88 +1855,6 @@ def run_file_findings_command() -> None:
     from cli.file_findings import run as _run_file_findings
     sys.exit(_run_file_findings(sys.argv[2:]))
 
-def run_map_command() -> None:
-    """
-    Handle the 'map' subcommand: read a running app from its URL.
-
-    Walks the app in a real browser (same-origin GET links only; logout/delete-style
-    links are never followed; no form is submitted), names each page's elements without
-    AI, and saves config/projects/<project>/app_map.json + selectors.json. Generation
-    for that project is then grounded in the real pages and elements.
-
-    Called when sys.argv[1] == "map".
-    """
-    import asyncio
-
-    parser = argparse.ArgumentParser(
-        prog="qax map",
-        description="Read a running app from its URL: pages, elements and selectors for functional QA.",
-    )
-    parser.add_argument("--url", required=True, help="Root URL of the running app.")
-    parser.add_argument("--project", required=True, help="Project name (config/projects/<name>/).")
-    parser.add_argument("--start", action="append", default=[], metavar="PATH",
-                        help="Extra path to start from (repeatable), e.g. --start /bookmarks")
-    parser.add_argument("--max-pages", type=int, default=20, help="Hard cap on pages visited (default 20).")
-    parser.add_argument("--user-env", default="", metavar="VAR",
-                        help="Name of the environment variable holding the login user (e.g. QAX_VAR_USER).")
-    parser.add_argument("--password-env", default="", metavar="VAR",
-                        help="Name of the environment variable holding the login password.")
-    parser.add_argument("--authorized", action="store_true",
-                        help="Confirm you own this app or are authorized to test it (required).")
-    parser.add_argument("--insecure", action="store_true",
-                        help="Do not verify the TLS certificate (self-signed staging only).")
-    parser.add_argument("--headed", action="store_true", help="Show the browser.")
-    parser.add_argument("--explore-actions", action="store_true",
-                        help="ALSO follow create/edit/delete/logout-style links (a disposable staging app "
-                             "only: following them CHANGES DATA). Every write is listed.")
-    parser.add_argument("--no-menus", action="store_true",
-                        help="Do not open menus/dialogs to record what they reveal.")
-    args = parser.parse_args(sys.argv[2:])
-
-    if not args.authorized:
-        print("\n  Refusing to map without --authorized (you own this app or may test it).\n")
-        sys.exit(2)
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", args.project):
-        print("\n  --project: letters, digits, - and _ only.\n")
-        sys.exit(2)
-    user = os.getenv(args.user_env, "") if args.user_env else ""
-    password = os.getenv(args.password_env, "") if args.password_env else ""
-    if (args.user_env or args.password_env) and not (user and password):
-        print(f"\n  Login variables not set: {args.user_env or '-'} / {args.password_env or '-'}\n")
-        sys.exit(2)
-
-    from core.app_mapper import map_app, save_map
-    print(f"\n  QAX — reading {args.url} (max {args.max_pages} pages, GET links only)…")
-    app_map = asyncio.run(map_app(args.url, start_paths=args.start, max_pages=args.max_pages,
-                                  username=user, password=password, headless=not args.headed,
-                                  insecure=args.insecure, explore_actions=args.explore_actions,
-                                  open_menus=not args.no_menus))
-    if app_map.error:
-        print(f"\n  ✗ {app_map.error}\n")
-        sys.exit(1)
-    if user and app_map.login_ok is False:
-        print("  ⚠️  Login did not succeed — only public pages were read.")
-    path = save_map(app_map, args.project)
-    n_el = sum(len(p.get("elements") or {}) for p in app_map.pages)
-    print(f"  Pages read: {len(app_map.pages)} · elements named: {n_el}"
-          + (f" · logged in" if app_map.login_ok else ""))
-    for p in app_map.pages[:30]:
-        print(f"    {p['path']:<40} {len(p.get('elements') or {}):>3} element(s)")
-    if app_map.skipped_links:
-        print(f"  Not followed (would log out / change data): {', '.join(app_map.skipped_links[:8])}"
-              "  — add --explore-actions on a disposable staging app to map them too")
-    if app_map.explored_actions:
-        print(f"  Action links followed (--explore-actions): {', '.join(app_map.explored_actions[:10])}")
-    n_open = sum(len(p.get("opened_by") or {}) for p in app_map.pages)
-    if n_open:
-        print(f"  Revealed by opening menus/dialogs: {n_open} element(s)")
-    if app_map.writes:
-        print(f"  ⚠️  Writes sent while mapping: {len(app_map.writes)} — "
-              + ", ".join(sorted({w['method'] + ' ' + w['path'] for w in app_map.writes})[:8]))
-    print(f"  Saved: {path}")
-    print(f"         {path.parent / 'selectors.json'}")
-    print(f"  Next:  python main.py pipeline --input story --source \"…\" --project {args.project} "
-          f"--exec-mode ui --base-url {args.url} --plan-only\n")
 
 
 def run_diff_command() -> None:
@@ -2310,285 +1902,23 @@ def run_verify_fixes_command() -> None:
     sys.exit(_run_verify_fixes(sys.argv[2:]))
 
 
-def scan_needs_key(quick: bool, repo: str | None) -> bool:
-    """
-    Whether a scan needs an Anthropic key: a DEEP scan (generation, red-team, critic) or any
-    scan that models a --repo's source with the AI. A quick scan of a live app (probes +
-    deterministic coverage templates) makes no model call and must run without one.
-    """
-    return (not quick) or bool(repo)
 
 
-def _load_examples_file(path: str | None) -> dict:
-    """Parse the --examples file; a missing/unreadable/invalid file is reported and ignored."""
-    if not path:
-        return {}
-    try:
-        from services.live_surface import parse_examples
-        ex = parse_examples(Path(path).read_text(encoding="utf-8"))
-        print(f"  (using {len(ex)} example body(ies) from {path})\n" if ex else
-              f"  ! no usable example in {path} (expected JSON like {{\"POST /api/x\": {{...}}}}) — ignoring it\n")
-        return ex
-    except OSError as exc:
-        print(f"  ! cannot read --examples file {path}: {exc} — continuing without it\n")
-        return {}
 
 
-def _load_endpoints_file(path: str | None) -> list:
-    """Parse the --endpoints file; a missing/unreadable file is reported and ignored (the scan still runs)."""
-    if not path:
-        return []
-    try:
-        from services.live_surface import parse_endpoint_lines
-        eps = parse_endpoint_lines(Path(path).read_text(encoding="utf-8"))
-        print(f"  (using {len(eps)} endpoint(s) from {path})\n")
-        return eps
-    except OSError as exc:
-        print(f"  ! cannot read --endpoints file {path}: {exc} — continuing without it\n")
-        return []
 
 
-def run_scan_command() -> None:
-    """
-    Handle the 'scan' subcommand — a deep, autonomous security + QA scan.
-
-    Runs the whole agent team over a repository against a live app in one call:
-    whole-system model → detectors → active probes → generation + red-team →
-    coverage loop → execute → critic → investigator. Prints the confirmed bugs
-    (from the Investigator and the probes) and the coverage it guaranteed.
-
-    Called when sys.argv[1] == "scan".
-    """
-    parser = argparse.ArgumentParser(
-        prog="qax scan",
-        description="Deep autonomous scan: model the whole app, hunt and PROVE bugs.")
-    parser.add_argument("--repo", default=None,
-                        help="Path to the repository to scan. Optional — omit for a UI-only / "
-                             "no-source target; QAX then scans the live app only (grounding + "
-                             "probes + --tour).")
-    parser.add_argument("--url", required=True,
-                        help="Base URL of the running app (e.g. http://localhost:8000).")
-    parser.add_argument("--project", default=None, help="QAX project name (optional).")
-    parser.add_argument("--max-router-files", type=int, default=4,
-                        help="Hard ceiling on router files for functional generation.")
-    parser.add_argument("--max-endpoints", type=int, default=40,
-                        help="Functional-generation budget in endpoints (routers chosen "
-                             "highest-risk-first until spent, bounded by --max-router-files).")
-    parser.add_argument("--quick", action="store_true",
-                        help="Quick scan — skip the LLM-heavy passes (knowledge, functional "
-                             "generation, red-team). Uses probes + deterministic coverage only; "
-                             "near-free, still proves JWT forgery/crashes and the security classes.")
-    parser.add_argument("--refresh", action="store_true",
-                        help="Ignore the cached app model and rebuild it.")
-    parser.add_argument("--out", default=None, help="Write the full result to this JSON file.")
-    parser.add_argument("--truth", default=None,
-                        help="Ground-truth JSON for the target (recall + false-positive scoring).")
-    parser.add_argument("--token", default=None,
-                        help="A valid auth token for apps QAX can't self-register into "
-                             "(external IdP, offline-signed JWT, API key). Enables auth-gated probes.")
-    parser.add_argument("--token-b", default=None,
-                        help="A second user's token, for IDOR/BOLA (userB reaching userA's data).")
-    parser.add_argument("--auth-header", default="Authorization",
-                        help="Header name for the token (default: Authorization).")
-    parser.add_argument("--auth-scheme", default="Bearer",
-                        help="Scheme prefix for the token (default: Bearer; use '' for a raw value / API key).")
-    parser.add_argument("--accepted", default=None, metavar="FILE",
-                        help="Known / by-design findings that must not be counted again (reason + expiry "
-                             "required per entry; they stay listed under ACCEPTED). Default: "
-                             ".qax/accepted.json when present.")
-    parser.add_argument("--reverify", type=int, default=0, metavar="N",
-                        help="Re-run the probes N more times and CONFIRM only findings that fire "
-                             "in every pass (the rest are reported as unstable). Gives the bug "
-                             "report a measured 'Reproduced N+1/N+1'. Default 0 (off); 1-2 is typical.")
-    parser.add_argument("--tour", action="store_true",
-                        help="Also tour the live UI in a real browser and fold what it sees "
-                             "(uncaught JS errors, failed API calls) into the findings. Needs "
-                             "Playwright — run this scan under the exec venv (.venv-exec, Python 3.12).")
-    parser.add_argument("--visual-baseline", default=None,
-                        help="Directory of baseline screenshots for visual regression (with --tour). "
-                             "First run seeds it; later runs flag screens whose rendering changed.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="No external side effects (exports); the scan still runs.")
-    parser.add_argument("--spec", default=None, metavar="URL|PATH|FILE",
-                        help="Where the app's OpenAPI/Swagger document is, when it is not at a standard path "
-                             "(a URL, a path on the app like /apispec.json, or a local file).")
-    parser.add_argument("--endpoints", default=None, metavar="FILE",
-                        help="A hand-written endpoint list for apps with no OpenAPI spec whose routes cannot be "
-                             "guessed. One per line: `GET /api/things`, `POST /api/things title!,body`. "
-                             "See QUICKSTART.md.")
-    parser.add_argument("--examples", default=None, metavar="FILE",
-                        help="A JSON file of VALID request bodies for endpoints whose creates need data QAX "
-                             "cannot guess: {\"POST /api/pages\": {\"title\": \"T {{unique}}\", ...}}. "
-                             "`{{unique}}` is replaced per request.")
-    parser.add_argument("--insecure", action="store_true",
-                        help="Do not verify the target's TLS certificate (a staging server with a self-signed or "
-                             "internal-CA certificate). Use ONLY for a target you control.")
-    parser.add_argument("--header", action="append", default=[], metavar="\"Name: value\"",
-                        help="An extra header sent with EVERY request (repeatable): a CSRF nonce for a cookie "
-                             "session (`--header \"CSRF-Token: <nonce>\"`), a tenant id, an API version.")
-    parser.add_argument("--cookie", default=None, metavar="\"name=value; ...\"",
-                        help="Authenticate with a session cookie instead of a token (copy it from your "
-                             "browser's DevTools). Carried on every request. Best with --read-only; a full "
-                             "scan of a CSRF-protected app from a cookie is not supported yet.")
-    parser.add_argument("--read-only", action="store_true",
-                        help="Send NO write request (only GET/HEAD/OPTIONS): probes and tests that need to "
-                             "create data, register users or log in are not run and are listed under NOT "
-                             "TESTED. Use it for a first scan of a staging you do not own. Works best with "
-                             "--token (no self-registration needed).")
-    parser.add_argument("--authorized", action="store_true",
-                        help="Confirm you OWN or are explicitly permitted to actively test this "
-                             "target. A scan runs active, data-MUTATING probes (it creates test "
-                             "records and sends adversarial input). Required — a scan refuses "
-                             "without it. Never run against a target you are not authorized to test.")
-    args = parser.parse_args(sys.argv[2:])
-
-    # S4 — authorized-target gate: active probing mutates the target, so require an
-    # explicit ownership/permission confirmation before anything runs.
-    if not args.authorized:
-        from execution.probes import MUTATING_PROBES
-        print("\n  Refusing to scan: an active scan runs data-MUTATING probes "
-              f"({', '.join(sorted(MUTATING_PROBES))})\n  — it creates test records and sends "
-              "adversarial input to the target.\n  Re-run with --authorized to confirm you own "
-              "or are permitted to test this target.\n")
-        sys.exit(2)
-
-    from services import scorecard as _scorecard
-    from services import usage as _usage
-    from services.context import QAXContext
-    from services.orchestrator_service import OrchestratorService
-    from services.progress import PrintProgressReporter
-
-    if args.repo:
-        if not Path(args.repo).exists():
-            print(f"\n  Repo path not found: {args.repo}\n")
-            sys.exit(1)
-        repo_path = args.repo
-    else:
-        # No repo — UI-only / live-app-only scan. Use an empty dir so the model
-        # degrades cleanly to live-app grounding + probes + tour.
-        import tempfile
-        repo_path = tempfile.mkdtemp(prefix="qax_nosrc_")
-
-    try:
-        ctx = QAXContext.from_env(project=args.project or "", dry_run=args.dry_run)
-        # A key is needed only where an LLM is actually used: a DEEP scan, or modelling a
-        # --repo's source. A quick scan of a live app (probes + coverage templates) makes no
-        # model call, so it must run on a clean machine with no key (ROADMAP Q2).
-        if scan_needs_key(args.quick, args.repo):
-            ctx.require_anthropic_key()
-        elif not ctx.anthropic_key:
-            print("\n  (no ANTHROPIC_API_KEY — a quick scan of a live app needs none; the AI "
-                  "verification of failing generated tests is simply skipped)")
-    except Exception as exc:
-        print(f"\n  {exc}\n")
-        sys.exit(1)
-
-    mode = "quick" if args.quick else "deep"
-    print(f"\n  QAX {mode} scan — repo: {args.repo or '(none — live app only)'}  ·  app: {args.url}\n")
-
-    # Instrument this run: count every LLM call (for $/run) and time it.
-    _usage.track()
-    _usage.reset()
-    _auth = None
-    from core.session_auth import parse_headers      # used below (--out run record) even with no credentials
-    if args.token or args.token_b or args.cookie or args.header or args.insecure:
-        _auth = {"token": args.token, "token_b": args.token_b,
-                 "header": args.auth_header, "scheme": args.auth_scheme, "cookie": args.cookie,
-                 "headers": parse_headers(args.header), "insecure": bool(args.insecure)}
-        _how = "a session cookie" if (args.cookie and not args.token) else f"a supplied token via '{args.auth_header}'"
-        print(f"  (authenticating with {_how})\n")
-    _t0 = time.time()
-    result = OrchestratorService(ctx).run(
-        repo_path, args.url,
-        deep=not args.quick,
-        max_router_files=args.max_router_files,
-        max_endpoints=args.max_endpoints,
-        use_cache=not args.refresh,
-        auth=_auth,
-        tour=args.tour,
-        visual_baseline=args.visual_baseline,
-        reverify=max(0, int(args.reverify or 0)),
-        read_only=args.read_only,
-        spec_url=args.spec,
-        extra_endpoints=_load_endpoints_file(args.endpoints),
-        examples=_load_examples_file(args.examples),
-        progress=PrintProgressReporter())
-    _elapsed = time.time() - _t0
-
-    if result.error:
-        print(f"\n  Scan failed: {result.error}\n")
-        sys.exit(1)
-
-    # Known / by-design findings (core.accepted): split out BEFORE rendering so they are neither
-    # counted nor filed, but always listed with their reason.
-    _acc_text = ""
-    try:
-        from core import accepted as _acc
-        _loaded = _acc.load(args.accepted)
-        if _loaded["entries"] or _loaded["error"] or _loaded["invalid"]:
-            _info = _acc.split(list(result.confirmed or []), _loaded["entries"])
-            result.confirmed = _info["active"]
-            result.accepted = [{**a["finding"], "accepted": a["entry"]} for a in _info["accepted"]]
-            _acc_text = _acc.render(_info, _loaded)
-    except Exception as exc:
-        logger.warning("accepted-findings handling failed (nothing suppressed): %s", exc)
-
-    from cli.scan_render import render_scan_result
-    print(render_scan_result(result))   # S8: extracted, B1-aligned (deterministic vs AI leads)
-    if _acc_text:
-        print("\n" + _acc_text + "\n")
-
-    # Scorecard — the honest, trackable number for this run.
-    _truth = None
-    if args.truth:
-        try:
-            _truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("Could not read --truth file: %s", exc)
-    try:
-        _rec = _scorecard.score_run(
-            result, repo=(args.repo or args.url), url=args.url, mode=mode,
-            duration_sec=_elapsed, usage=_usage.snapshot(), truth=_truth)
-        _path = _scorecard.write_run(_rec)
-        print(_scorecard.render(_rec))
-        if _path:
-            print(f"     saved: {_path}")
-        print()
-    except Exception as exc:
-        logger.warning("scorecard failed (scan result is unaffected): %s", exc)
-
-    if args.out:
-        try:
-            # Record WHAT was scanned, so a finding filed later (file-findings) can
-            # state its environment — a bug report without one is not reproducible.
-            from core.build_fingerprint import build_fingerprint
-            from core.version import run_record
-            from services.live_surface import authed_session
-            _out = {**result.to_dict(), "target_url": args.url,
-                    "scan_mode": "quick" if args.quick else "deep",
-                    # PLAN.md §6 run record: what produced this result (never the tokens themselves).
-                    **run_record(quick=bool(args.quick), read_only=bool(args.read_only),
-                                 reverify=int(args.reverify or 0), tour=bool(args.tour),
-                                 repo_supplied=bool(args.repo), token_supplied=bool(args.token),
-                                 token_b_supplied=bool(args.token_b), cookie_supplied=bool(args.cookie), insecure=bool(args.insecure),
-                                 extra_headers=sorted(parse_headers(args.header)),
-                                 auth_header=args.auth_header,
-                                 auth_scheme=args.auth_scheme,
-                                 accepted_file=args.accepted or None),
-                    "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-                    # Which build was scanned — so a later verify-fixes can tell "not fixed" from
-                    # "not redeployed" (None = no stable component, i.e. unknown).
-                    "build": build_fingerprint(args.url, session=authed_session(_auth))}
-            Path(args.out).write_text(json.dumps(_out, indent=2, ensure_ascii=False),
-                                      encoding="utf-8")
-            print(f"  Full result written to {args.out}\n")
-        except Exception as exc:
-            logger.warning("Could not write --out file: %s", exc)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+
+
+
+
 
 def main() -> None:
     """
@@ -2632,6 +1962,9 @@ def main() -> None:
         "lint-tests":       run_lint_tests_command,
         "diff":             run_diff_command,
         "map":              run_map_command,
+        "doctor":           run_doctor_command,
+        "mcp":              run_mcp_command,
+        "login":            run_login_command,
     }
 
     if command in dispatch:

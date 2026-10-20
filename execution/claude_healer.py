@@ -158,7 +158,8 @@ class ClaudeHealer:
             # ── Call Claude API ────────────────────────────────────────────
             import anthropic  # Local import — not required at module load time
 
-            client = anthropic.Anthropic(api_key=self._api_key)
+            from core.ai_provider import make_ai_client
+            client = make_ai_client(api_key=self._api_key)
             response = client.messages.create(
                 model=self._model,
                 max_tokens=512,
@@ -330,7 +331,8 @@ class ClaudeHealer:
             )
 
             import anthropic
-            client = anthropic.Anthropic(api_key=self._api_key)
+            from core.ai_provider import make_ai_client
+            client = make_ai_client(api_key=self._api_key)
             response = client.messages.create(
                 model=self._model,
                 max_tokens=128,

@@ -119,3 +119,26 @@ example-qa-generate:
       - mr_comment.md
     expire_in: 7 days
     when: always
+
+# ── QAX functional QA end to end (real browser) ─────────────────────────────
+# Variables: QAX_APP_URL (staging/preview URL of an app you own), QAX_PROJECT,
+# QAX_VAR_* for test-user secrets. Results show in the merge request's test report.
+qax-e2e:
+  image: mcr.microsoft.com/playwright/python:v1.44.0-jammy
+  stage: test
+  variables:
+    CI: "true"
+    DRY_RUN: "true"
+    AUTO_BUG_REPORT: "false"
+  script:
+    - pip install -r requirements.txt
+    - python main.py execute --file qa/qax-cases.json --project "$QAX_PROJECT"
+        --base-url "$QAX_APP_URL" --yes --junit output/qax-junit.xml --screenshots all
+  artifacts:
+    when: always
+    expire_in: 14 days
+    paths:
+      - output/reports/
+      - output/screenshots/
+    reports:
+      junit: output/qax-junit.xml

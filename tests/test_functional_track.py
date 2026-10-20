@@ -395,7 +395,8 @@ def test_pipeline_upload_without_xray_credentials_is_an_error_not_a_crash(tmp_pa
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)                      # run history / outputs stay out of the repo
     monkeypatch.delenv("QAX_API_TOKEN", raising=False)
     monkeypatch.delenv("QAX_ALLOW_LIVE_EXPORT", raising=False)
     from web.server import app
@@ -462,7 +463,7 @@ def test_generate_goes_through_the_validating_generation_service(client, monkeyp
 def test_ui_config_and_page_wire_execution_token_and_honest_export(client, monkeypatch):
     cfg = client.get("/api/config").get_json()
     assert cfg["live_export"] is False and cfg["token_required"] is False and "browser" in cfg
-    html = client.get("/app").get_data(as_text=True)
+    html = "".join(client.get(u).get_data(as_text=True) for u in ("/app", "/app.js", "/app.css"))
     for needle in ("/api/execute", "runTests(", "X-QAX-Token", "AI proposal · not run",
                    "QAX_ALLOW_LIVE_EXPORT", "dry_run:!live", "tc.manual_steps",
                    'id="exengine"', "loadTests(", "engine:$('exengine').value"):
@@ -561,7 +562,7 @@ def test_env_file_fills_gaps_but_never_overrides_what_the_operator_set(tmp_path,
 
 
 def test_the_app_has_two_tracks_and_generation_lives_inside_functional_qa(client):
-    html = client.get("/app").get_data(as_text=True)
+    html = "".join(client.get(u).get_data(as_text=True) for u in ("/app", "/app.js", "/app.css"))
     assert 'id="mode-scan"' in html and 'id="mode-func"' in html and 'id="mode-gen"' not in html
     assert 'id="panel-gen"' not in html and 'id="src-gen"' not in html
     assert "if(m==='gen'){ m='func'; }" in html                                         # old links
@@ -774,3 +775,192 @@ def test_web_functional_bugs_files_only_failures_and_stays_dry_run(client, monke
     assert d["dry_run"] is True and calls["dry_run"] is True          # live export is off on the server
     assert [b["test_case_id"] for b in d["bugs"]] == ["T1"]
     assert client.post("/api/functional/bugs", json={"results": res[1:]}).status_code == 400
+
+
+def test_one_story_drives_functional_and_security_cases():
+    from core.istqb_knowledge import prompt_block
+    from core.traceability import extract_criteria, security_block, security_risks
+    ac = extract_criteria("- A user can delete their own note\n- Admins can approve posts\n- Users can reset their password")
+    risks = {(r["criterion"], r["risk"]) for r in security_risks(ac)}
+    assert ("AC-1", "access control") in risks and ("AC-2", "function-level authorization") in risks
+    assert ("AC-3", "authentication") in risks
+    assert "AC-1 — access control" in security_block(security_risks(ac)) and security_block([]) == ""
+    assert "negative access-control case" in prompt_block()
+
+
+def test_requirement_verdicts_and_the_story_comment():
+    from core.traceability import requirement_verdicts, verdict_comment
+    ac = [{"id": "AC-1", "text": "add"}, {"id": "AC-2", "text": "reject"}, {"id": "AC-3", "text": "x"},
+          {"id": "AC-4", "text": "y"}]
+    cov = {"by_criterion": {"AC-1": ["T1", "T2"], "AC-2": ["T3"], "AC-3": [], "AC-4": ["T4"]}}
+    res = [{"test_case_id": "T1", "status": "PASS"}, {"test_case_id": "T2", "status": "PASS"},
+           {"test_case_id": "T3", "status": "FAIL"}, {"test_case_id": "T4", "status": "SKIP"}]
+    v = {x["id"]: x["verdict"] for x in requirement_verdicts(ac, cov, res)}
+    assert v == {"AC-1": "PASSED", "AC-2": "FAILED", "AC-3": "NOT COVERED", "AC-4": "NOT FULLY RUN"}
+    text = verdict_comment(requirement_verdicts(ac, cov, res), "http://a", ["BUG-1"])
+    assert "AC-2 FAILED" in text and "Bugs: BUG-1" in text
+
+
+def test_bugs_link_to_the_story_and_the_story_gets_the_verdicts(client):
+    res = [{"test_case_id": "T1", "status": "FAIL", "steps": [{"step_number": 1, "status": "FAIL", "actual_result": "no"}]}]
+    body = {"results": res, "story_key": "notes-7", "url": "http://a",
+            "criteria": [{"id": "AC-1", "text": "add a note"}],
+            "coverage": {"by_criterion": {"AC-1": ["T1"]}}, "all_results": res}
+    d = client.post("/api/functional/bugs", json=body).get_json()
+    assert d["dry_run"] is True and d["results"][0]["linked_to"] == "NOTES-7"
+    assert d["story_comment"]["story_key"] == "NOTES-7" and "AC-1 FAILED" in d["story_comment"]["text"]
+    assert "regression_suite" not in d                                       # dry run writes nothing
+    assert client.post("/api/functional/bugs", json=dict(body, story_key="not a key")).status_code == 400
+
+
+def test_run_history_finds_regressions_fixes_and_flaky_cases(tmp_path):
+    from core.run_history import add_regression_cases, compare, history, save_run
+    for verdicts in ({"A": "PASS", "B": "FAIL", "C": "PASS"}, {"A": "PASS", "B": "FAIL", "C": "FAIL"},
+                     {"A": "PASS", "B": "FAIL", "C": "PASS"}):
+        save_run("p", "http://a", [{"test_case_id": k, "status": v} for k, v in verdicts.items()], root=tmp_path)
+        import time
+        time.sleep(0.002)
+    now = [{"test_case_id": "A", "status": "FAIL"}, {"test_case_id": "B", "status": "PASS"},
+           {"test_case_id": "C", "status": "FAIL"}, {"test_case_id": "D", "status": "PASS"}]
+    ch = compare(history("p", root=tmp_path), now)
+    assert ch["regressions"] == ["A", "C"] and ch["fixed"] == ["B"] and ch["new"] == ["D"]
+    assert ch["flaky"] == ["C"] and ch["runs_before"] == 3
+    path = add_regression_cases("p", [{"test_case_id": "A", "title": "t", "_verdict": {}}], {"A": "BUG-9"}, root=tmp_path)
+    suite = json.loads(open(path).read())
+    assert suite["test_cases"] == [{"test_case_id": "A", "title": "t", "regression_for": "BUG-9"}]
+
+
+def test_a_bug_can_be_written_in_arabic(client):
+    from core.jira_bugs import functional_result_to_bug
+    r = {"test_case_id": "T1", "status": "FAIL", "steps": [{"step_number": 2, "status": "FAIL", "actual_result": "x"}]}
+    bug = functional_result_to_bug(r, {"title": "Login"}, base_url="http://a", lang="ar")
+    assert "يفشل عند الخطوة 2" in bug["description"] and "النتيجة الفعلية: x" in bug["description"]
+    d = client.post("/api/functional/bugs", json={"results": [r], "lang": "ar"}).get_json()
+    assert "يفشل عند الخطوة" in d["bugs"][0]["text"]
+    assert "fails at step 2" in functional_result_to_bug(r, {"title": "Login"})["description"]
+
+
+def test_doctor_names_what_is_missing_and_never_prints_secrets(monkeypatch, capsys):
+    from core.doctor import print_report, run_checks
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-REAL-SECRET-VALUE")
+    monkeypatch.setenv("JIRA_API_TOKEN", "your-api-token")                 # a placeholder is "not set"
+    checks = {c["name"]: c for c in run_checks()}
+    assert checks["AI provider"]["status"] == "ok" and checks["Jira"]["status"] == "warn"
+    assert {"Python", "Packages", "Browser engine", "git", "Output folder", "Xray", "Live writes"} <= set(checks)
+    print_report(list(checks.values()))
+    assert "REAL-SECRET" not in capsys.readouterr().out
+
+
+def test_reading_the_app_again_keeps_the_names_existing_cases_use(tmp_path, monkeypatch):
+    import core.app_mapper as am
+    from core.app_mapper import AppMap, save_map
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path)
+    (tmp_path / "hand").mkdir()
+    (tmp_path / "hand" / "selectors.json").write_text(json.dumps(
+        {"_meta": {"auto_discovered": False}, "dashboard": {"note_input": "#note-input", "welcome_heading": "#welcome"}}))
+    fresh = AppMap(base_url="http://a", pages=[{"path": "/dashboard", "elements": {"note": "#note-input", "add": "#add"}}])
+    save_map(fresh, "hand")
+    d = json.loads((tmp_path / "hand" / "selectors.json").read_text())["dashboard"]
+    assert d == {"note": "#note-input", "add": "#add", "note_input": "#note-input", "welcome_heading": "#welcome"}
+    # an auto-discovered file: aliases of live selectors survive, stale selectors go
+    (tmp_path / "auto").mkdir()
+    (tmp_path / "auto" / "selectors.json").write_text(json.dumps(
+        {"_meta": {"auto_discovered": True, "manual_overrides": ["dashboard.pinned"]},
+         "dashboard": {"note_input": "#note-input", "gone": "#old", "pinned": "#pin"}}))
+    save_map(fresh, "auto")
+    d = json.loads((tmp_path / "auto" / "selectors.json").read_text())["dashboard"]
+    assert d == {"note": "#note-input", "add": "#add", "note_input": "#note-input", "pinned": "#pin"}
+
+
+def test_an_automated_case_bug_states_the_expected_result_from_its_assertion():
+    from core.jira_bugs import functional_result_to_bug
+    case = {"title": "Login", "automation_steps": [{"playwright_action": "navigate", "value": "/"},
+            {"playwright_action": "assert", "selector_key": "welcome_heading", "assertion_type": "text",
+             "assertion_value": "Welcome, admin"}]}
+    r = {"test_case_id": "T", "status": "FAIL", "steps": [{"step_number": 1, "status": "PASS"},
+         {"step_number": 2, "status": "FAIL", "actual_result": "got 'Welcome, demo'"}]}
+    assert "Expected: text check on welcome_heading: Welcome, admin" in functional_result_to_bug(r, case)["description"]
+
+
+def test_the_session_route_says_what_is_saved_and_never_returns_it(client, tmp_path, monkeypatch):
+    import core.session_state as ss
+    monkeypatch.setattr(ss, "CONFIG_DIR", tmp_path / "projects")
+    p = ss.state_path("shop")
+    p.parent.mkdir(parents=True)
+    p.write_text('{"cookies": [{"name": "sid", "value": "SECRET-SESSION"}]}')
+    d = client.post("/api/session", json={"project": "shop"}).get_json()
+    assert d["saved"] is True and "SECRET-SESSION" not in json.dumps(d)
+    assert client.post("/api/session", json={"project": "shop", "action": "record", "url": "http://a"}).status_code == 400
+    assert client.post("/api/session", json={}).status_code == 400
+    assert client.post("/api/session", json={"project": "shop", "action": "forget"}).get_json()["forgotten"] is True
+    assert not p.exists()
+
+
+def test_a_second_ai_provider_speaks_the_same_client_shape(monkeypatch):
+    """No Anthropic credit must not mean no test cases: QAX_AI_PROVIDER=openai sends the same
+    request to any OpenAI-compatible API (OpenAI, Azure, a local Ollama) and answers in the shape
+    every caller reads."""
+    import threading
+
+    from flask import Flask, request as freq
+    from werkzeug.serving import make_server
+
+    from core.ai_provider import OpenAICompatClient, make_ai_client
+    seen = {}
+    fake = Flask("fake-openai")
+
+    @fake.post("/v1/chat/completions")
+    def chat():
+        seen["body"], seen["auth"] = freq.get_json(), freq.headers.get("Authorization")
+        if seen["body"]["model"] == "broken":
+            return {"error": "no such model"}, 404
+        return {"model": "local-x", "choices": [{"message": {"content": '[{"title": "t"}]'}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7}}
+    srv = make_server("127.0.0.1", 0, fake)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("QAX_AI_PROVIDER", "openai")
+        monkeypatch.setenv("QAX_AI_BASE_URL", f"http://127.0.0.1:{srv.server_port}/v1")
+        monkeypatch.setenv("QAX_AI_MODEL", "local-x")
+        monkeypatch.setenv("QAX_AI_API_KEY", "k-123")
+        client = make_ai_client("ignored")
+        assert isinstance(client, OpenAICompatClient)
+        r = client.messages.create(model="claude-sonnet-4-5", max_tokens=100, system="be a QA engineer",
+                                   messages=[{"role": "user", "content": [{"type": "text", "text": "story"}]},
+                                             {"role": "assistant", "content": "["}])
+        assert r.content[0].text == '[{"title": "t"}]' and r.stop_reason == "max_tokens"
+        assert r.usage.input_tokens == 11 and r.usage.output_tokens == 7
+        b = seen["body"]
+        assert b["model"] == "local-x" and b["messages"][0] == {"role": "system", "content": "be a QA engineer"}
+        assert b["messages"][-1]["role"] == "user" and "Start your answer with: [" in b["messages"][-1]["content"]
+        assert seen["auth"] == "Bearer k-123"
+        monkeypatch.setenv("QAX_AI_MODEL", "broken")
+        with pytest.raises(RuntimeError, match="404"):
+            make_ai_client().messages.create(messages=[{"role": "user", "content": "x"}])
+        from services.context import QAXContext
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        assert QAXContext.from_env().require_anthropic_key()                # the openai provider is enough
+        monkeypatch.setenv("QAX_AI_PROVIDER", "anthropic")
+        import anthropic
+        assert isinstance(make_ai_client("sk-x"), anthropic.Anthropic)
+    finally:
+        srv.shutdown()
+
+
+def test_the_package_metadata_matches_the_code():
+    """pyproject.toml: same version as core.version, commands that exist, the runtime requirements."""
+    import importlib
+    import re as _re
+    import tomllib
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[1]
+    meta = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    from core.version import __version__
+    assert meta["version"] == __version__
+    for target in meta["scripts"].values():
+        mod, fn = target.split(":")
+        assert callable(getattr(importlib.import_module(mod), fn)), target
+    declared = {_re.split(r"[<>=!~\[]", d)[0].lower() for d in meta["dependencies"]}
+    reqs = [l.split("#")[0].strip() for l in (root / "requirements.txt").read_text().splitlines()]
+    runtime = {_re.split(r"[<>=!~\[]", r)[0].lower() for r in reqs if r and not r.startswith(("pytest",))}
+    assert runtime <= declared, runtime - declared

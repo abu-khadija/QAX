@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# QAX — GitHub Actions: functional QA end to end on every pull request
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs your QAX test cases in a real (headless) browser against the app deployed for
+# the pull request (a preview / staging URL), publishes the results as JUnit XML, and
+# uploads the screenshots and the HTML report. Nothing is written to Jira or Xray.
+#
+# Setup:
+#   1. Copy this file to .github/workflows/qax-e2e.yml in YOUR app's repository.
+#   2. Commit the cases file QAX wrote or you exported (default: qa/qax-cases.json) and the
+#      project's selectors (config/projects/<project>/selectors.json from `main.py map`).
+#   3. Repository variables: QAX_APP_URL (the staging/preview URL — an app you own),
+#      QAX_PROJECT (the project name). Secrets for test users: QAX_VAR_* (e.g.
+#      QAX_VAR_PASSWORD), referenced in cases as {{env:QAX_VAR_PASSWORD}}.
+#   4. QAX itself is checked out from its repository (QAX_REPO variable, owner/name).
+# A failing case fails the job; a case that could not run (ERROR) fails it too — a green
+# job means every case ran and passed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: QAX — E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout the app
+        uses: actions/checkout@v4
+
+      - name: Checkout QAX
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.QAX_REPO }}
+          path: .qax
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: .qax/requirements.txt
+
+      - name: Install QAX and Chromium
+        run: |
+          pip install -r .qax/requirements.txt
+          python -m playwright install --with-deps chromium
+          mkdir -p .qax/config/projects/${{ vars.QAX_PROJECT }}
+          cp -r config/projects/${{ vars.QAX_PROJECT }}/. .qax/config/projects/${{ vars.QAX_PROJECT }}/ 2>/dev/null || true
+
+      - name: Run the cases in a browser
+        working-directory: .qax
+        env:
+          CI: 'true'
+          DRY_RUN: 'true'
+          AUTO_BUG_REPORT: 'false'
+          QAX_VAR_PASSWORD: ${{ secrets.QAX_VAR_PASSWORD }}
+        run: |
+          python main.py execute --file ../qa/qax-cases.json --project "${{ vars.QAX_PROJECT }}" \
+            --base-url "${{ vars.QAX_APP_URL }}" --yes --junit ../output/qax-junit.xml \
+            --screenshots all --output ../output/reports/report.html
+
+      - name: Results in the job summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          try:
+              s = ET.parse("output/qax-junit.xml").getroot()
+              line = (f"**QAX E2E:** {s.get('tests')} cases · {s.get('failures')} failed · "
+                      f"{s.get('errors')} could not run · {s.get('skipped')} skipped")
+          except Exception as e:
+              line = f"**QAX E2E:** no results ({e})"
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(line + "\n")
+          PY
+
+      - name: Upload report, screenshots and JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qax-e2e
+          path: |
+            output/qax-junit.xml
+            output/reports/
+            .qax/output/screenshots/
+          retention-days: 14

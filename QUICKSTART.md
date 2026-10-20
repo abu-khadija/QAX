@@ -137,6 +137,30 @@ request body, never in a URL. **Read-only is
 on by default.** Click **Preview plan** to see what QAX will do (the endpoints it found, which checks write data,
 what is missing) before anything is attacked, then run the scan. Finished scans are kept under **Past scans**.
 
+## 4c. Functional QA end to end (web UI, real browser)
+
+The full install adds the browser engine (Chromium) and checks the machine:
+
+```bash
+make install        # Python 3.11/3.12 venv, packages, Chromium, then `doctor`
+make doctor         # what is ready and what is missing (never prints secrets)
+make web            # http://localhost:8900/app → Functional QA (E2E)
+```
+
+Or in a container, with nothing to install but Docker: `make docker` (the port is published on this machine only;
+an app running on your machine is `http://host.docker.internal:<port>` from inside the container).
+
+In **Functional QA (E2E)**, give QAX the app's URL (and a test login), the repository (a folder or an https Git URL)
+and the user story — or a Jira story key like `PROJ-123`. It shows what it understood (pages, criteria, the security
+risks the story implies), writes test cases traced to each criterion, and lets you **export** them (CSV/JSON) or
+**share** them to Jira/Xray (dry run unless live export is enabled). Then **Run tests**: PASS / FAIL per case with a
+screenshot of every step, the page errors it saw, accessibility and performance observations, and what changed since
+the last run. Failures become Jira bugs (English or Arabic), linked to the story, with the requirement verdicts as a
+comment on it — previewed until an operator enables live export. Writing test cases needs `ANTHROPIC_API_KEY`;
+everything else works without AI (load your own cases file instead).
+
+For coding agents: `python main.py mcp` serves the same tools over MCP — see [docs/MCP.md](docs/MCP.md).
+
 ## 5. Next steps
 
 ```bash
@@ -187,6 +211,8 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
 | `valid token was not accepted` / many checks NOT TESTED after a while | The token expired; get a fresh one |
 | `user A may not create objects (HTTP 403)` | Use an admin/owner token as `--token`, an ordinary user's as `--token-b` |
 | `QAX stopped sending requests ... rate-limiting` | The target kept answering HTTP 429; re-run later or allow-list the scanner |
+
+More (browser runs, Docker, the web server, MCP): [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## 8. Feedback
 

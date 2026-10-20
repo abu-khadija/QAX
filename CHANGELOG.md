@@ -33,7 +33,45 @@ Every scan written with `--out` records the exact version and commit that produc
   PASS); a click that opens a new tab continues there; cookie banners answered with their reject option; a
   covering overlay closed (Escape) or an off-screen element scrolled into view before a click fails.
 
+- `doctor` (machine readiness, never prints secrets), `make install` / `make web` / `make doctor` / `make docker`,
+  a Dockerfile and docker-compose (published on loopback only).
+- `mcp`: QAX as an MCP server for coding agents — read the app, write tests, run them, scan, preview bugs;
+  same gates as the UI, never writes to Jira/Xray.
+- Functional runs: elements inside iframes (`iframe#x >>> #el`); accessibility basics (WCAG) and page timings
+  (TTFB, load, LCP, CLS) per page as observations; per-project run history (newly failing, fixed, flaky);
+  every live-filed bug added to a regression suite.
+- One story → functional **and** security cases: the security risks each criterion implies (access control,
+  function-level authorization, authentication, injection, upload, business logic), with a one-click scan.
+- Jira: a story key as the input (read-only); bugs linked to the story; requirement verdicts commented on it
+  (dry run unless enabled); bugs and the E2E report in Arabic.
+- Docs: `docs/TROUBLESHOOTING.md`, `docs/MCP.md`, QUICKSTART §4c.
+
+- `make eval-generation`: measures the test cases an AI model writes (coverage, traceability, negatives,
+  security cases, grounding) and runs them against an app with a known bug (needs AI credit).
+- Web components: elements inside open shadow roots are read and used.
+- `login` / 🔐 button: log in by hand once (SSO, 2FA); `map` and browser runs reuse the session.
+- CI: `execute --yes --junit PATH --base-url URL`; `ci/github_action_e2e.yml`; a GitLab `qax-e2e` job.
+- `--device desktop|mobile|mobile-ios|tablet`, `--browser chromium|firefox|webkit`, `--workers N`.
+- `cleanup_steps` undo what a case created; `--visual` compares the end screen with a baseline (a lead).
+- `QAX_AI_PROVIDER=openai`: any OpenAI-compatible API or a local model writes the test cases.
+- `pyproject.toml` (`qax`, `qax-web` commands).
+
+### Security
+- The local web API refused nothing from other web pages: a page the operator visited could start scans,
+  browser runs or git clones through it. Now: cross-site (Sec-Fetch-Site / Origin) requests are refused,
+  writes must be JSON, only a loopback Host is served without `QAX_API_TOKEN`, security headers are set,
+  `/files` serves images only, and the server will not listen beyond loopback without a token.
+
+### Fixed
+- A failure after a step that could not run (ERROR) is no longer reported as an app bug (a real failure
+  after a SKIP still is).
+- A FAIL that followed a step that could not run was reported as an app bug; the case is now ERROR with the reason.
+- Re-reading an app no longer deletes selector names that existing test cases use.
+- The login request is no longer reported as "data changed while reading the app".
+
 ### Changed
+- main.py split into cli/ modules (names re-exported); the web UI's CSS and JS in their own files;
+  functional-QA routes in web/functional.py.
 - External writes need an explicit opt-in: `pipeline --live`; `execute` files auto-bugs only with `--upload`;
   `analyze` asks before a live push (`--yes` for CI).
 - A `.env` file fills missing variables but no longer overrides one set in the environment (a `.env` with

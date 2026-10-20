@@ -182,9 +182,24 @@ def save_map(app_map: AppMap, project: str) -> Path:
     except Exception:  # noqa: BLE001
         sel = {}
     sel.setdefault("_meta", {"auto_discovered": True, "manual_overrides": []})
+    meta = sel.get("_meta") if isinstance(sel.get("_meta"), dict) else {}
+    hand_written = meta.get("auto_discovered") is False
+    manual = set(meta.get("manual_overrides") or [])
     for p in app_map.pages:
         section = re.sub(r"[^a-z0-9]+", "_", (p.get("path") or "/").lower()).strip("_") or "home"
-        sel[section] = dict(p.get("elements") or {})
+        fresh = dict(p.get("elements") or {})
+        old = sel.get(section) if isinstance(sel.get(section), dict) else {}
+        # Re-reading must not break existing test cases: a hand-written file (or a key the
+        # operator pinned in manual_overrides) keeps its names; an auto-discovered name
+        # survives when its selector is still on the page (an alias). Stale ones go.
+        merged = dict(fresh)
+        live = set(fresh.values())
+        for k, v in old.items():
+            if hand_written or k in manual or f"{section}.{k}" in manual:
+                merged[k] = v
+            elif k not in merged and v in live:
+                merged[k] = v
+        sel[section] = merged
     sel_path.write_text(json.dumps(sel, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -226,7 +241,7 @@ def is_risky_link(href: str, text: str = "") -> bool:
 async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: int = 20,
                   username: str = "", password: str = "", headless: bool = True,
                   insecure: bool = False, explore_actions: bool = False,
-                  open_menus: bool = True) -> AppMap:
+                  open_menus: bool = True, storage_state: "str | None" = None) -> AppMap:
     """
     Walk the running app and return its map (see module docstring). Never raises.
 
@@ -236,6 +251,8 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
         max_pages (int): Hard cap on pages visited.
         username, password (str): Optional login (values, not names — the CLI reads
             them from environment variables).
+        storage_state (str | None): A session the operator recorded by hand
+            (core.session_state — SSO / 2FA apps); the walk starts logged in.
         headless (bool): Run without a window.
         insecure (bool): Accept an unverified TLS certificate (staging only).
         explore_actions (bool): ALSO follow the risky links (create/edit/delete/logout…)
@@ -264,12 +281,16 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless)
-            context = await browser.new_context(ignore_https_errors=insecure)
+            context = await browser.new_context(ignore_https_errors=insecure,
+                                                **({"storage_state": storage_state} if storage_state else {}))
+
+            logging_in = {"now": False}       # a login POST is expected, not a data change
 
             def _on_request(req):
                 try:
                     if is_write_request(req.method, req.url, req.post_data):
-                        result.writes.append({"method": req.method.upper(), "path": urlparse(req.url).path})
+                        result.writes.append({"method": req.method.upper(), "path": urlparse(req.url).path,
+                                              **({"login": True} if logging_in["now"] else {})})
                 except Exception:  # noqa: BLE001
                     pass
             context.on("request", _on_request)
@@ -284,10 +305,12 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                 try:
                     # never fill a form on the current page (it may be "add user"): start over
                     await _goto_settled(page, base_url + "/")
+                    logging_in["now"] = True
                     await DOMAnalyzer().login_if_needed(page)
                 except Exception:  # noqa: BLE001
                     pass
                 finally:
+                    logging_in["now"] = False
                     for k, v in saved.items():
                         if v is None:
                             os.environ.pop(k, None)
@@ -335,7 +358,12 @@ async def map_app(base_url: str, *, start_paths: list | None = None, max_pages: 
                                 "forms": await page.evaluate(_FORMS_JS)})
                         # logged in only if a login really happened and the form is gone — not
                         # merely "no password field here" (a 404 page has none: found on Flaskr)
-                        result.login_ok = bool(await DOMAnalyzer().login_if_needed(page)) and \
+                        logging_in["now"] = True
+                        try:
+                            did_login = bool(await DOMAnalyzer().login_if_needed(page))
+                        finally:
+                            logging_in["now"] = False
+                        result.login_ok = did_login and \
                             not await page.query_selector("input[type='password']")
                         # SPA: the login form and the signed-in home share one URL (Beszel "/"):
                         # keep the login page under its own name so the home page is still read

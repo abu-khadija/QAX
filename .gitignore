@@ -69,3 +69,6 @@ output/scorecard/
 .venv-exec/
 .venv/
 output/cache/
+
+# Saved browser sessions (QAX session import for SSO/2FA apps) are credentials
+config/projects/*/.auth/

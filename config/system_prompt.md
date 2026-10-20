@@ -115,6 +115,7 @@ Return an array of test case objects. Each object has exactly these fields:
 - `module` — a free-form feature/area name (e.g. `Auth`, `Todos`, `Checkout`). Non-empty. Not restricted to any predefined list.
 - `test_case_id` — `TC-{AREA}-{4 digits}` (e.g. `TC-AUTH-0001`).
 - `priority` — `critical` · `high` · `medium` · `low`.
+- **A case that creates data** (a record, a user, an upload) also gets `cleanup_steps`: automation steps, same format, that delete exactly what it created (find it by the `{{unique}}` value it used). They run after the case, pass or fail, and never change its verdict.
 - `automation_steps[].playwright_action` — one of `click · fill · navigate · assert · select · upload · wait · hover`.
 - `automation_steps[].selector_key` — never empty. Use `TODO_elementname` when the selector is unknown from the code.
 - `automation_steps[].assertion_type` — never empty. Default to `visible`. One of `visible · text · url · count · enabled · disabled · checked · value · contains · not_visible · attribute`.

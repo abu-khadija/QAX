@@ -1,0 +1,17 @@
+# QAX web UI in a container. Secrets come from .env (never baked into the image).
+# The port is published on 127.0.0.1 only: to reach it from another machine, set
+# QAX_API_TOKEN in .env first.
+services:
+  qax:
+    build: .
+    image: qax:local
+    env_file: .env
+    ports:
+      - "127.0.0.1:8900:8900"
+    volumes:
+      - ./output:/qax/output                    # reports, screenshots, traces
+      - ./config/projects:/qax/config/projects  # app maps and selectors per project
+    # An app running on this machine is reachable from the container as
+    # http://host.docker.internal:<port>
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

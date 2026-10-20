@@ -1,0 +1,38 @@
+# QAX packaging. Install from a checkout (keeps config/, web/static and the demo targets in place):
+#     python3.12 -m venv .venv && . .venv/bin/activate
+#     pip install -e .            # then: qax doctor · qax demo · qax-web
+#     python -m playwright install chromium
+# `make install` does the same into .venv-exec.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qax"
+version = "0.1.0"
+description = "QAX — the runtime proof layer: generate the tests, prove the bugs, ship to Jira."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "anthropic>=0.40.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "jsonschema>=4.23.0",
+    "requests>=2.31.0",
+    "playwright==1.44.0",
+    "flask>=3.0.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-cov>=5"]
+
+[project.scripts]
+qax = "main:main"
+qax-web = "web.server:serve"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "services*", "execution*", "web*", "cli*", "evals*"]

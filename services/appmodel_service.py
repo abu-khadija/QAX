@@ -214,7 +214,8 @@ class AppModelService:
         """One Claude call that returns the structured model as a JSON object."""
         import anthropic
 
-        client = anthropic.Anthropic(api_key=self.context.anthropic_key)
+        from core.ai_provider import make_ai_client
+        client = make_ai_client(api_key=self.context.anthropic_key)
         response = client.messages.create(
             model=self.context.model_heavy,
             max_tokens=6000,

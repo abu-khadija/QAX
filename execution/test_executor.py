@@ -201,11 +201,17 @@ class TestExecutor:
         first_failure_step = None  # capture details for bug report
 
         step_shots = os.getenv("QAX_STEP_SCREENSHOTS", "false").strip().lower() == "true"
+        quality = None
+        if os.getenv("QAX_PAGE_QUALITY", "true").strip().lower() != "false" and page is not None:
+            from core.page_quality import QualityObserver
+            quality = QualityObserver()    # accessibility + performance of every page visited
         for i, step in enumerate(steps, start=1):
             step["step_number"] = i  # Ensure step_number is set
             page = await runner.get_page() or page        # a new tab opened by the last step
             step_result = await self._execute_step(step, page, runner, tc_id)
             step_results.append(step_result)
+            if quality is not None:
+                await quality.observe(await runner.get_page() or page)
             # `--screenshots all` / `--watch`: what the browser showed after EVERY step —
             # the run can be followed (and reviewed) step by step, not only at a failure.
             if step_shots and not step_result.get("screenshot") and hasattr(runner, "take_screenshot"):
@@ -262,6 +268,20 @@ class TestExecutor:
                 healed_count += 1
                 # HEALED means it eventually passed after AI healing
                 # Don't mark overall as FAIL
+
+        # A failure that FOLLOWS a step that could not run (ERROR: an unknown element name, a
+        # crash) is a consequence of the broken test, not evidence about the app —
+        # e.g. "log in" never ran, so "add a note" timed out. That case is ERROR, and no bug
+        # is filed for it (found in a real-browser run of the E2E flow, 2026-10-20).
+        case_error = ""
+        first_bad = next((sr for sr in step_results if sr.get("status") not in ("PASS", "HEALED")), None)
+        if overall_status == "FAIL" and first_bad is not None and first_bad.get("status") == "ERROR":
+            # (a SKIP — an assertion that could not be evaluated — does not stop later steps
+            # from meaning something, so a real failure after it still wins)
+            overall_status = "ERROR"
+            first_failure_step = None
+            case_error = (f"Step {first_bad.get('step_number')} could not run ({first_bad.get('status')}); "
+                          "the failures after it are its consequence — fix the test, then re-run")
 
         # A case is PASS only when every step actually ran and passed. A step that
         # crashed (ERROR) or was not executed (SKIP: unrecognised action, no browser)
@@ -324,7 +344,9 @@ class TestExecutor:
             except Exception as _be:
                 logger.debug("Auto-bug-report failed (non-fatal): %s", _be)
 
+        out_quality = quality.summary() if quality is not None else {}
         return {
+            **({"quality": out_quality} if out_quality else {}),
             "test_case_id":      tc_id,
             "title":             title,
             "status":            overall_status,
@@ -335,7 +357,7 @@ class TestExecutor:
             "screenshot":        failure_screenshot,
             "html_snapshot":     html_snapshot_path,
             "healed_steps":      healed_count,
-            "error":             "",
+            "error":             case_error,
             "risk_level":        risk_level,
             "bug_key":           bug_key,
             "bug_url":           bug_url,
@@ -444,6 +466,7 @@ class TestExecutor:
             if hasattr(runner, "take_page_errors"):
                 runner.take_page_errors()
             result = await self.execute_test_case(tc, runner)
+            await self._after_case(tc, result, runner)
             if hasattr(runner, "take_page_errors"):
                 errs = runner.take_page_errors()
                 if errs:
@@ -504,6 +527,42 @@ class TestExecutor:
             "duration_seconds": duration,
             "stopped_early": stopped_early,
         }
+
+    async def _after_case(self, tc: dict, result: dict, runner) -> None:
+        """
+        After a case, in its own session: the visual check of the screen it ended on
+        (`--visual`, a lead, never a verdict), then its cleanup_steps — undo what it created
+        (run on PASS and FAIL; their outcome is reported, the verdict does not change).
+        Never raises.
+        """
+        try:
+            page = await runner.get_page() if hasattr(runner, "get_page") else None
+        except Exception:  # noqa: BLE001
+            page = None
+        if page is None:
+            return
+        try:
+            from core.visual_check import check_case_screen
+            vis = await check_case_screen(page, str(tc.get("test_case_id", "case")))
+            if vis:
+                result["visual"] = vis
+        except Exception:  # noqa: BLE001
+            pass
+        cleanup = [s for s in (tc.get("cleanup_steps") or []) if isinstance(s, dict)]
+        if not cleanup or os.getenv("QAX_CLEANUP", "true").strip().lower() == "false":
+            return
+        done = []
+        for n, step in enumerate(cleanup, start=1):
+            step = dict(step, step_number=step.get("step_number") or n)
+            try:
+                page = await runner.get_page() or page
+                r = await self._execute_step(step, page, runner, f"{tc.get('test_case_id', 'case')}-cleanup")
+            except Exception as e:  # noqa: BLE001
+                r = {"step_number": n, "status": "ERROR", "error": str(e)[:200]}
+            done.append({"step_number": r.get("step_number", n), "status": r.get("status"),
+                         "actual_result": r.get("actual_result", ""), "error": r.get("error")})
+        ok = all(d["status"] in ("PASS", "HEALED") for d in done)
+        result["cleanup"] = {"status": "done" if ok else "incomplete", "steps": done}
 
     # ─────────────────────────────────────────────────────────────────────────
     # Private: _execute_step
@@ -667,3 +726,56 @@ class TestExecutor:
             "healed_steps": 0,
             "error": error_message,
         }
+
+
+async def run_parallel(test_cases: list, workers: int = 2, *, headless: bool = True,
+                       stop_on_fail: bool = False, dry_run: bool = True) -> dict:
+    """
+    Run cases on several browsers at once (each worker: its own browser, its own clean
+    session per case) and merge the results in the original order. Cases must not depend
+    on each other — QAX cases are self-contained ({{unique}} values, a fresh session per
+    case) — so a verdict does not change with the number of workers.
+
+    Args:
+        test_cases: the cases.
+        workers: browsers in parallel (1 = the sequential batch).
+        headless, stop_on_fail, dry_run: as for a single batch.
+
+    Returns:
+        dict: the same shape as TestExecutor.execute_batch(), plus "workers".
+    """
+    from execution.playwright_runner import PlaywrightRunner
+    workers = max(1, min(int(workers or 1), 8, len(test_cases) or 1))
+    start = time.monotonic()
+    start_ts = datetime.now(timezone.utc).isoformat()
+    chunks = [[(i, tc) for i, tc in enumerate(test_cases) if i % workers == w] for w in range(workers)]
+
+    async def one(chunk):
+        runner = PlaywrightRunner()
+        executor = TestExecutor(dry_run=dry_run)
+        try:
+            await runner.setup(headless=headless)
+            batch = await executor.execute_batch([tc for _, tc in chunk], runner, stop_on_fail=stop_on_fail)
+        finally:
+            try:
+                await runner.teardown()
+            except Exception:  # noqa: BLE001
+                pass
+        return [(chunk[k][0], r) for k, r in enumerate(batch.get("results") or [])], batch.get("stopped_early", False)
+
+    parts = await asyncio.gather(*(one(c) for c in chunks if c))
+    results = [r for _, r in sorted((x for part, _ in parts for x in part), key=lambda t: t[0])]
+    counts = {"PASS": 0, "FAIL": 0, "ERROR": 0, "SKIP": 0}
+    for r in results:
+        counts[r.get("status", "ERROR")] = counts.get(r.get("status", "ERROR"), 0) + 1
+    total = len(results)
+    return {
+        "writes_sent": sum(len(r.get("writes") or []) for r in results),
+        "throttled": sum(1 for r in results if r.get("throttled")),
+        "total": total, "passed": counts["PASS"], "failed": counts["FAIL"],
+        "errors": counts["ERROR"], "skipped": counts["SKIP"],
+        "pass_rate": round((counts["PASS"] / total * 100) if total else 0.0, 1),
+        "results": results, "start_time": start_ts, "end_time": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": round(time.monotonic() - start, 2),
+        "stopped_early": any(stopped for _, stopped in parts), "workers": workers,
+    }

@@ -285,6 +285,8 @@ def test_map_reads_the_app_logs_in_and_never_follows_logout(ui_app):
     assert dash["elements"].get("add_note_button") == "#add-note-btn"
     assert any("logout" in h for h in m.skipped_links)       # seen, not followed
     assert "/logout" not in paths
+    # the login POST is expected: it is marked, never reported as "data changed while reading"
+    assert m.writes and all(w.get("login") for w in m.writes), m.writes
 
 
 def test_a_selector_written_directly_in_a_step_is_used_as_is(ui_app):
@@ -471,3 +473,291 @@ def test_the_runner_gets_past_obstacles_and_reports_page_problems(ui_app):
     assert "Escape" in r["steps"][1]["actual_result"]                   # overlay handled
     kinds = {e["kind"] for e in r.get("page_errors", [])}
     assert "javascript exception" in kinds and "HTTP 500" in kinds
+
+
+def test_elements_inside_an_iframe_are_read_and_used(ui_app):
+    """An embedded form (payments, editors, widgets) lives in another document: the reader lists
+    its elements as "iframe >>> element", and a run fills, clicks and checks inside it — by that
+    selector and by a plain selector the runner finds in the frame."""
+    import asyncio
+
+    from playwright.async_api import async_playwright
+
+    from core.dom_analyzer import FRAME_SEP, label_page
+
+    async def read():
+        async with async_playwright() as p:
+            b = await p.chromium.launch()
+            pg = await b.new_page()
+            await pg.goto(f"http://127.0.0.1:{ui_app}/frames")
+            await pg.wait_for_timeout(300)
+            els, _hidden = await label_page(pg)
+            await b.close()
+            return els
+    els = asyncio.run(read())
+    framed = {k: v for k, v in els.items() if FRAME_SEP in v}
+    assert framed.get("card_number") == "iframe#pay-frame >>> #card", els
+    assert any(v.endswith("#pay") for v in framed.values()), els
+    case = {"test_case_id": "IFR", "title": "pay inside an iframe", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/frames"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": "iframe#pay-frame >>> #card", "value": "4242"},
+        {"step_number": 3, "playwright_action": "click", "selector_key": "#pay"},          # found in the frame
+        {"step_number": 4, "playwright_action": "assert", "selector_key": "#paid",
+         "assertion_type": "text", "assertion_value": "Paid with 4242"},
+        {"step_number": 5, "playwright_action": "assert", "assertion_type": "url", "assertion_value": "/frames"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result"), s.get("error"))
+                                   for s in r["steps"]]
+
+
+def test_each_page_a_case_visits_gets_accessibility_and_performance_basics(ui_app):
+    """Observations, never a verdict: the case passes; what a QA engineer would notice on the
+    way is reported with its WCAG criterion, and page timings are measured."""
+    case = {"test_case_id": "A11Y", "title": "signup page", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/a11y"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": "#icon-btn"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS"
+    q = r["quality"]
+    page = next(p for p in q["pages"] if p["url"] == "/a11y")
+    rules = " | ".join(i["rule"] for i in page["accessibility"])
+    for expected in ("image without text alternative", "form field without a label",
+                     "button without a name", "text contrast", "heading level skipped"):
+        assert expected in rules, rules
+    assert next(i for i in page["accessibility"] if "contrast" in i["rule"])["wcag"] == "1.4.3"
+    assert isinstance(page["performance"].get("dom_ready_ms"), int)
+    assert q["issues"] >= 5
+
+
+def test_a_coding_agent_can_run_qax_over_mcp(ui_app, monkeypatch):
+    """`main.py mcp`: the protocol handshake, the tool list, the authorization gate, and a real
+    browser run of the demo cases — the planted bug FAILS, the unrunnable step is not a PASS."""
+    import io
+
+    from core.mcp_server import serve
+    monkeypatch.delenv("QAX_API_TOKEN", raising=False)
+    cases = str(ROOT / "evals/data/ui_demo_cases.json")
+    url = f"http://127.0.0.1:{ui_app}"
+    msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "qax_run_tests", "arguments": {
+                "url": url, "cases_file": cases, "project": "uidemo"}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "qax_run_tests", "arguments": {
+                "url": url, "cases_file": cases, "project": "uidemo", "authorized": True}}}]
+    out = io.StringIO()
+    serve(io.StringIO("\n".join(json.dumps(m) for m in msgs) + "\n"), out)
+    replies = [json.loads(x) for x in out.getvalue().splitlines()]
+    assert [r["id"] for r in replies] == [1, 2, 3, 4]                     # no reply to the notification
+    assert replies[0]["result"]["serverInfo"]["name"] == "qax"
+    names = {t["name"] for t in replies[1]["result"]["tools"]}
+    assert {"qax_read_app", "qax_write_tests", "qax_run_tests", "qax_scan", "qax_bug_preview"} <= names
+    assert replies[2]["result"]["isError"] is True                         # not authorized → nothing ran
+    d = json.loads(replies[3]["result"]["content"][0]["text"])
+    by = {r["test_case_id"]: r["status"] for r in d["results"]}
+    assert by["TC-UI-001"] == "PASS" and by["TC-UI-004"] == "FAIL" and by["TC-UI-005"] != "PASS", by
+
+
+def test_a_failure_after_a_step_that_could_not_run_is_an_error_not_a_bug(ui_app):
+    """Found in the E2E flow: 'login_button' was unknown (ERROR), so the user never logged in and
+    'add note' timed out — that FAIL said nothing about the app, yet became a bug."""
+    case = {"test_case_id": "CHAIN", "title": "chain", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"},
+        {"step_number": 2, "playwright_action": "click", "selector_key": "no_such_button"},
+        {"step_number": 3, "playwright_action": "click", "selector_key": "#add-note-btn"}]}
+    r = _run([case])["results"][0]
+    assert [s["status"] for s in r["steps"]] == ["PASS", "ERROR", "FAIL"]
+    assert r["status"] == "ERROR" and "could not run" in r["error"]
+
+
+def test_the_generation_quality_eval_scores_cases_and_runs_them(tmp_path, monkeypatch):
+    """The harness that measures AI-written cases (no credit when it was built) is itself
+    tested with a stand-in generator: a good set meets the bar; it finds the planted bug."""
+    from evals import generation_quality as gq
+    monkeypatch.chdir(tmp_path)
+    import core.app_mapper as am
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path / "projects")
+    login = [{"playwright_action": "navigate", "value": "/login"},
+             {"playwright_action": "fill", "selector_key": "#username", "value": "demo"},
+             {"playwright_action": "fill", "selector_key": "#password", "value": "demo123"},
+             {"playwright_action": "click", "selector_key": "#login-btn"}]
+
+    def fake(story, app_map, ctx):
+        assert "AC-2: An empty note is rejected" in ctx and app_map.pages
+        mk = lambda i, ac, tech, steps, tt="functional", title="t": {  # noqa: E731
+            "test_case_id": i, "title": title, "test_type": tt,
+            "description": f"Covers: {ac} | Technique: {tech}.", "automation_steps": login + steps}
+        return [mk("G1", "AC-1", "Use Case Testing", [{"playwright_action": "fill", "selector_key": "#note-input", "value": "milk {{unique}}"},
+                                                       {"playwright_action": "click", "selector_key": "#add-note-btn"},
+                                                       {"playwright_action": "assert", "selector_key": "#notes", "assertion_type": "text", "assertion_value": "milk"}]),
+                mk("G2", "AC-2", "Equivalence Partitioning", [{"playwright_action": "fill", "selector_key": "#note-input", "value": ""},
+                                                              {"playwright_action": "click", "selector_key": "#add-note-btn"},
+                                                              {"playwright_action": "assert", "selector_key": "#error", "assertion_type": "text", "assertion_value": "Note cannot be empty"}],
+                   title="An empty note is rejected"),
+                mk("G3", "AC-4", "Use Case Testing", [{"playwright_action": "assert", "selector_key": "#welcome", "assertion_type": "text", "assertion_value": "Welcome, demo"}]),
+                {"test_case_id": "G4", "title": "Wrong password is rejected", "test_type": "security",
+                 "description": "Covers: AC-3 | Technique: Error Guessing (access control).",
+                 "automation_steps": [{"playwright_action": "navigate", "value": "/login"},
+                                      {"playwright_action": "fill", "selector_key": "#username", "value": "demo"},
+                                      {"playwright_action": "fill", "selector_key": "#password", "value": "nope"},
+                                      {"playwright_action": "click", "selector_key": "#login-btn"},
+                                      {"playwright_action": "assert", "selector_key": "#error", "assertion_type": "text",
+                                       "assertion_value": "Invalid username or password"}]}], None
+    code = gq.run(str(ROOT / "evals/data/generation_stories.json"), str(tmp_path / "q.json"), generate=fake)
+    rec = json.loads((tmp_path / "q.json").read_text())["stories"][0]
+    assert rec["review"]["coverage_pct"] == 100 and rec["review"]["grounded_pct"] == 100
+    assert rec["run"]["planted_found"] == ["AC-2"] and rec["run"]["false_failures"] == []
+    assert code == 0, rec["missed"]
+    # a weak set: one happy-path case, untraced → the bar is missed
+    weak = lambda s, m, c: ([{"test_case_id": "W1", "title": "works", "automation_steps": login}], None)  # noqa: E731
+    assert gq.run(str(ROOT / "evals/data/generation_stories.json"), str(tmp_path / "w.json"), generate=weak) == 1
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert gq.run(str(ROOT / "evals/data/generation_stories.json"), str(tmp_path / "n.json")) == 2
+
+
+def test_elements_inside_a_web_component_shadow_root_are_read_and_used(ui_app):
+    """Web components (Lit, Ionic, Salesforce) keep their form in a shadow root: the reader used
+    to see an empty page there. Read, name, fill, click and check inside it."""
+    from playwright.async_api import async_playwright
+
+    from core.dom_analyzer import label_page
+
+    async def read():
+        async with async_playwright() as p:
+            b = await p.chromium.launch()
+            pg = await b.new_page()
+            await pg.goto(f"http://127.0.0.1:{ui_app}/shadow")
+            await pg.wait_for_timeout(200)
+            els, _ = await label_page(pg)
+            await b.close()
+            return els
+    els = asyncio.run(read())
+    assert els.get("your_name") == "#who" and els.get("greet_button") == "#greet", els
+    case = {"test_case_id": "SH", "title": "greet inside a shadow root", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/shadow"},
+        {"step_number": 2, "playwright_action": "fill", "selector_key": els["your_name"], "value": "Sara"},
+        {"step_number": 3, "playwright_action": "click", "selector_key": els["greet_button"]},
+        {"step_number": 4, "playwright_action": "assert", "selector_key": "#hello",
+         "assertion_type": "text", "assertion_value": "Hello, Sara"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result"), s.get("error"))
+                                   for s in r["steps"]]
+
+
+def test_a_session_recorded_by_hand_is_reused_by_reading_and_by_runs(ui_app, tmp_path, monkeypatch):
+    """SSO / 2FA apps: the operator logs in once by hand; QAX keeps the browser session for the
+    project and both `map` and browser runs start logged in — no password anywhere."""
+    from playwright.async_api import async_playwright
+
+    import core.session_state as ss
+    from core.app_mapper import map_app
+    monkeypatch.setattr(ss, "CONFIG_DIR", tmp_path / "projects")
+    path = ss.state_path("uidemo")
+    path.parent.mkdir(parents=True)
+
+    async def login_by_hand():       # stands in for the operator in the visible window
+        async with async_playwright() as p:
+            b = await p.chromium.launch()
+            ctx = await b.new_context()
+            pg = await ctx.new_page()
+            await pg.goto(f"http://127.0.0.1:{ui_app}/login")
+            await pg.fill("#username", "demo")
+            await pg.fill("#password", "demo123")
+            await pg.click("#login-btn")
+            await pg.wait_for_url("**/dashboard")
+            await ctx.storage_state(path=str(path))
+            await b.close()
+    asyncio.run(login_by_hand())
+    assert ss.has_state("uidemo") and ss.state_for("other") is None
+    m = asyncio.run(map_app(f"http://127.0.0.1:{ui_app}", start_paths=["/dashboard"],
+                            storage_state=ss.state_for("uidemo")))
+    assert "/dashboard" in {p["path"] for p in m.pages}, [p["path"] for p in m.pages]
+    case = {"test_case_id": "SESS", "title": "starts logged in", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/dashboard"},
+        {"step_number": 2, "playwright_action": "assert", "selector_key": "#welcome",
+         "assertion_type": "text", "assertion_value": "Welcome, demo"}]}
+    r = _run([case])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result")) for s in r["steps"]]
+    assert ss.forget("uidemo") and not ss.has_state("uidemo")
+
+
+def test_ci_runs_the_cases_without_a_prompt_and_writes_junit(ui_app, tmp_path):
+    """CI: `execute --yes --junit` — no prompt, JUnit XML a CI dashboard reads, exit code 1 when
+    a case fails (the planted bug), and the step evidence inside the failure."""
+    import os as _os
+    import subprocess
+    import sys
+    import xml.etree.ElementTree as ET
+    env = dict(_os.environ, CI="true", DRY_RUN="true", AUTO_BUG_REPORT="false", QAX_AI_HEAL="false")
+    junit = tmp_path / "junit.xml"
+    p = subprocess.run([sys.executable, str(ROOT / "main.py"), "execute", "--file", str(ROOT / "evals/data/ui_demo_cases.json"),
+                        "--project", "uidemo", "--base-url", f"http://127.0.0.1:{ui_app}", "--yes",
+                        "--junit", str(junit), "--output", str(tmp_path / "r" / "x.html")],
+                       cwd=tmp_path, env=env, capture_output=True, text=True, timeout=240)
+    assert "Proceed with execution?" not in p.stdout
+    assert p.returncode == 1, p.stdout[-800:] + p.stderr[-800:]
+    suite = ET.parse(junit).getroot()
+    assert suite.get("tests") == "5" and suite.get("failures") == "1"
+    failed = [c for c in suite if c.find("failure") is not None]
+    assert "TC-UI-004" in failed[0].get("name") and "#7 FAIL" in failed[0].find("failure").text
+    assert int(suite.get("skipped")) + int(suite.get("errors")) == 1          # the unrunnable case is not a pass
+
+
+def test_mobile_device_and_parallel_workers_give_the_same_verdicts(ui_app, monkeypatch):
+    """`--device mobile`: a phone screen with touch and a mobile user agent; `--workers 2`:
+    two browsers at once — the verdicts are the truth either way, in the cases' order."""
+    from execution.test_executor import run_parallel
+    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    probe = {"test_case_id": "DEV", "title": "screen", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "value": "/login"}]}
+    monkeypatch.setenv("QAX_DEVICE", "mobile")
+    batch = asyncio.run(run_parallel(cases + [probe], 2))
+    by = {r["test_case_id"]: r["status"] for r in batch["results"]}
+    assert [r["test_case_id"] for r in batch["results"]] == [c["test_case_id"] for c in cases] + ["DEV"]
+    assert by["TC-UI-001"] == "PASS" and by["TC-UI-004"] == "FAIL" and by["TC-UI-005"] != "PASS", by
+    assert batch["workers"] == 2 and batch["failed"] == 1
+
+    from execution.playwright_runner import PlaywrightRunner
+
+    async def screen():
+        r = PlaywrightRunner()
+        await r.setup(headless=True)
+        try:
+            await r.page.goto(f"http://127.0.0.1:{ui_app}/login")
+            return await r.page.evaluate("[screen.width, navigator.maxTouchPoints > 0, /Mobile/.test(navigator.userAgent)]")
+        finally:
+            await r.teardown()
+    w, touch, mobile_ua = asyncio.run(screen())
+    assert w < 500 and touch and mobile_ua
+
+
+def test_cleanup_steps_undo_what_a_case_created_and_visual_checks_find_a_changed_screen(ui_app, monkeypatch, tmp_path):
+    """cleanup_steps run after the case (pass or fail) and delete what it created; with
+    --visual the first run saves the screen, an unchanged screen is identical and a changed
+    one is reported (a lead with a diff image) — the verdict never changes."""
+    import urllib.request
+    monkeypatch.setenv("QAX_VISUAL", "true")
+    login = [{"playwright_action": "navigate", "value": "/login"},
+             {"playwright_action": "fill", "selector_key": "#username", "value": "demo"},
+             {"playwright_action": "fill", "selector_key": "#password", "value": "demo123"},
+             {"playwright_action": "click", "selector_key": "#login-btn"}]
+    case = {"test_case_id": "CLN", "title": "add then clean up", "automation_steps": login + [
+        {"playwright_action": "fill", "selector_key": "#note-input", "value": "temp {{unique}}"},
+        {"playwright_action": "click", "selector_key": "#add-note-btn"},
+        {"playwright_action": "assert", "selector_key": "#notes", "assertion_type": "text", "assertion_value": "temp"}],
+        "cleanup_steps": [{"playwright_action": "navigate", "value": "/notes/manage"},
+                          {"playwright_action": "click", "selector_key": "button:has-text('Delete \"temp {{unique}}\"')"}]}
+    still = {"test_case_id": "VIS", "title": "a still screen", "automation_steps": [
+        {"playwright_action": "navigate", "value": "/a11y"}, {"playwright_action": "wait"}]}
+    r = _run([case, still])["results"]
+    assert r[0]["status"] == "PASS" and r[0]["cleanup"]["status"] == "done", r[0].get("cleanup")
+    left = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{ui_app}/_notes").read())["notes"]
+    assert not [n for n in left if n.startswith("temp")], left                 # nothing left behind
+    assert r[1]["visual"]["status"] == "baseline_saved"
+    assert _run([still])["results"][0]["visual"]["status"] == "identical"
+    changed = {"test_case_id": "VIS", "title": "same case, other screen", "automation_steps": [
+        {"playwright_action": "navigate", "value": "/obstacles"}, {"playwright_action": "wait"}]}
+    v = _run([changed])["results"][0]
+    assert v["status"] == "PASS" and v["visual"]["status"] in ("changed", "dimension_mismatch")
+    if v["visual"]["status"] == "changed":
+        assert v["visual"]["diff"].endswith(".diff.png")

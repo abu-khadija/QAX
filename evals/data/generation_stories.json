@@ -1,0 +1,11 @@
+{
+  "_comment": "Stories for evals/generation_quality.py, written against evals/targets/ui_demo_app.py. planted_bug_criteria = the criteria the demo app breaks on purpose: a good set of cases must FAIL there and nowhere else.",
+  "stories": [
+    {
+      "id": "notes",
+      "start_path": "/login",
+      "story": "As a user I keep short notes in my account.\nTest user: demo / demo123 (log in at /login).\n- A logged-in user can add a note and then sees it in the notes list\n- An empty note is rejected with the message 'Note cannot be empty'\n- A wrong password shows 'Invalid username or password' and the user stays on the login page\n- After logging in, the dashboard greets the user with 'Welcome, demo'",
+      "planted_bug_criteria": ["AC-2"]
+    }
+  ]
+}

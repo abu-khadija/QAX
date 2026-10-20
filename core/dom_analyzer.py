@@ -137,11 +137,31 @@ _ELEMENTS_JS = r"""(avoid) => {
   // For each interactive element, pick a selector that matches EXACTLY ONE element on the
   // page (checked here, in the browser): a[href='#'] or button:has-text('Save') can match
   // several elements and a click would hit the wrong one (found on Healthchecks).
-  const one = (sel) => { try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; } };
+  // Web components: elements inside OPEN shadow roots are part of the page too (Playwright's CSS
+  // selectors pierce them). Every lookup below searches the document and every open shadow root.
+  const roots = [document];
+  for (let i = 0; i < roots.length && roots.length < 200; i++)
+    for (const el of roots[i].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot);
+  const deepAll = (sel) => { let r = []; for (const rt of roots) { try { r = r.concat([...rt.querySelectorAll(sel)]); } catch (e) { return null; } } return r; };
+  const one = (sel) => { const r = deepAll(sel); return !!r && r.length === 1; };
   const q = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const cssPath = (el) => {
     const parts = [];
     let n = el;
+    const root = el.getRootNode();
+    if (root !== document && root.host) {
+      // inside a shadow root: "<host selector> >> <path inside it>" (Playwright chains into the root)
+      const inner = [];
+      let m = el;
+      while (m && m.nodeType === 1) {
+        if (okId(m.id) && one('#' + CSS.escape(m.id))) { inner.unshift('#' + CSS.escape(m.id)); break; }
+        let i = 1, s = m;
+        while ((s = s.previousElementSibling)) if (s.tagName === m.tagName) i++;
+        inner.unshift(m.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
+        m = m.parentElement;
+      }
+      return cssPath(root.host) + ' >> ' + inner.join(' > ');
+    }
     while (n && n.nodeType === 1 && n !== document.body) {
       if (okId(n.id) && one('#' + CSS.escape(n.id))) { parts.unshift('#' + CSS.escape(n.id)); break; }
       let i = 1, s = n;
@@ -154,12 +174,13 @@ _ELEMENTS_JS = r"""(avoid) => {
   const out = [];
   // + editable divs: rich editors (Memos, Notion-likes) are contenteditable, not <textarea>
   // + ARIA widgets: Base UI / Radix / MUI menus are <div role="menuitem">, not buttons (found on Memos)
-  const els = document.querySelectorAll("input, select, textarea, button, a[href], [role='button'], [contenteditable='true'], [contenteditable=''], [role='textbox'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [role='option'], [role='tab'], [role='checkbox'], [role='switch'], [role='link'], [role='combobox']");
+  const els = deepAll("input, select, textarea, button, a[href], [role='button'], [contenteditable='true'], [contenteditable=''], [role='textbox'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [role='option'], [role='tab'], [role='checkbox'], [role='switch'], [role='link'], [role='combobox']") || [];
   for (const e of els) {
     const st = getComputedStyle(e);
     if (e.type === 'hidden' || st.display === 'none' || st.visibility === 'hidden') continue;
+    const inShadow = e.getRootNode() !== document;
     let label = '';
-    if (e.id) { const l = document.querySelector(`label[for="${CSS.escape(e.id)}"]`); if (l) label = l.innerText; }
+    if (e.id) { const l = e.getRootNode().querySelector(`label[for="${CSS.escape(e.id)}"]`); if (l) label = l.innerText; }
     if (!label && e.closest('label')) label = e.closest('label').innerText;
     const tag = e.tagName.toLowerCase(), name = e.getAttribute('name') || '', href = e.getAttribute('href') || '';
     const testid = e.getAttribute('data-testid') || '', aria = e.getAttribute('aria-label') || '';
@@ -191,8 +212,9 @@ _ELEMENTS_JS = r"""(avoid) => {
     const norm = (x) => (x.textContent || '').replace(/\s+/g, ' ').trim();
     const text = norm(e);
     const role = e.getAttribute('role') || '';
-    if (!sel && text && text.length <= 60 && role && role !== 'textbox') {
-      // an ARIA widget by its role and exact name (descendant text included)
+    if (!sel && text && text.length <= 60 && role && role !== 'textbox' && !inShadow) {
+      // an ARIA widget by its role and exact name (descendant text included; XPath does not
+      // enter shadow roots, so not for elements inside one)
       const same = [...document.querySelectorAll(`[role='${role}']`)].filter(x => norm(x) === text);
       if (same.length === 1 && !text.includes("'")) sel = `xpath=//*[@role='${role}'][normalize-space(.)='${text}']`;
     }
@@ -201,11 +223,11 @@ _ELEMENTS_JS = r"""(avoid) => {
       // text (has-text is a case-insensitive substring match and works when the text is in a
       // child element — text-is did not: PocketBase's <button><span>Login</span></button>)
       const low = text.toLowerCase();
-      const same = [...document.querySelectorAll(tag)].filter(x => norm(x).toLowerCase().includes(low));
+      const same = (deepAll(tag) || []).filter(x => norm(x).toLowerCase().includes(low));
       if (same.length === 1) sel = `${tag}:has-text('${q(text)}')`;
       // exact text (descendants included): "Save" when other buttons merely CONTAIN "save" —
       // a positional path broke as soon as typing changed the page (found on Memos)
-      if (!sel && !text.includes("'")) {
+      if (!sel && !text.includes("'") && !inShadow) {
         const exact = [...document.querySelectorAll(tag)].filter(x => norm(x) === text);
         if (exact.length === 1) sel = `xpath=//${tag}[normalize-space(.)='${text}']`;
       }
@@ -333,6 +355,56 @@ def label_elements(elements: list) -> dict:
     return out
 
 
+FRAME_SEP = " >>> "      # "iframe#pay >>> #card" = #card inside that iframe (see execution.action_mapper)
+
+_FRAME_SEL_JS = r"""(f) => {
+  if (f.id && !/^\d|[\s.:#\[\]]/.test(f.id)) return 'iframe#' + f.id;
+  if (f.getAttribute('name')) return 'iframe[name="' + f.getAttribute('name') + '"]';
+  if (f.getAttribute('title')) return 'iframe[title="' + f.getAttribute('title') + '"]';
+  return 'iframe >> nth=' + [...document.querySelectorAll('iframe')].indexOf(f);
+}"""
+
+
+async def frame_elements(page, avoid_ids: "list | None" = None) -> "tuple[dict, list]":
+    """
+    The interactive elements inside the page's iframes (one level; at most 5 frames) —
+    payment forms, embedded editors, widgets. Each selector is "<iframe selector> >>>
+    <selector inside it>", which the runner enters before acting. Never raises.
+
+    Returns:
+        (elements {key: selector}, hidden_keys).
+    """
+    out, hidden = {}, []
+    try:
+        frames = [f for f in page.frames if f.parent_frame is not None and f.parent_frame == page.main_frame][:5]
+    except Exception:  # noqa: BLE001
+        return out, hidden
+    for fr in frames:
+        try:
+            handle = await fr.frame_element()
+            fsel = await handle.evaluate(_FRAME_SEL_JS)
+            raw = await fr.evaluate(_ELEMENTS_JS, list(avoid_ids or []))
+            labelled = label_elements(raw)
+            hid = {e.get("sel") for e in raw if e.get("sel") and e.get("vis") is False}
+            for k, sel in labelled.items():
+                out[k] = f"{fsel}{FRAME_SEP}{sel}"
+                if sel in hid:
+                    hidden.append(k)
+        except Exception:  # noqa: BLE001
+            continue
+    return out, hidden
+
+
+def _merge(elements: dict, extra: dict) -> dict:
+    """Add extra {key: selector} without overwriting a key that names another element."""
+    for k, v in extra.items():
+        kk, n = k, 2
+        while kk in elements and elements[kk] != v:
+            kk, n = f"{k}_{n}", n + 1
+        elements[kk] = v
+    return elements
+
+
 async def label_page(page, avoid_ids: "list | None" = None) -> "tuple[dict, list]":
     """
     Label the page's elements and say which are hidden right now (inside a closed menu or
@@ -351,7 +423,14 @@ async def label_page(page, avoid_ids: "list | None" = None) -> "tuple[dict, list
                 e["id"] = ""
     elements = label_elements(raw)
     hidden_sel = {e.get("sel") for e in raw if e.get("sel") and e.get("vis") is False}
-    return elements, [k for k, sel in elements.items() if sel in hidden_sel]
+    hidden = [k for k, sel in elements.items() if sel in hidden_sel]
+    f_el, f_hidden = await frame_elements(page, avoid_ids)
+    if f_el:
+        before = set(elements)
+        _merge(elements, f_el)
+        added = {v: k for k, v in elements.items() if k not in before}
+        hidden += [added[f_el[k]] for k in f_hidden if f_el[k] in added]
+    return elements, hidden
 
 
 async def label_elements_deterministic(page) -> dict:
@@ -366,7 +445,7 @@ async def label_elements_deterministic(page) -> dict:
         elements = await page.evaluate(_ELEMENTS_JS, [])
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"QAX could not read the page's elements: {str(e)[:200]}") from e
-    return label_elements(elements)
+    return _merge(label_elements(elements), (await frame_elements(page))[0])
 
 class DOMAnalyzer:
     """
@@ -828,7 +907,8 @@ class DOMAnalyzer:
                 "Return ONLY valid JSON, no text outside the JSON object."
             )
 
-            client = anthropic.Anthropic(api_key=self._api_key)
+            from core.ai_provider import make_ai_client
+            client = make_ai_client(api_key=self._api_key)
             response = client.messages.create(
                 model=self._model,
                 max_tokens=1024,

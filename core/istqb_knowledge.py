@@ -129,6 +129,17 @@ RISK_RULE = ("Prioritise by risk = likelihood x impact: money, permissions, data
              "high-risk cases first.")
 
 
+SECURITY_FROM_STORY_RULE = (
+    "Security from the same story (ISTQB: security is a test type of every feature, not a separate "
+    "project): for every criterion where a user creates, changes, deletes or views THEIR OWN data, or "
+    "that needs a login or a role, add at least one negative access-control case — another user, a "
+    "logged-out visitor or a lower role tries the same action or opens the record's URL/id directly, "
+    "and must be refused without the data being shown or changed. For every free-text or file input, "
+    "add one case with hostile input (script tag, quote, very long text) that must be stored and shown "
+    "as plain text. Mark these test_type 'security' and trace them like the others "
+    "(Covers: AC-n | Technique: Error Guessing (access control) / (injection)).")
+
+
 def prompt_block(with_code: bool = False) -> str:
     """
     Render a concise, actionable ISTQB doctrine block for the generation prompt.
@@ -153,5 +164,6 @@ def prompt_block(with_code: bool = False) -> str:
     lines.append("Test types to consider (not only functional): "
                  + "; ".join(f"{t['name']} ({t['apply']})" for t in TEST_TYPES))
     lines.append(RISK_RULE)
+    lines.append(SECURITY_FROM_STORY_RULE)
     lines.append(TRACEABILITY_RULE)
     return "\n".join(lines)

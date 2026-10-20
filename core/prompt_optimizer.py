@@ -79,7 +79,8 @@ Return ONLY the 3 numbered suggestions. No introduction, no conclusion.
 """
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        from core.ai_provider import make_ai_client
+        client = make_ai_client(api_key=api_key)
 
         logger.info("Calling Claude for prompt optimization suggestions...")
         response = client.messages.create(

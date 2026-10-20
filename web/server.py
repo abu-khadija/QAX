@@ -31,6 +31,52 @@ _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app = Flask(__name__, static_folder=_STATIC, static_url_path="")
 
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
+def _cross_site_block():
+    """
+    The local API can start scans, browser runs, git clones and Jira writes, so a web
+    page the operator happens to visit must not be able to drive it (CSRF / DNS rebinding):
+    - a browser request marked cross-site (Sec-Fetch-Site) is refused;
+    - an Origin that is not this server is refused;
+    - a write must be JSON (a cross-site page cannot send that without a CORS preflight,
+      which this server never answers);
+    - with no QAX_API_TOKEN, only a loopback Host is served (QAX_ALLOWED_HOSTS adds names).
+    Returns a Flask response to refuse with, or None. CLI clients (no browser headers) pass.
+    """
+    from urllib.parse import urlparse
+    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        return jsonify({"error": "cross-site request refused"}), 403
+    origin = request.headers.get("Origin", "")
+    if origin and origin != "null" and urlparse(origin).netloc != request.host:
+        return jsonify({"error": "cross-origin request refused"}), 403
+    if origin == "null":
+        return jsonify({"error": "cross-origin request refused"}), 403
+    if not os.getenv("QAX_API_TOKEN", ""):
+        host = (request.host or "").rsplit(":", 1)[0] if not (request.host or "").startswith("[") \
+            else (request.host or "").split("]")[0] + "]"
+        allowed = _LOCAL_HOSTS | {h.strip() for h in os.getenv("QAX_ALLOWED_HOSTS", "").split(",") if h.strip()}
+        if host not in allowed:
+            return jsonify({"error": "this host is not allowed — set QAX_API_TOKEN (and QAX_ALLOWED_HOSTS) "
+                                     "to serve beyond loopback"}), 403
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not request.is_json:
+        return jsonify({"error": "send JSON (Content-Type: application/json)"}), 415
+    return None
+
+
+@app.after_request
+def _security_headers(resp):
+    """Clickjacking, MIME sniffing and referrer leaks are off; API answers are never cached."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.before_request
 def _require_api_token():
     """
@@ -40,6 +86,11 @@ def _require_api_token():
     means setting the token first. Static pages and files are not gated.
     """
     import hmac
+    if not request.path.startswith(("/api/", "/files/")):
+        return None
+    blocked = _cross_site_block()
+    if blocked is not None:
+        return blocked
     if not request.path.startswith("/api/"):
         return None
     expected = os.getenv("QAX_API_TOKEN", "")
@@ -213,7 +264,10 @@ def app_ui():
 
 @app.get("/files/<path:p>")
 def files(p):
-    """Serve tour screenshots saved under ./output (relative to the server cwd)."""
+    """Serve tour screenshots saved under ./output (relative to the server cwd) — images only
+    (output/ also holds reports, cloned repositories and run records, which are not served)."""
+    if not p.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")) or p.split("/", 1)[0] == "repos":
+        return jsonify({"error": "not found"}), 404
     return send_from_directory(os.path.join(os.getcwd(), "output"), p)
 
 
@@ -451,212 +505,6 @@ def _clean_project(value) -> str:
     return "".join(ch for ch in str(value or "") if ch.isalnum() or ch in "-_")[:64]
 
 
-def _repo_source(repo: str) -> "tuple[str, str]":
-    """
-    A source repository for the Understand step: a local folder, or an https Git URL
-    cloned shallowly into output/repos/. Returns (folder, error). No credentials in
-    URLs (they would be logged); only http(s); never raises.
-    """
-    import re as _re
-    import subprocess
-    from pathlib import Path
-    from urllib.parse import urlparse
-    repo = (repo or "").strip()
-    if not repo:
-        return "", ""
-    if not repo.startswith(("http://", "https://")):
-        path = Path(repo).expanduser()
-        return (str(path), "") if path.is_dir() else ("", f"Repository folder not found: {repo}")
-    u = urlparse(repo)
-    if "@" in u.netloc:
-        return "", "Remove the credentials from the repository URL (they would end up in logs)."
-    slug = _re.sub(r"[^A-Za-z0-9_.-]+", "_", (u.netloc + u.path).strip("/"))[:80] or "repo"
-    dest = Path(__file__).resolve().parent.parent / "output" / "repos" / slug
-    if dest.is_dir():
-        return str(dest), ""
-    try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(["git", "clone", "--depth", "1", "--quiet", repo, str(dest)],
-                           capture_output=True, text=True, timeout=180,
-                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
-        if r.returncode != 0:
-            return "", f"Could not clone the repository: {(r.stderr or '').strip()[:200]}"
-        return str(dest), ""
-    except Exception as exc:  # noqa: BLE001
-        return "", f"Could not clone the repository: {str(exc)[:200]}"
-
-
-@app.post("/api/functional/analyze")
-def functional_analyze():
-    """
-    Functional QA, steps 1-3: take every input the user has — the running app's URL, a
-    source repository (folder or https Git URL), a user story / acceptance criteria, code —
-    understand them (read the app, understand the repo, number the acceptance criteria),
-    then write test cases grounded in all of it, each traced to a criterion and a technique.
-    Returns {understanding, tests, invalid, coverage, error}. Reading the app needs the
-    authorization checkbox; the login values are used for this read only.
-    """
-    import asyncio
-    data = request.get_json(force=True, silent=True) or {}
-    url = str(data.get("url", "")).strip().rstrip("/")
-    story = str(data.get("story", "")).strip()
-    code = str(data.get("code", "")).strip()
-    repo = str(data.get("repo", "")).strip()
-    project = _clean_project(data.get("project")) or "app"
-
-    def _on(v) -> bool:
-        return str(v).lower() in ("1", "true", "yes", "on")
-    if not (url or story or code or repo):
-        return jsonify({"error": "Give QAX something to test: the app URL, a repository, a user story or code."}), 400
-    understanding: dict = {"project": project, "pages": [], "criteria": [], "repo": None, "notes": []}
-    app_map = None
-
-    # 1 · the running app, read from its URL
-    if url:
-        if not url.startswith(("http://", "https://")):
-            return jsonify({"error": "The app URL must start with http:// or https://."}), 400
-        if not _target_authorized():
-            return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
-        from core.app_mapper import map_app, save_map
-        app_map = asyncio.run(map_app(url, username=str(data.get("username", "")),
-                                      password=str(data.get("password", "")),
-                                      insecure=_on(data.get("insecure", "")),
-                                      explore_actions=_on(data.get("explore_actions", ""))))
-        if app_map.error:
-            understanding["notes"].append(f"Could not read the app: {app_map.error}")
-            app_map = None
-        else:
-            save_map(app_map, project)
-            understanding.update(
-                pages=[{"path": p["path"], "elements": len(p.get("elements") or {})} for p in app_map.pages],
-                login_ok=app_map.login_ok, skipped_links=app_map.skipped_links,
-                explored_actions=app_map.explored_actions, writes=len(app_map.writes))
-
-    # 2 · the source repository
-    repo_context = None
-    if repo:
-        folder, err = _repo_source(repo)
-        if err:
-            understanding["notes"].append(err)
-        else:
-            try:
-                from services.comprehension_service import RepoComprehensionService
-                from services.context import QAXContext
-                comp = RepoComprehensionService(QAXContext.from_env()).comprehend(folder, input_type="folder")
-                if getattr(comp, "error", None):
-                    understanding["notes"].append(_ai_error_message(comp.error).replace(
-                        "Generation failed", "Could not understand the repository"))
-                else:
-                    repo_context = comp.as_context()
-                    understanding["repo"] = {"folder": folder, "overview": getattr(comp, "overview", ""),
-                                             "risk_areas": getattr(comp, "risk_areas", [])}
-            except Exception as exc:  # noqa: BLE001
-                understanding["notes"].append(_ai_error_message(exc).replace(
-                    "Generation failed", "Could not understand the repository"))
-
-    # 3 · the requirements: numbered acceptance criteria
-    from core.traceability import coverage, criteria_block, extract_criteria
-    criteria = extract_criteria(story)
-    understanding["criteria"] = criteria
-    if not (story or code):
-        story = ("Explore and test the main user flows of this application: what a user can create, "
-                 "change, delete and see, including invalid input and permissions.")
-        understanding["notes"].append("No user story given — QAX wrote an exploratory charter from what it read.")
-
-    # 4 · test cases, grounded in all of the above
-    try:
-        from services.context import QAXContext
-        from services.exceptions import QAXConfigError
-        from services.generation_service import GenerationOptions, GenerationService
-        from services.progress import NullProgressReporter
-        ctx = "\n\n".join(x for x in (repo_context, criteria_block(criteria)) if x) or None
-        opts = GenerationOptions(user_story=story, content=code or story, app_map=app_map,
-                                 repo_context=ctx, test_type=str(data.get("test_type") or "") or None)
-        try:
-            res = GenerationService(QAXContext.from_env()).generate(
-                "code://web-input" if code else "story://web-input", options=opts,
-                progress=NullProgressReporter())
-        except QAXConfigError as exc:
-            return jsonify({"understanding": understanding, "tests": [], "error": str(exc)})
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"understanding": understanding, "tests": [], "error": _ai_error_message(exc)})
-    if res.error:
-        return jsonify({"understanding": understanding, "tests": [], "error": _ai_error_message(res.error)})
-    tests = res.test_cases or []
-    return jsonify({"understanding": understanding, "tests": tests, "invalid": len(res.invalid or []),
-                    "summary": res.summary or {}, "coverage": coverage(tests, criteria)})
-
-
-@app.post("/api/functional/bugs")
-def functional_bugs():
-    """
-    Functional QA, step 5: the failed cases of a run as Jira bugs (ISTQB defect-report
-    shape, evidence included). Same live-gate as every export: a dry-run preview unless
-    the operator enabled QAX_ALLOW_LIVE_EXPORT on the server AND the caller asked.
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    results = [r for r in (data.get("results") or []) if isinstance(r, dict) and r.get("status") == "FAIL"]
-    if not results:
-        return jsonify({"error": "No failed case to report."}), 400
-    cases = {str(t.get("test_case_id")): t for t in (data.get("tests") or []) if isinstance(t, dict)}
-    allow_live = os.getenv("QAX_ALLOW_LIVE_EXPORT", "false").lower() == "true"
-    dry_run = True if not allow_live else (data.get("dry_run", True) is not False)
-    from core.jira_bugs import JiraBugFiler, functional_result_to_bug
-    url = str(data.get("url", "")).strip()
-    bugs = [functional_result_to_bug(r, cases.get(str(r.get("test_case_id"))), base_url=url)
-            for r in results]
-    try:
-        out = JiraBugFiler(dry_run=dry_run, project_key=str(data.get("project_key", "")).strip() or None
-                           ).file_many(bugs)
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"Bug filing failed: {exc}"}), 502
-    out = dict(out or {})
-    out["dry_run"] = dry_run
-    out["bugs"] = [{"test_case_id": b["test_case_id"], "title": b["title"], "text": b["description"]}
-                   for b in bugs]
-    return jsonify(out)
-
-
-@app.post("/api/map")
-def map_app_route():
-    """
-    Read a running app from its URL (functional QA, step 1): GET links only, logout/delete
-    style links never followed, no form submitted; optional login. Saves the project's
-    app map + selectors, which generation and the browser engine then use. The login
-    values are used for this run only — never stored, never logged.
-    """
-    import asyncio
-    data = request.get_json(force=True, silent=True) or {}
-    url = str(data.get("url", "")).strip().rstrip("/")
-    project = _clean_project(data.get("project"))
-    if not url.startswith(("http://", "https://")):
-        return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
-    if not project:
-        return jsonify({"error": "Give the project a name (letters, digits, - and _)."}), 400
-    if not _target_authorized():
-        return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
-    from core.app_mapper import map_app, save_map
-    try:
-        max_pages = max(1, min(int(data.get("max_pages") or 20), 60))
-    except (TypeError, ValueError):
-        max_pages = 20
-    def _on(v) -> bool:
-        return str(v).lower() in ("1", "true", "yes", "on")
-    result = asyncio.run(map_app(url, max_pages=max_pages,
-                                 username=str(data.get("username", "")),
-                                 password=str(data.get("password", "")),
-                                 insecure=_on(data.get("insecure", "")),
-                                 explore_actions=_on(data.get("explore_actions", ""))))
-    if result.error:
-        return jsonify({"error": result.error}), 502
-    save_map(result, project)
-    return jsonify({"project": project, "pages": [
-        {"path": p["path"], "elements": len(p.get("elements") or {})} for p in result.pages],
-        "login_ok": result.login_ok, "skipped_links": result.skipped_links,
-        "explored_actions": result.explored_actions, "writes": len(result.writes),
-        "revealed": sum(len(p.get("opened_by") or {}) for p in result.pages)})
-
-
 def _ai_error_message(err) -> str:
     """Turn an AI-provider error into a sentence the user can act on (the raw text stays in the log)."""
     raw = str(err or "")
@@ -757,8 +605,14 @@ def execute_tests():
         from services.execution_service import ExecutionService
         if engine == "ui":
             on = lambda v: str(v).lower() in ("1", "true", "yes", "on")  # noqa: E731
+            try:
+                workers = int(data.get("workers") or 1)
+            except (TypeError, ValueError):
+                workers = 1
             res = _run_browser(cases, url, project, insecure=on(data.get("insecure", "")),
-                               watch=on(data.get("watch", "")), trace=on(data.get("trace", "")))
+                               watch=on(data.get("watch", "")), trace=on(data.get("trace", "")),
+                               browser=str(data.get("browser", "")), device=str(data.get("device", "")),
+                               workers=workers, visual=on(data.get("visual", "")))
         else:
             token = str(data.get("token", "")).strip()
             res = ExecutionService().execute(cases, mode="api", base_url=url,
@@ -771,6 +625,12 @@ def execute_tests():
            "skipped": raw.get("skipped", 0), "errors": raw.get("errors", 0),
            "not_run": len(plan["not_run"]), "writes_sent": raw.get("writes_sent", 0),
            "error": res.error}
+    if out["results"] and not res.error:
+        # per-project memory: what changed since the last run (regressions, fixes, flaky cases)
+        from core.run_history import compare, history, save_run
+        hist_project = project or _clean_project(url.split("//", 1)[-1]) or "default"
+        out["changes"] = compare(history(hist_project), out["results"])
+        save_run(hist_project, url, out["results"])
     return (jsonify(out), 502) if res.error else jsonify(out)
 
 
@@ -778,7 +638,8 @@ _BROWSER_LOCK = __import__("threading").Lock()
 
 
 def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
-                 watch: bool = False, trace: bool = False):
+                 watch: bool = False, trace: bool = False, browser: str = "", device: str = "",
+                 workers: int = 1, visual: bool = False):
     """
     One browser run at a time: the UI engine reads the target and the selector project
     from the process environment, so they are set — and restored — under a lock.
@@ -786,7 +647,7 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
     """
     from services.execution_service import ExecutionService
     keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT", "QAX_INSECURE",
-            "QAX_SLOW_MO_MS", "QAX_STEP_SCREENSHOTS", "QAX_TRACE")
+            "QAX_SLOW_MO_MS", "QAX_STEP_SCREENSHOTS", "QAX_TRACE", "QAX_BROWSER", "QAX_DEVICE", "QAX_WORKERS", "QAX_VISUAL")
     with _BROWSER_LOCK:
         saved = {k: os.environ.get(k) for k in keys}
         try:
@@ -799,6 +660,10 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
             os.environ["QAX_STEP_SCREENSHOTS"] = "true"
             os.environ["QAX_SLOW_MO_MS"] = "400" if watch else "0"
             os.environ["QAX_TRACE"] = "true" if trace else "false"
+            os.environ["QAX_BROWSER"] = browser if browser in ("chromium", "firefox", "webkit") else "chromium"
+            os.environ["QAX_DEVICE"] = device if device in ("desktop", "mobile", "mobile-ios", "tablet") else "desktop"
+            os.environ["QAX_WORKERS"] = str(max(1, min(int(workers or 1), 4))) if not watch else "1"
+            os.environ["QAX_VISUAL"] = "true" if visual else "false"
             if project:
                 os.environ["DEFAULT_PROJECT"] = project
             return ExecutionService().execute(cases, mode="ui", headless=not watch)
@@ -946,5 +811,23 @@ def scan_stream():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
 
+# The functional-QA (E2E) routes live in web/functional.py
+import sys as _sys  # noqa: E402
+from web.functional import register as _register_functional  # noqa: E402
+
+_register_functional(app, _sys.modules[__name__])
+
+
+def serve() -> None:
+    """Start the web UI (the `qax-web` command and `python -m web.server`)."""
+    # Loopback by default. QAX_WEB_HOST=0.0.0.0 is for a container (publish the port on the
+    # host's loopback only); anywhere else, set QAX_API_TOKEN first.
+    _host = os.getenv("QAX_WEB_HOST", "127.0.0.1") or "127.0.0.1"
+    if _host not in ("127.0.0.1", "localhost", "::1") and not os.getenv("QAX_API_TOKEN") \
+            and not os.getenv("QAX_IN_CONTAINER"):
+        raise SystemExit("QAX: refusing to listen on %s without QAX_API_TOKEN." % _host)
+    app.run(host=_host, port=int(os.getenv("QAX_WEB_PORT", "8900") or 8900), debug=False, threaded=True)
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.getenv("QAX_WEB_PORT", "8900") or 8900), debug=False, threaded=True)
+    serve()

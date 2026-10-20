@@ -160,6 +160,7 @@ class ExecutionService:
     ) -> ExecutionResult:
         """Run the Playwright UI engine. See execute() for args."""
         import asyncio
+        import os
 
         try:
             from execution.playwright_runner import PLAYWRIGHT_AVAILABLE
@@ -177,8 +178,14 @@ class ExecutionService:
 
         async def _exec() -> dict:
             from execution.playwright_runner import PlaywrightRunner
-            from execution.test_executor import TestExecutor
+            from execution.test_executor import TestExecutor, run_parallel
 
+            try:
+                workers = int(os.getenv("QAX_WORKERS", "1") or 1)
+            except ValueError:
+                workers = 1
+            if workers > 1 and len(test_cases) > 1:
+                return await run_parallel(test_cases, workers, headless=headless, stop_on_fail=stop_on_fail)
             runner = PlaywrightRunner()
             executor = TestExecutor()
             try:

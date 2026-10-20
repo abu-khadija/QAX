@@ -96,6 +96,33 @@ def add_note():
     return redirect("/dashboard")
 
 
+@app.get("/notes/manage")
+def manage_notes():
+    """Delete notes one by one (what a cleanup step uses)."""
+    if not _logged_in():
+        return redirect("/login")
+    rows = "".join(f"""<li><form method="post" action="/notes/delete"><input type="hidden" name="note" value="{html.escape(n)}">
+<button type="submit">Delete "{html.escape(n)}"</button></form></li>""" for n in _NOTES)
+    return _page("Manage notes", f"<h1>Manage notes</h1><ul id='manage'>{rows}</ul>")
+
+
+@app.post("/notes/delete")
+def delete_note():
+    """Remove the first note with this text."""
+    if not _logged_in():
+        return redirect("/login")
+    note = request.form.get("note", "")
+    if note in _NOTES:
+        _NOTES.remove(note)
+    return redirect("/notes/manage")
+
+
+@app.get("/_notes")
+def notes_json():
+    """The notes as JSON (for tests that check what a run left behind)."""
+    return {"notes": list(_NOTES)}
+
+
 @app.get("/logout")
 def logout():
     """Clear the session and return to the login page."""
@@ -192,6 +219,48 @@ fetch('/boom');
 def newtab():
     """The page a target=_blank link opens."""
     return _page("Help", "<h1 id='help-title'>Help centre</h1>")
+
+
+@app.get("/frames")
+def frames():
+    """A payment-style form embedded in an iframe — the elements live in another document."""
+    return _page("Checkout", """<h1>Checkout</h1>
+<iframe id="pay-frame" title="Payment" src="/frame-inner" style="width:420px;height:160px"></iframe>""")
+
+
+@app.get("/frame-inner")
+def frame_inner():
+    """The document inside the checkout iframe."""
+    return _page("Payment", """<label for="card">Card number</label> <input id="card" name="card">
+<button id="pay" onclick="document.getElementById('paid').textContent='Paid with '+document.getElementById('card').value">Pay now</button>
+<p id="paid"></p>""")
+
+
+@app.get("/a11y")
+def a11y():
+    """Accessibility problems a QA engineer would notice: an image with no alt text, a field
+    with only a placeholder, an icon button with no name, grey-on-white text, a skipped heading."""
+    return _page("Signup", """<h1>Signup</h1><h3>Details</h3>
+<img src="/static-logo.png" width="10" height="10">
+<input id="email-x" placeholder="Email">
+<button id="icon-btn" onclick="this.dataset.n=1"></button>
+<p style="color:#bbbbbb;background:#ffffff">Terms apply</p>""")
+
+
+@app.get("/shadow")
+def shadow():
+    """A web component: its form lives in an open shadow root (Lit, Ionic, Salesforce …)."""
+    return _page("Greeter", """<h1>Greeter</h1><qax-greeter></qax-greeter>
+<script>
+customElements.define('qax-greeter', class extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<label for="who">Your name</label> <input id="who">'
+      + ' <button id="greet">Greet</button> <p id="hello"></p>';
+    r.getElementById('greet').onclick = () => { r.getElementById('hello').textContent = 'Hello, ' + r.getElementById('who').value; };
+  }
+});
+</script>""")
 
 
 @app.get("/boom")

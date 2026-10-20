@@ -166,7 +166,8 @@ class DetectorService:
         """One model call: apply the pattern catalog to the whole-system model."""
         import anthropic
 
-        client = anthropic.Anthropic(api_key=self.context.anthropic_key)
+        from core.ai_provider import make_ai_client
+        client = make_ai_client(api_key=self.context.anthropic_key)
         prompt = self._build_prompt(model)
         response = client.messages.create(
             model=self.context.model_heavy, max_tokens=3000,

@@ -67,7 +67,8 @@ class ClaudeClient:
         from core.env_loader import load_env
         load_env()
 
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        from core.ai_provider import provider
+        api_key = os.getenv("ANTHROPIC_API_KEY") or ("openai-compatible" if provider() == "openai" else "")
         if not api_key:
             raise ValueError(
                 "ANTHROPIC_API_KEY is not set. "
@@ -78,7 +79,8 @@ class ClaudeClient:
         self.project = project or os.getenv("DEFAULT_PROJECT", "")
 
         # Initialize the official Anthropic SDK client
-        self.client = anthropic.Anthropic(api_key=api_key)
+        from core.ai_provider import make_ai_client
+        self.client = make_ai_client(api_key=api_key)
 
         # Load the system prompt once at startup (includes project context)
         self.system_prompt = self.load_system_prompt()

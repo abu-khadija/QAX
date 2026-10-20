@@ -135,6 +135,12 @@ class QAXContext:
         # Imported here to avoid a circular import at module load time.
         from services.exceptions import QAXConfigError
 
+        from core.ai_provider import ai_configured, provider
+        if provider() == "openai":
+            if not ai_configured():
+                raise QAXConfigError("QAX_AI_PROVIDER=openai needs QAX_AI_MODEL (and QAX_AI_BASE_URL / "
+                                     "QAX_AI_API_KEY unless it is the OpenAI API with OPENAI_API_KEY).")
+            return self.anthropic_key or "openai-compatible"
         if not self.anthropic_key:
             raise QAXConfigError(
                 "ANTHROPIC_API_KEY is not set. Add it to .env (single-tenant) "

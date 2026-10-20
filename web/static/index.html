@@ -363,7 +363,7 @@ No token                    → HTTP 401
         <p>Give QAX your app's URL, its repository and the user stories. It reads the running app, understands the code and numbers the acceptance criteria, then writes test cases traced to them — drafts a QA engineer reviews, exports or shares to Jira/Xray. It runs them in a real browser: PASS / FAIL with step-by-step evidence, page errors it saw, and the failures as ready-to-file Jira bugs. A case that did not fully run is never counted as passed.</p>
         <p><a href="/app#functional">Open functional QA →</a></p></div>
       <div class="card"><div class="ic">FILE</div><h3 style="margin-top:8px">Send to Jira, Xray, Zephyr or Excel <span class="status pre">dry run by default</span></h3>
-        <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server. Live filing has been exercised on a real Jira Cloud project: only fields the project actually has are sent, repeat scans do not file duplicates, and the evidence is attached.</p></div>
+        <p>Findings become Jira bugs and test cases become Xray tests. Exports preview what would be created until an operator adds credentials and turns on live export on the server. Live filing has been exercised on a real Jira Cloud project: only fields the project actually has are sent, repeat scans do not file duplicates, and the evidence is attached. The Xray export has not yet been tested against a real Xray instance.</p></div>
     </div>
   </div>
 </section>
@@ -382,7 +382,7 @@ No token                    → HTTP 401
       <div class="stat"><div class="n">2×</div><div class="l">identical confirmed list</div><div class="src">The gate scans twice and requires the same result.</div></div>
       <div class="stat"><div class="n">10</div><div class="l">real apps, 0 false alarms in the final scans</div><div class="src">Django, Flask, Node, Go, Java and Gitea (537 API operations) backends we didn't write, run locally. QAX raised false alarms on several of them first, a P1 &ldquo;command injection&rdquo; among them; we fixed each cause, added a regression test and wrote it up. Still a small sample.</div></div>
     </div>
-    <p class="caption">Measured October 2026. Case studies on three of those apps (Django REST, Go/Gin, Gitea) are written up with their scorecards, including the false alarms QAX raised before we fixed them and what it could not test.</p>
+    <p class="caption">Measured October 2026. Case studies on three of those apps (Django REST, Go/Gin, Gitea) are written up with their scorecards, including the false alarms QAX raised before we fixed them and what it could not test. Functional QA, end to end in a real browser: 7 real apps, 45 of 45 verdicts correct and all 14 deliberately wrong cases failed, as they should (hand-written cases; writing cases with a live AI model is not measured yet).</p>
   </div>
 </section>
 
@@ -424,7 +424,7 @@ No token                    → HTTP 401
       </div>
       <div role="tabpanel" id="p-qa" aria-labelledby="t-qa" tabindex="0" hidden>
         <h3>Stop writing up bugs by hand</h3>
-        <ul><li>Each bug arrives with steps, evidence and an expected result.</li><li>Draft test cases from a user story, review them, push them to Xray.</li><li>Findings are drafted as Jira bugs in the format your team already uses.</li></ul>
+        <ul><li>Each bug arrives with steps, evidence and an expected result.</li><li>Test cases from a user story, traced to its acceptance criteria — review them, export them or share them to Jira/Xray.</li><li>Findings are drafted as Jira bugs in the format your team already uses.</li></ul>
       </div>
       <div role="tabpanel" id="p-dev" aria-labelledby="t-dev" tabindex="0" hidden>
         <h3>No noise to triage</h3>

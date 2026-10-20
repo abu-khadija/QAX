@@ -289,7 +289,8 @@ Maximum {MAX_PATTERNS} patterns."""
                 logger.warning("ANTHROPIC_API_KEY not set — cannot extract bug patterns")
                 return ""
 
-            client = anthropic.Anthropic(api_key=api_key)
+            from core.ai_provider import make_ai_client
+            client = make_ai_client(api_key=api_key)
             response = client.messages.create(
                 model=PATTERN_MODEL,
                 max_tokens=PATTERN_MAX_TOKENS,

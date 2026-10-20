@@ -79,10 +79,16 @@ scanned with 0 false alarms — QAX raised false alarms on two of them first; th
 
 ---
 
-## Functional QA: generate → run in a real browser → report → Xray
+## Functional QA end to end: understand → test cases → run in a real browser → report → bugs to Jira
+
+The web UI (`make web` → *Functional QA (E2E)*) takes the app URL, the repository and the user story (or a Jira
+story key), shows what it understood, writes traced test cases (export or share them), runs them, and turns the
+failures into Jira bugs linked to the story — see [QUICKSTART §4c](QUICKSTART.md). Coding agents get the same tools
+over MCP: `python main.py mcp` ([docs/MCP.md](docs/MCP.md)). The command line:
 
 ```bash
-pip install -r requirements.txt && playwright install chromium   # full set + the browser
+make install && make doctor               # venv, packages, Chromium; then check the machine
+pip install -r requirements.txt && playwright install chromium   # (or by hand) full set + the browser
 cp .env.example .env                     # ANTHROPIC_API_KEY for generation
 python main.py pipeline --input story --source "As a user I can reset my password" \
     --exec-mode ui --base-url http://localhost:8000 --plan-only   # 1. see the plan first
@@ -335,6 +341,8 @@ python main.py analyze --file "D:\path\to\YourController.cs" --project example
 ---
 
 ## Troubleshooting
+
+Start with `python main.py doctor`. More: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 **`ANTHROPIC_API_KEY is not set`**
 Run `copy .env.example .env` and add your API key.

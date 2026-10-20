@@ -210,6 +210,11 @@
           }
         }
       },
+      "cleanup_steps": {
+        "type": "array",
+        "description": "OPTIONAL — steps run after the case (pass or fail) that undo what it created (e.g. delete the record it added). Same shape as automation_steps; their outcome never changes the verdict.",
+        "items": {"type": "object", "required": ["playwright_action"], "additionalProperties": true}
+      },
       "api_steps": {
         "type": "array",
         "description": "OPTIONAL — executable HTTP steps for API testing. When present, the API runner runs these as real HTTP requests and asserts the status code.",
