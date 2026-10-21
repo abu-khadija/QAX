@@ -16,6 +16,12 @@ claude mcp add qax -- /path/to/QAX/.venv-exec/bin/python /path/to/QAX/main.py mc
 | `qax_run_tests` | Run cases (inline or a cases file) in a real browser or over HTTP: PASS/FAIL per case with evidence, page errors, accessibility/performance observations, changes since the last run. |
 | `qax_scan` | Security scan with deterministic probes; confirmed findings separate from leads. Read-only by default. |
 | `qax_bug_preview` | Failed results → ISTQB-shaped Jira bug drafts. |
+| `qax_release_check` | One decision for a change: the cases it can affect in a real browser + a read-only security scan → GO / NO-GO / NOT PROVEN, blockers, what did not run, what was not covered, a PR-ready Markdown report and a fix brief per blocker. No AI decides. |
+| `qax_fix_brief` | A failed case → a brief to fix the app: steps, expected vs observed, failed requests, page errors, files to look at, the command that verifies the fix. |
+| `qax_import_recording` | A Chrome DevTools Recorder JSON export or a Playwright codegen script → a QAX case (a recorded password becomes `{{env:QAX_VAR_PASSWORD}}`). |
+
+**A coding agent's loop with QAX:** change the code → `qax_release_check` (with `changed_since`) → on NO-GO, read
+the fix brief of each blocker, fix the app (never the case) → `qax_release_check` again until GO.
 
 Safety — the same gates as the web UI:
 - every tool that sends a request to an app needs `authorized: true` (the agent must ask the operator);

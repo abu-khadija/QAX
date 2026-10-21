@@ -133,8 +133,9 @@
       
       <div class="field"><label for="code">Source code (optional — paste a function or module)</label>
         <textarea id="code" rows="5" placeholder="// paste a function, endpoint, or module"></textarea></div>
-      <div class="field"><label for="tcfile">Load a test-cases file (JSON) — start from your own cases, skips writing them</label>
-        <input type="file" id="tcfile" accept=".json,application/json" onchange="loadTests(this)"></div>
+      <div class="field"><label for="tcfile">Load test cases — a QAX cases file, or a flow you recorded in the browser
+        (Chrome DevTools Recorder → Export as JSON, or Playwright codegen) — no AI needed</label>
+        <input type="file" id="tcfile" accept=".json,.py,.js,.ts,application/json,text/plain" onchange="loadTests(this)"></div>
       <label class="consent" for="mapexplore"><input type="checkbox" id="mapexplore">
         <span><b>Also follow create / edit / delete / logout links while reading</b> (a disposable staging app only —
           this CHANGES DATA; every write is listed).</span></label>
@@ -246,6 +247,7 @@
       <div class="row" style="margin-top:10px;justify-content:flex-end;gap:8px">
         <button class="btn2" onclick="runTests(true)">Preview run</button>
         <button class="btn" id="exgo" onclick="runTests(false)">Run tests</button>
+        <button class="btn" id="exrc" onclick="releaseCheck()" title="Run what this change can affect, scan the same app (read-only) and decide: GO, NO-GO or NOT PROVEN">Release check</button>
       </div>
       <div class="hint" id="exhint">HTTP engine: runs cases that have API steps. The browser engine needs
         Playwright and the page selectors of your app; it does not run in read-only mode.</div>

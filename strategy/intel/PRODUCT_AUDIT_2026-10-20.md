@@ -380,7 +380,9 @@ S1–S4, B1 — see §3/§3a. Rollback: each is a guard; disabling it re-opens t
 | # | Item | Value | Depends | Acceptance | Effort |
 |---|---|---|---|---|---|
 | 1 | ✅ DONE (first version) — Change → test selection | run what a change can break | map (exists), routes in the diff | seeded changes on PetClinic/eShop: 0 missed regressions, ≥40% fewer cases than "all" | 5–8 (uncertain) |
-| 2 | PR comment with per-criterion verdicts + CI on a real repo | the loop in the developer's tool | pushable repo (founder), P2-1 | one real PR shows the comment | 2 |
+| 2 | 🟡 BUILT, not yet on a real PR — Release check (GO / NO-GO / NOT PROVEN, PR-ready Markdown, fix briefs) + CI on a real repo | the loop in the developer's tool | pushable repo (founder), P2-1 | `make eval-release`: 4/4 decisions right on seeded PetClinic changes; one real PR shows the comment (open) | 2 |
+| 7 | ✅ DONE 2026-10-21 — Import browser recordings (Chrome Recorder, Playwright codegen) | tests without AI or credit; answers ContextQA's recorder | — | recorded flows pass on the demo app, broken twins fail | 1 |
+| 8 | ✅ DONE 2026-10-21 — Fix brief for coding agents | Claude/Codex/Cursor act on a proven failure; answers ContextQA's agent hand-off | — | real linkding bugs: the brief's hints include the files the upstream fixes changed | 1 |
 | 3 | ✅ DONE — Project home (both tracks), coverage-gaps / critical-findings / readiness cards | one place to decide | overview (exists) | cards per §7 from real data only | 3 |
 | 4 | ✅ DONE — Flaky quarantine | stop flaky cases blocking | history (exists) | a flaky case is marked, not counted as FAIL, listed | 1 |
 | 5 | ✅ DONE — Per-run cost for functional runs | budget | usage tracking | run duration + AI calls/≈USD per run and per generation (scoped meter; non-Claude providers counted, not priced); Cost card | 1 |

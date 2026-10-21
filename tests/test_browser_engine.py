@@ -557,6 +557,21 @@ def test_axe_core_finds_the_planted_accessibility_problems_when_asked(ui_app, mo
     assert contrast["wcag"] == "1.4.3" and contrast["impact"]
 
 
+def test_a_chrome_recording_runs_as_recorded_and_its_check_can_fail(ui_app, monkeypatch):
+    """Record once, run on every change: the imported Chrome Recorder flow passes on the demo app,
+    and the same flow with an impossible final check fails (the check is real)."""
+    import copy
+
+    from core.recording_import import convert
+    monkeypatch.setenv("QAX_VAR_PASSWORD", "demo123")
+    case = convert((ROOT / "tests/data/recordings/chrome_add_note.json").read_text(), case_id="REC-1")["case"]
+    neg = copy.deepcopy(case)
+    neg["test_case_id"] = "REC-NEG"
+    neg["automation_steps"][-1]["selector_key"] = 'text="a note nobody added"'
+    by = {r["test_case_id"]: r["status"] for r in _run([case, neg])["results"]}
+    assert by == {"REC-1": "PASS", "REC-NEG": "FAIL"}, by
+
+
 def test_a_coding_agent_can_run_qax_over_mcp(ui_app, monkeypatch):
     """`main.py mcp`: the protocol handshake, the tool list, the authorization gate, and a real
     browser run of the demo cases — the planted bug FAILS, the unrunnable step is not a PASS."""

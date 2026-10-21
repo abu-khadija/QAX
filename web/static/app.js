@@ -85,8 +85,20 @@ window._lastTests=[];
 function loadTests(input){
   const f=input.files&&input.files[0]; if(!f) return;
   const rd=new FileReader();
-  rd.onload=()=>{ try{
-      const d=JSON.parse(rd.result); const cases=Array.isArray(d)?d:(d.test_cases||[]);
+  rd.onload=async ()=>{ try{
+      let d=null; try{ d=JSON.parse(rd.result); }catch(e){ d=null; }
+      if(!d || (!Array.isArray(d) && !d.test_cases)){
+        // not a cases file: maybe a browser recording (Chrome Recorder JSON, Playwright codegen)
+        const r=await api('/api/import-recording',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:rd.result})});
+        const x=await r.json();
+        if(!x.case){ showErr('Not a test-cases file or a browser recording: '+((x.warnings||[]).join('; ')||x.error||'')); return; }
+        $('err').style.display='none'; renderTests([...(window._lastTests||[]),x.case]);
+        $('funcstate').innerHTML='<b>Recording imported</b> ('+esc(x.format)+') as <b>'+esc(x.case.test_case_id)+'</b> — '
+          +x.case.automation_steps.length+' steps'+(x.needs_env.length?'. Set <code>'+x.needs_env.map(esc).join(', ')+'</code> on the server (the recorded password was dropped)':'')
+          +((x.warnings||[]).length?'<br>⚠️ '+x.warnings.map(esc).join('<br>⚠️ '):'');
+        return;
+      }
+      const cases=Array.isArray(d)?d:(d.test_cases||[]);
       if(!Array.isArray(cases)||!cases.length){ showErr('No test cases in that file.'); return; }
       $('err').style.display='none'; renderTests(cases.filter(c=>c&&typeof c==='object'));
       $('funcstate').innerHTML='<b>'+window._lastTests.length+'</b> test case(s) loaded — review them, then run them below.';
@@ -371,7 +383,8 @@ function renderReport(d){
       return '<label class="bugrow"><input type="checkbox" class="bugpick" value="'+esc(r.test_case_id)+'"'+(unclear?'':' checked')+'><span><b>'
         +esc((byId[r.test_case_id]||{}).title||r.title||r.test_case_id)+'</b> — step '+esc(f.step_number)+': '+esc(f.actual_result||r.error||'failed')
         +(unclear?' <span style="color:var(--p2)">· unclear: the app changed or the case is stale — check the screenshot before filing</span>':'')
-        +(r.network_log?' <a href="#" onclick="openArtifact(\''+esc(r.network_log)+'\');return false">network log</a>':'')+'</span></label>'; }).join('')
+        +(r.network_log?' <a href="#" onclick="openArtifact(\''+esc(r.network_log)+'\');return false">network log</a>':'')
+        +' <a href="#" title="Steps, evidence, files to look at and the command that verifies the fix — for Claude Code, Codex or Cursor" onclick="downloadFixBrief(\''+esc(r.test_case_id)+'\');return false">fix brief for your coding agent</a>'+'</span></label>'; }).join('')
       +'<div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px"><select id="fqlang" title="Language of the bugs and the report" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select><button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button><button class="btn2" onclick="downloadJUnit()" title="For CI dashboards (GitHub Actions, GitLab, Jenkins)">⤓ JUnit XML</button>'
       +'<button class="btn" id="fqbugsbtn" onclick="fileBugs()">⤴ File selected bugs to Jira</button></div><div id="fqbugsout"></div></div>';
   } else h+='<div class="hk">No failed case. <select id="fqlang" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select> <button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button> <button class="btn2" onclick="downloadJUnit()" title="For CI dashboards (GitHub Actions, GitLab, Jenkins)">⤓ JUnit XML</button></div>';
@@ -402,6 +415,47 @@ const _RW={en:{title:'Functional QA report',app:'App',passed:'passed',failed:'fa
   verdict:'Verdict',failure:'Failure',covers:'Covers',req:'Requirements',note:'A case that did not fully run is never counted as passed.'},
   ar:{title:'تقرير اختبار وظيفي شامل',app:'التطبيق',passed:'نجح',failed:'فشل',notrun:'لم يُنفَّذ',id:'الرقم',tc:'حالة الاختبار',
   verdict:'النتيجة',failure:'سبب الفشل',covers:'يغطي',req:'المتطلبات',note:'الحالة التي لم تُنفَّذ بالكامل لا تُحسب ناجحة أبدًا.'}};
+async function downloadFixBrief(id){
+  // one failed case as a Markdown brief a coding agent can act on (core/fix_brief.py) — nothing is run
+  const res=((window._fqLastRun||{}).results||[]).find(r=>r.test_case_id===id); if(!res) return;
+  const tc=(window._lastTests||[]).find(t=>t.test_case_id===id)||null;
+  try{ const r=await api('/api/fix-brief',{method:'POST',headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({result:res,case:tc,url:$('exurl').value.trim(),project:$('mapproj').value.trim(),
+                              repo:(($('exrepo')||{}).value||'').trim()})});
+    const d=await r.json(); if(!d.markdown) return;
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([d.markdown],{type:'text/markdown'}));
+    a.download='qax-fix-'+id+'.md'; a.click(); }catch(e){}
+}
+async function releaseCheck(){
+  // one decision for this change: the cases it can affect + the security scan → GO / NO-GO / NOT PROVEN
+  const out=$('exout'), url=$('exurl').value.trim();
+  if(!window._lastTests.length){ out.innerHTML='<div class="hk">Write or load test cases first (steps 1–3).</div>'; return; }
+  if(!$('exauth').checked){ out.innerHTML='<div class="hk">Confirm you are authorized to test this app (the check also scans it).</div>'; return; }
+  const btn=$('exrc'); btn.disabled=true;
+  out.innerHTML='<div class="hk">Release check running — the affected cases in the browser, then a read-only security scan. This takes a few minutes.</div>';
+  try{
+    const r=await api('/api/release-check',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tests:window._lastTests,url,project:$('mapproj').value.trim(),a11y:$('exa11y').value,
+        changed_since:(($('exsince')||{}).value||'').trim(),repo:(($('exrepo')||{}).value||'').trim(),
+        authorized:$('exauth').checked})});
+    const d=await r.json();
+    if(d.error){ out.innerHTML='<div class="hk">⚠️ '+esc(d.error)+'</div>'; return; }
+    window._lastRelease=d;
+    const cls={'GO':'ok','NO-GO':'bad','NOT PROVEN':'warn'}[d.verdict]||'warn';
+    out.innerHTML='<div class="rcverdict '+cls+'"><div class="rcv">'+esc(d.verdict)+'</div><div>'+(d.reasons||[]).map(esc).join('<br>')
+      +'<br><span class="hint" style="margin:0">'+esc(d.selection.why)+' · '+(d.security.ran?d.security.confirmed+' confirmed security finding(s), '+d.security.blocking+' blocking':'security scan did not run')
+      +' · '+d.duration_s+' s</span></div></div>'
+      +((d.blockers||[]).length?'<div class="hk"><b>Blocking</b><br>'+d.blockers.map(b=>'• '+esc(b.kind)+' <code>'+esc(b.id)+'</code> '+esc(b.title)+' — '+esc(b.why)).join('<br>')+'</div>':'')
+      +((d.not_proven||[]).length?'<div class="hk"><b>Did not run to a verdict</b> (not counted as passed)<br>'+d.not_proven.map(n=>'• '+esc(n.kind)+' <code>'+esc(n.id)+'</code> '+esc(n.title)+' — '+esc(n.why)).join('<br>')+'</div>':'')
+      +'<div class="row" style="justify-content:flex-end;gap:8px"><button class="btn2" onclick="downloadReleaseMd()">⤓ Report for the PR (Markdown)</button></div>';
+  }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
+  finally{ btn.disabled=false; }
+}
+function downloadReleaseMd(){
+  const d=window._lastRelease; if(!d) return;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([d.report_md],{type:'text/markdown'}));
+  a.download='qax-release-check.md'; a.click();
+}
 async function downloadJUnit(){
   // the last run's results as JUnit XML, for a CI dashboard (the same file `main.py execute --junit` writes)
   try{ const r=await api('/api/junit',{method:'POST',headers:{'Content-Type':'application/json'},

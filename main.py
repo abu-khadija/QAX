@@ -120,6 +120,8 @@ from cli.run_flags import (  # noqa: E402,F401
     _apply_seeing_flags,
     _print_writes_sent,
 )
+from cli.release_cmd import run_release_check_command  # noqa: E402,F401
+from cli.recording_cmd import run_import_recording_command  # noqa: E402,F401
 from cli.execute_cmd import (  # noqa: E402,F401
     run_execute_command,
     _collect_test_cases_for_execute,
@@ -1753,6 +1755,8 @@ def show_help() -> None:
     print("  analyze          Generate test cases from source code")
     print("  run              Config-driven pipeline with session tracking")
     print("  execute          Run test cases with Playwright browser")
+    print("  release-check    One decision per change: GO / NO-GO / NOT PROVEN, with the proof")
+    print("  import-recording Turn a Chrome Recorder / Playwright codegen recording into test cases")
     print("  feedback         Record QA decisions and improve output quality")
     print("  discover         Auto-discover CSS selectors from a live app")
     print("  check-connection Test all API connections (Claude + Jira + Xray)")
@@ -1929,6 +1933,8 @@ def main() -> None:
       analyze          — Generate test cases from source code
       run              — Config-driven pipeline with session tracking
       execute          — Run test cases with Playwright browser
+      release-check    — Run what a change can break + scan, decide GO / NO-GO / NOT PROVEN
+      import-recording — Chrome Recorder JSON / Playwright codegen → QAX test cases (no AI)
       feedback         — Record QA decisions, view stats, optimize prompts
       discover         — Auto-discover CSS selectors from a live app
       check-connection — Verify Claude + Jira + Xray connectivity
@@ -1965,6 +1971,8 @@ def main() -> None:
         "map":              run_map_command,
         "doctor":           run_doctor_command,
         "mcp":              run_mcp_command,
+        "release-check":    run_release_check_command,
+        "import-recording": run_import_recording_command,
         "login":            run_login_command,
     }
 

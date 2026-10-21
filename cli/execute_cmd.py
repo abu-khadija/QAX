@@ -129,6 +129,8 @@ def run_execute_command() -> None:
     parser.add_argument("--base-url", default="", help="The app under test (sets APP_BASE_URL).")
     parser.add_argument("--yes", action="store_true",
                         help="Do not ask before running (CI). Also implied when CI=true.")
+    parser.add_argument("--only", default="", metavar="ID[,ID]",
+                        help="With --file: run only these case ids (e.g. re-run the case a fix brief names).")
     parser.add_argument("--junit", default="", metavar="PATH",
                         help="Also write the results as JUnit XML (CI test dashboards).")
     parser.add_argument("--changed-since", default="", metavar="REF",
@@ -182,6 +184,12 @@ def run_execute_command() -> None:
 
     # ── Collect test cases ─────────────────────────────────────────────────
     test_cases = _collect_test_cases_for_execute(args)
+    only = {x.strip() for x in str(getattr(args, "only", "") or "").split(",") if x.strip()}
+    if only:
+        test_cases = [c for c in test_cases if str(c.get("test_case_id")) in only]
+        missing = only - {str(c.get("test_case_id")) for c in test_cases}
+        if missing:
+            print(f"\n  QAX: not in the file: {', '.join(sorted(missing))}")
     if not test_cases:
         print("\n  No test cases found. Check your --test-case / --suite / --file args.\n")
         sys.exit(0)

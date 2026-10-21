@@ -187,3 +187,7 @@ footer b{color:var(--muted)}
 .pagechecks{border:1px solid var(--line);border-radius:12px;padding:10px 14px 4px;margin:12px 0}
 .pagechecks legend{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding:0 6px}
 .mode .md.gets{margin-top:6px;font-size:12px;opacity:.85}
+
+.rcverdict{display:flex;gap:14px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
+.rcverdict .rcv{font-size:20px;font-weight:800;letter-spacing:.5px;white-space:nowrap}
+.rcverdict.ok{border-left:4px solid #3fb950}.rcverdict.bad{border-left:4px solid #f85149}.rcverdict.warn{border-left:4px solid #d29922}

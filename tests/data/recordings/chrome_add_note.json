@@ -1,0 +1,15 @@
+{
+  "title": "Add a note",
+  "steps": [
+    {"type": "setViewport", "width": 1280, "height": 800, "deviceScaleFactor": 1, "isMobile": false, "hasTouch": false, "isLandscape": false},
+    {"type": "navigate", "url": "http://127.0.0.1:8911/login", "assertedEvents": [{"type": "navigation", "url": "http://127.0.0.1:8911/login", "title": "Log in"}]},
+    {"type": "click", "target": "main", "selectors": [["aria/Username"], ["#username"], ["xpath///*[@id=\"username\"]"], ["pierce/#username"]], "offsetY": 10, "offsetX": 40},
+    {"type": "change", "value": "demo", "selectors": [["aria/Username"], ["#username"], ["xpath///*[@id=\"username\"]"], ["pierce/#username"]], "target": "main"},
+    {"type": "change", "value": "demo123", "selectors": [["aria/Password"], ["#password"], ["xpath///*[@id=\"password\"]"], ["pierce/#password"]], "target": "main"},
+    {"type": "click", "target": "main", "selectors": [["aria/Log in[role=\"button\"]"], ["#login-btn"], ["xpath///*[@id=\"login-btn\"]"], ["pierce/#login-btn"], ["text/Log in"]], "offsetY": 9, "offsetX": 20,
+     "assertedEvents": [{"type": "navigation", "url": "http://127.0.0.1:8911/dashboard", "title": "Dashboard"}]},
+    {"type": "change", "value": "recorded note", "selectors": [["#note-input"], ["xpath///*[@id=\"note-input\"]"]], "target": "main"},
+    {"type": "click", "target": "main", "selectors": [["aria/Add[role=\"button\"]"], ["#add-note-btn"], ["text/Add"]], "offsetY": 8, "offsetX": 12},
+    {"type": "waitForElement", "target": "main", "selectors": [["text/recorded note"]]}
+  ]
+}

@@ -1085,6 +1085,16 @@ class ActionMapper:
                     "actual_result": f"Selected '{value}' in: {selector}",
                 })
 
+            elif action in ("key", "press_key", "keypress"):
+                # a real key press on an element (Enter to submit a search) — "press" alone means
+                # click in older cases, so recordings use "key" (core/recording_import.py)
+                selector = await _resolve_selector()
+                base_result["selector_used"] = selector
+                key = value or "Enter"
+                await page.press(selector, key, timeout=15_000)
+                await _settle_after_action(page)
+                base_result.update({"status": "PASS", "actual_result": f"Pressed {key} in: {selector}"})
+
             elif action in ("wait", "pause"):
                 await page.wait_for_timeout(2000)
                 base_result.update({

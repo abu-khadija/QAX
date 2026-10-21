@@ -796,6 +796,79 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
                     os.environ[k] = v
 
 
+def _local_checkout(path: str) -> str:
+    """A local git checkout given in the UI: an existing folder, no hidden folders on the way ("" otherwise)."""
+    from pathlib import Path as _P
+    try:
+        p = _P(str(path or "").strip()).expanduser()
+        if not str(path or "").strip() or not p.is_dir() or any(x.startswith(".") for x in p.resolve().parts[1:]):
+            return ""
+        return str(p)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+@app.post("/api/release-check")
+def release_check_route():
+    """
+    One decision for a change: the cases it can affect in a real browser + the quick security scan →
+    GO / NO-GO / NOT PROVEN with the report (services.release_check_service). Same gates as a run and a scan.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    tests = [t for t in (data.get("tests") or []) if isinstance(t, dict)]
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
+    if not tests:
+        return jsonify({"error": "Load or write the test cases first."}), 400
+    if not _target_authorized():
+        return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
+    repo = _local_checkout(data.get("repo", ""))
+    since = str(data.get("changed_since", "")).strip()
+    if since and not repo:
+        return jsonify({"error": "Give the app's local git checkout (a folder) to compare changes."}), 400
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A scan is already running — wait for it to finish.", "busy": True}), 409
+    try:
+        with _browser_lock():
+            from services.release_check_service import run_release_check
+            d = run_release_check(tests, url, _clean_project(data.get("project")), repo=repo, changed_since=since,
+                                  scan=data.get("scan", True) is not False,
+                                  scan_read_only=not bool(data.get("scan_writes")),
+                                  fail_on=str(data.get("fail_on") or "P1").upper()[:2],
+                                  a11y=str(data.get("a11y") or "basic"),
+                                  a11y_fail_on=str(data.get("a11y_fail_on") or ""))
+    finally:
+        _SCAN_LOCK.release()
+    return jsonify(d)
+
+
+@app.post("/api/fix-brief")
+def fix_brief_route():
+    """A failed case as a Markdown brief for a coding agent (core.fix_brief). Nothing is run."""
+    from core.fix_brief import build
+    data = request.get_json(force=True, silent=True) or {}
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    if not result:
+        return jsonify({"error": "Give the failed case's result."}), 400
+    case = data.get("case") if isinstance(data.get("case"), dict) else None
+    md = build(result, case, base_url=str(data.get("url", ""))[:300], project=_clean_project(data.get("project")),
+               repo=_local_checkout(data.get("repo", "")))
+    return jsonify({"markdown": md, "test_case_id": result.get("test_case_id")})
+
+
+@app.post("/api/import-recording")
+def import_recording_route():
+    """A Chrome Recorder JSON export or a Playwright codegen script → one QAX case (core.recording_import)."""
+    from core.recording_import import convert
+    data = request.get_json(force=True, silent=True) or {}
+    text = str(data.get("text", ""))
+    if not text.strip() or len(text) > 2_000_000:
+        return jsonify({"error": "Paste or load a recording (Chrome Recorder JSON or Playwright codegen)."}), 400
+    r = convert(text, case_id=str(data.get("case_id", ""))[:40], title=str(data.get("title", ""))[:120])
+    return (jsonify(r), 400) if not r["case"] else jsonify(r)
+
+
 @app.post("/api/junit")
 def junit_route():
     """The results of a run as JUnit XML (for CI dashboards). The results come from the page; nothing is

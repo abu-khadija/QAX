@@ -7,6 +7,19 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- **Release check** (`qax release-check`, web "Release check" button, MCP `qax_release_check`): the cases a change can
+  affect in a real browser + a read-only security scan → **GO / NO-GO / NOT PROVEN** (exit 0 / 1 / 2), a PR-ready
+  Markdown report that lists what did not run and what was not covered, and a fix brief per blocker. Measured on
+  seeded Spring PetClinic changes (`make eval-release`): 4/4 decisions right (control GO, three regressions NO-GO).
+- **Import a browser recording** (`qax import-recording`, the web "Load test cases" field, MCP
+  `qax_import_recording`): Chrome DevTools Recorder JSON and Playwright codegen (Python, JS/TS) → QAX cases, no AI.
+  Stable selectors preferred; recorded checks become assertions; a recorded password becomes
+  `{{env:QAX_VAR_PASSWORD}}`; a recording without a check is flagged.
+- **Fix brief for a coding agent** (web link on every failed case, MCP `qax_fix_brief`, written by release-check):
+  steps, expected vs observed, failed requests from the network log, page errors, files behind the failing page
+  (hints, ranked: route declarations, then the page's own view/template), the command that re-runs the case, and the
+  rule "fix the app, not the test". On the real linkding bugs the hints include the files the upstream fixes changed.
+- `execute --only ID[,ID]`: re-run single cases from a file; a `key` step action (a real key press).
 - **Grounding gate**: a generated case that uses an element QAX did not find on the app is not run (SKIP, cause
   test) until reviewed (`"reviewed": true`) or `QAX_ALLOW_UNMAPPED=true`; the run preview lists it as not run.
 - **Per-run cost**: each functional run records its duration and AI calls (≈ USD), each generation its AI usage;

@@ -76,6 +76,12 @@ run is never counted as a pass; no per-step credits.
 confirms the bet and removes "first" as a claim. QAX must win on trust (proof, self-hosted, security) and on getting
 the loop live (PR comment + Jira) before the next round of launches.
 
+**Closed the same week (2026-10-21):** a release check per change (GO / NO-GO / NOT PROVEN with a PR-ready report —
+their "analyzes each PR"), import of Chrome Recorder / Playwright recordings (their Chrome recording), and a fix brief
+per failure for Claude/Codex/Cursor over MCP (their agent hand-off) — each measured (see PRODUCT_AUDIT P2-2, 7, 8).
+Still theirs: live integrations and customers; reproducing a bug from a ticket (needs AI credit here); production
+session mining.
+
 ## Sources
 - ContextQA Ship product page: https://contextqa.com/ship/ (read 2026-10-21)
 - [xbow-funding] https://www.tamradar.com/funding-rounds/xbow-series-c-120m · https://www.sentinelone.com/s-ventures/blog/xbow-series-c-investment/

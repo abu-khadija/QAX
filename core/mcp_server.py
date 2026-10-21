@@ -61,6 +61,26 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["url", "authorized"], "properties": {
          "url": {"type": "string"}, "read_only": {"type": "boolean"}, "token": {"type": "string"},
          "spec_url": {"type": "string"}, "authorized": _AUTH}}},
+    {"name": "qax_release_check",
+     "description": "One decision for a change: runs the cases the change can affect in a real browser, scans the "
+                    "same app (read-only), and returns GO / NO-GO / NOT PROVEN with blockers, what did not run, what "
+                    "was not covered, a Markdown report for the PR and fix briefs for each blocker. No AI decides.",
+     "inputSchema": {"type": "object", "required": ["url", "authorized"], "properties": {
+         "url": {"type": "string"}, "test_cases": {"type": "array", "items": {"type": "object"}},
+         "cases_file": {"type": "string"}, "project": {"type": "string"},
+         "changed_since": {"type": "string"}, "repo": {"type": "string"},
+         "scan": {"type": "boolean", "description": "Default true."},
+         "fail_on": {"type": "string", "enum": ["P1", "P2", "P3"]}, "authorized": _AUTH}}},
+    {"name": "qax_fix_brief",
+     "description": "A failed case (its result from qax_run_tests) as a brief to fix the APP: steps, expected vs "
+                    "observed, failed requests, page errors, files to look at, the command that verifies the fix.",
+     "inputSchema": {"type": "object", "required": ["result"], "properties": {
+         "result": {"type": "object"}, "test_case": {"type": "object"}, "url": {"type": "string"},
+         "project": {"type": "string"}, "repo": {"type": "string"}}}},
+    {"name": "qax_import_recording",
+     "description": "Turn a Chrome DevTools Recorder JSON export or a Playwright codegen script into a QAX test "
+                    "case (no AI; a recorded password becomes {{env:QAX_VAR_PASSWORD}}).",
+     "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
     {"name": "qax_bug_preview",
      "description": "Turn failed results into ISTQB-shaped Jira bug drafts (dry run: nothing is filed).",
      "inputSchema": {"type": "object", "required": ["results"], "properties": {
@@ -83,6 +103,18 @@ def _call_route(path: str, body: dict) -> dict:
         return data
 
 
+def _cases_from_file(path: str) -> "tuple[list, str]":
+    """Cases from a .json file inside the working folder or QAX (an agent must not read files elsewhere)."""
+    from pathlib import Path as _P
+    f = _P(path).expanduser().resolve()
+    if not (f.suffix == ".json" and (f.is_relative_to(_P.cwd().resolve())
+                                     or f.is_relative_to(_P(__file__).resolve().parent.parent))):
+        return [], "cases_file must be a .json file inside the working folder or QAX"
+    with open(f, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    return (raw if isinstance(raw, list) else raw.get("test_cases", [])), ""
+
+
 def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
     """Run one tool. Returns (result, is_error). Never raises."""
     args = args or {}
@@ -97,14 +129,9 @@ def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
         elif name == "qax_run_tests":
             cases = args.get("test_cases")
             if not cases and args.get("cases_file"):
-                from pathlib import Path as _P
-                f = _P(args["cases_file"]).expanduser().resolve()
-                if not (f.suffix == ".json" and (f.is_relative_to(_P.cwd().resolve())
-                                                 or f.is_relative_to(_P(__file__).resolve().parent.parent))):
-                    return {"error": "cases_file must be a .json file inside the working folder or QAX"}, True
-                with open(f, encoding="utf-8") as fh:
-                    raw = json.load(fh)
-                cases = raw if isinstance(raw, list) else raw.get("test_cases", [])
+                cases, err = _cases_from_file(args["cases_file"])
+                if err:
+                    return {"error": err}, True
             d = _call_route("/api/execute", {"tests": cases or [], "url": args.get("url", ""),
                                              "project": args.get("project", ""),
                                              "engine": args.get("engine", "ui"),
@@ -116,6 +143,30 @@ def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
                                           "spec_url": args.get("spec_url", ""),
                                           "read_only": args.get("read_only", True) is not False,
                                           "authorized": bool(args.get("authorized"))})
+        elif name in ("qax_release_check",):
+            cases = args.get("test_cases")
+            if not cases and args.get("cases_file"):
+                cases, err = _cases_from_file(args["cases_file"])
+                if err:
+                    return {"error": err}, True
+            d = _call_route("/api/release-check", {"tests": cases or [], "url": args.get("url", ""),
+                                                   "project": args.get("project", ""),
+                                                   "changed_since": args.get("changed_since", ""),
+                                                   "repo": args.get("repo", ""), "scan": args.get("scan", True),
+                                                   "fail_on": args.get("fail_on", "P1"),
+                                                   "authorized": bool(args.get("authorized"))})
+            if not d.get("error"):
+                return d, False
+        elif name == "qax_fix_brief":
+            d = _call_route("/api/fix-brief", {"result": args.get("result") or {}, "case": args.get("test_case"),
+                                               "url": args.get("url", ""), "project": args.get("project", ""),
+                                               "repo": args.get("repo", "")})
+            if d.get("markdown"):
+                return d, False
+        elif name == "qax_import_recording":
+            d = _call_route("/api/import-recording", {"text": args.get("text", "")})
+            if d.get("case"):
+                return d, False
         elif name == "qax_bug_preview":
             d = _call_route("/api/functional/bugs", {"results": args.get("results") or [],
                                                      "tests": args.get("test_cases") or [],
