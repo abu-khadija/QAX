@@ -450,7 +450,7 @@ No current scores are claimed here beyond what's recorded in the repo.
 
 ## DELIVERABLE 10: QAX website blueprint
 
-> ⚠️ **Gate:** per `strategy/legal/IP_CHECKLIST.md` and the IP memory, no public site, launch or open-sourcing before counsel clears IP.
+> ⚠️ **Gate:** per the private IP record (kept outside the repository), no public site, launch or open-sourcing before counsel clears IP.
 
 ### 10.1 Sitemap
 

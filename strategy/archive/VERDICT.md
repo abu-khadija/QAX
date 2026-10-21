@@ -63,8 +63,8 @@ for that or don't build.
 
 ## 4. Biggest risks (ranked)
 
-1. **[VERIFIED] Legal / IP — potentially existential.** QAX was built while employed under
-   an outsourcing contract. If the employer owns the IP, there is **no company** — stop.
+1. **Legal / IP — potentially existential.** Ownership must be confirmed by counsel; without it there
+   is **no company** — stop.
    This must be cleared by a lawyer **before anything else** (ROADMAP M0).
 2. **[VERIFIED] Never validated outside one codebase, graded by one person.** Zero external
    evidence. Until 3+ diverse repos + outside QA engineers grade it, "it works" is opinion.

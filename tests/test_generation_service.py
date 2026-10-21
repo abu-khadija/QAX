@@ -32,17 +32,17 @@ def make_valid_test_case(**overrides) -> dict:
     """Build a test case that passes schema validation (mirrors test_validator)."""
     base = {
         "test_case_id": "TC-INC-0001",
-        "title": "Verify incident cannot be submitted without mandatory fields",
+        "title": "Verify order cannot be submitted without mandatory fields",
         "description": "Ensure the system prevents submission when fields are empty.",
         "module": "Orders",
         "test_type": "functional",
         "priority": "high",
-        "preconditions": ["User is logged in", "User is on the New Incident form"],
+        "preconditions": ["User is logged in", "User is on the New Order form"],
         "manual_steps": [
             {"step_number": 1, "action": "Click Submit with empty fields",
              "expected_result": "Validation error appears.", "notes": ""},
             {"step_number": 2, "action": "Fill all fields and click Submit",
-             "expected_result": "Incident is created.", "notes": ""},
+             "expected_result": "Order is created.", "notes": ""},
         ],
         "automation_steps": [
             {"step_number": 1, "playwright_action": "click",
@@ -52,7 +52,7 @@ def make_valid_test_case(**overrides) -> dict:
              "selector_key": "TODO_title_field", "value": "Spill",
              "assertion_type": "visible", "assertion_value": ""},
         ],
-        "test_data": {"incident_title": "Chemical spill"},
+        "test_data": {"order_title": "Chemical spill"},
         "confidence_score": 8,
         "needs_review": False,
         "review_note": "",

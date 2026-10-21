@@ -46,13 +46,8 @@ app → report only what's real.** That reads as security/QA assurance, not
 test-authoring.
 
 ## Honest risks / what's NOT done
-1. **IP is existential and must be cleared first.** Owner's account: QAX was built on
-   personal time and a personal account, with no the vendor company account or
-   project assets used. The repository has been swept clean of all ExampleApp/EXAMPLE
-   product-specific content and real infrastructure identifiers (see
-   `IP_CLEANUP_INVENTORY.md`); the engine was always generic. Still open for counsel:
-   a formal ownership determination, and whether to rewrite git history (the removed
-   content remains in prior commits). No incorporation/funding/sponsor until cleared.
+1. **IP must be cleared first.** A formal ownership determination with counsel is open (the record is
+   kept privately, outside this repository). No incorporation, funding, sponsor or sale until cleared.
 2. **It's a strong prototype, not a product yet.** Needs a real onboarding UI (not a
    two-venv CLI), multi-tenant/reliability, and packaging.
 3. **Deep-scan economics unproven end-to-end.** The deterministic + UI layers are

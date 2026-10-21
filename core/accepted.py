@@ -1,7 +1,7 @@
 """
 core/accepted.py — "we know about this one": accepted / by-design findings
 ===========================================================================
-not every real finding is a defect to fix — some are by-design, config-dependent, an
+Not every real finding is a defect to fix — some are by-design, config-dependent, an
 accepted risk, a known duplicate or an environment artefact, and a tool that re-reports them on every
 run trains people to ignore it (and makes a PR gate permanently red).
 

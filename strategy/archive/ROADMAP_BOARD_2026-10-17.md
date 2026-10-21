@@ -49,7 +49,7 @@ Details and exit criteria: [PLAN_TO_V1.md §5–6](PLAN_TO_V1.md).
 ## Waiting on the owner
 | What | Blocks |
 |---|---|
-| B9: a lawyer on ownership + git history (EXAMPLE traces in old commits) — owner: early 2027, will say if sooner | Phases D and E |
+| B9: a lawyer on ownership — owner: early 2027, will say if sooner | Phases D and E |
 | Each write to Jira (A6). Cloning permissive OSS apps for A3/A4 outside the repo: **approved 2026-10-16** | A6 |
 | The Xray trial app | finding → regression test → Xray (Q3 step 2) |
 

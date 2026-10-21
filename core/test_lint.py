@@ -1,7 +1,7 @@
 """
 core/test_lint.py — deterministic quality lint for generated test cases
 =======================================================================
-The test-case rewrite rules: a test case that *runs* can still be a bad
+The owner's test-case rewrite rules: a test case that *runs* can still be a bad
 test — vague expected results, execution notes leaking into the spec, steps with no
 verifiable outcome. This is a zero-LLM, rule-based check so quality is measured, not claimed.
 

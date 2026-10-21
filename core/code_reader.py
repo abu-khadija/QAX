@@ -16,25 +16,30 @@ logger = logging.getLogger(__name__)
 # ── Module detection: map folder name keywords → module names (a generic default) ──
 # Extend this dict with your application's folder naming patterns
 MODULE_FOLDER_MAP = {
-    "incident": "Incident",
-    "incidents": "Incident",
-    "audit": "Audit",
-    "audits": "Audit",
-    "investigation": "Investigation",
-    "investigations": "Investigation",
-    "capa": "CAPA",
-    "corrective": "CAPA",
-    "preventive": "CAPA",
-    "training": "Training",
-    "competency": "Training",
-    "document": "Document Control",
-    "documents": "Document Control",
-    "doc_control": "Document Control",
-    "risk": "Risk Assessment",
-    "risks": "Risk Assessment",
+    "auth": "Authentication",
+    "login": "Authentication",
+    "account": "Accounts",
+    "accounts": "Accounts",
+    "user": "Users",
+    "users": "Users",
+    "order": "Orders",
+    "orders": "Orders",
+    "cart": "Orders",
+    "checkout": "Checkout",
+    "payment": "Payments",
+    "payments": "Payments",
+    "billing": "Payments",
+    "product": "Products",
+    "products": "Products",
+    "catalog": "Products",
+    "inventory": "Inventory",
+    "notification": "Notifications",
+    "notifications": "Notifications",
+    "settings": "Settings",
     "admin": "Administration",
     "administration": "Administration",
     "dashboard": "Dashboard",
+    "search": "Search",
     "report": "Reports",
     "reports": "Reports",
 }
@@ -112,7 +117,7 @@ def read_file(file_path: str) -> dict:
         dict: File metadata with these keys:
             - "content" (str): Full file content as a string
             - "file_path" (str): The path as provided (for use in test cases)
-            - "file_name" (str): Filename only (e.g., "IncidentForm.js")
+            - "file_name" (str): Filename only (e.g., "OrderForm.js")
             - "extension" (str): File extension (e.g., ".js")
             - "size_lines" (int): Number of lines in the file
             - "module_hint" (str | None): Guessed EXAMPLE module from folder name
@@ -704,7 +709,7 @@ def _detect_module_from_path(file_path: str) -> str | None:
 
     # Check each folder name for a module keyword match
     for part in parts:
-        # Strip common suffixes that might be appended (e.g., "incidents-module")
+        # Strip common suffixes that might be appended (e.g., "orders-module")
         clean_part = re.sub(r"[-_]?(module|component|service|controller|view|util|helper)$", "", part)
         if clean_part in MODULE_FOLDER_MAP:
             return MODULE_FOLDER_MAP[clean_part]

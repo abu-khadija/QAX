@@ -42,7 +42,7 @@ class GitAnalyzer:
 
     Usage:
         analyzer = GitAnalyzer()
-        history = analyzer.get_file_history("src/incidents/IncidentForm.cs")
+        history = analyzer.get_file_history("src/orders/OrderForm.cs")
         if history["risk_level"] == "high":
             print(f"High risk file! {history['bug_fix_count']} bug-fix commits")
     """

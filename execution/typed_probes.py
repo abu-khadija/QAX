@@ -262,10 +262,10 @@ class _Ctx:
 def boolean_false_probe(model, base_url: str, *, session: requests.Session | None = None,
                         auth: dict | None = None, limit: int = 4) -> list[ProbeFinding]:
     """
-    Unticking a checkbox must be savable. The owner's worked example: a
-    non-nullable boolean made the framework add an implicit "required" rule, so
-    `false` was rejected with "The … field is required." — the flag became
-    permanent and every co-submitted edit was lost. Also its crash twin: `false` → 5xx.
+    Unticking a checkbox must be savable. A common framework trap: a non-nullable
+    boolean gets an implicit "required" rule, so `false` is rejected ("The … field is
+    required.") — the flag can never be cleared and every co-submitted edit is lost.
+    Also its crash twin: `false` → 5xx.
 
     Control: the SAME create with the field = true must be accepted (2xx), proving the
     endpoint works. Report only when `false` is then (a) rejected with a 4xx whose body
@@ -404,8 +404,8 @@ def _date_pairs(types: dict) -> list[tuple[str, str]]:
 def date_order_probe(model, base_url: str, *, session: requests.Session | None = None,
                      auth: dict | None = None, limit: int = 4) -> list[ProbeFinding]:
     """
-    END before START (the owner's "date-order negative" in the audit,
-    booking and scheduler suites). Control: an ordered pair (start < end) is accepted
+    END before START (a classic date-order negative for any start/end pair, e.g. a booking
+    or a schedule). Control: an ordered pair (start < end) is accepted
     (2xx). Report only when the REVERSED pair (end < start) is also accepted AND both
     reversed values are echoed back unchanged — i.e. stored, not normalised. P3.
     """

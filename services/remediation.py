@@ -343,7 +343,7 @@ def remediation_for(finding: dict) -> dict:
     return {}
 
 
-# ── QA bug-report fields (owner's compact format) ───
+# ── QA bug-report fields (compact format) ─────────────────────────────────────
 # Per probe: `how` — the condition the reproduction applies (completes "Send
 # <METHOD> <path> …"); `expected` — the Expected Result stated as a MUST rule.
 # Additive to _MAP: remediation_for() is unchanged.

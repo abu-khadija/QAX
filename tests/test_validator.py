@@ -33,26 +33,26 @@ def make_valid_test_case(**overrides) -> dict:
     """
     base = {
         "test_case_id": "TC-INC-0001",
-        "title": "Verify incident cannot be submitted without mandatory fields",
+        "title": "Verify order cannot be submitted without mandatory fields",
         "description": "Ensure the system prevents form submission when required fields are empty.",
         "module": "Orders",
         "test_type": "functional",
         "priority": "high",
         "preconditions": [
             "User is logged in with Reporter role",
-            "User is on the New Incident form page"
+            "User is on the New Order form page"
         ],
         "manual_steps": [
             {
                 "step_number": 1,
-                "action": "Leave the Incident Title field empty and click Submit",
+                "action": "Leave the Order Title field empty and click Submit",
                 "expected_result": "Form does not submit. Validation error appears.",
                 "notes": ""
             },
             {
                 "step_number": 2,
                 "action": "Fill all mandatory fields with valid data and click Submit",
-                "expected_result": "Incident is created. Status is Draft.",
+                "expected_result": "Order is created. Status is Draft.",
                 "notes": ""
             }
         ],
@@ -75,7 +75,7 @@ def make_valid_test_case(**overrides) -> dict:
             }
         ],
         "test_data": {
-            "incident_title": "Chemical spill in lab B",
+            "order_title": "Chemical spill in lab B",
             "severity": "High"
         },
         "confidence_score": 8,

@@ -119,5 +119,4 @@ Status: ✅ done · 🟡 partly / bounded · ⏳ open. Competitors are now check
 ### Founder decisions, 2026-10-20
 - Downloads approved and done: Firefox/WebKit, colima + Docker CLI + compose, JDK (Java 25 used; 17 failed in a network outage),
   .NET 10 SDK, the Java/Angular/.NET corpus apps.
-- The untracked `config/projects/app14-portal-…` folder was deleted (never committed).
 - Positioning (COMPETITORS §"Updated positioning"): explained, awaiting the founder's choice.

@@ -50,16 +50,10 @@ push to Jira/Xray/CSV/Excel. Scale of the real code:
 - **[VERIFIED] Quality judged by one person.** No external QA reviewer has graded QAX's
   output. The "it works" evidence is single-run demos, not measured rates.
 
-## 3. Assumptions tied to the original employer / stack
+## 3. Ownership
 
-- **[VERIFIED]** The repo still carries employer-specific project folders/config
-  (`example`, legacy `example-context.md`) and the lineage `example-qa-agent → QAFlow → QAX`.
-- **[ASSUMPTION]** The original design centred on Jira/Xray + a .NET/MVC + commercial-
-  widget stack. The generic multi-source/adapter layer was a
-  deliberate decoupling, but the prompts/examples still lean toward that world.
-- **[VERIFIED — from the user's own account]** QAX was built while employed under an
-  outsourcing contract. **IP ownership is unresolved and is the single most important
-  open question** (see VERDICT §4, ROADMAP M0).
+- **IP ownership is the single most important open question** — under review with counsel; the record is
+  kept privately, outside this repository.
 
 ## 4. Honest weaknesses (the "fake/weak" list)
 

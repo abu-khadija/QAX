@@ -72,7 +72,7 @@ def finding_to_bug(b: dict, i: int = 0, *, environment: str | None = None,
                    build: dict | None = None) -> dict:
     """
     Map a QAX confirmed finding to a Jira Bug covering the owner's 13 mandatory fields
-    in the compact security-bug layout:
+    in a compact security-bug layout:
     Summary · Severity (+ one-line business reason) · Environment · Location ·
     Reproducibility · Workaround · Steps to Reproduce (step 1 = a direct URL) ·
     Expected (a MUST rule) · Actual (evidence block) · Console Errors · Attachments ·
@@ -551,7 +551,7 @@ class JiraBugFiler:
                 key = (r.json() or {}).get("key")
                 res.update(success=True, jira_key=key)
                 if key and bug.get("evidence_text"):
-                    # filing isn't done until the evidence is attached.
+                    # Filing isn't done until the evidence is attached.
                     res["attachment"] = self._attach(key, bug.get("evidence_filename") or "evidence.txt",
                                                      bug["evidence_text"])
             else:

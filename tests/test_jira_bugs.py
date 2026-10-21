@@ -145,7 +145,7 @@ def test_xray_client_push_bug_needs_no_xray_credentials(monkeypatch):
     assert res["success"] and "preview" in res
 
 
-# ── Owner's compact security-bug format ──
+# ── Compact security-bug format ──────────────────────────────────────────────
 
 def _enriched():
     from services.remediation import qa_for, remediation_for

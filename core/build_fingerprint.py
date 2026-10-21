@@ -1,7 +1,7 @@
 """
 core/build_fingerprint.py — "which build was this?" for a running app
 =====================================================================
-re-verifying a fix on the WRONG build produced
+Re-verifying a fix on the WRONG build produced
 false "still broken" verdicts, and a bug that vanishes on an UNCHANGED build is flakiness,
 not a fix. So every scan records a build fingerprint, and `verify-fixes` compares it with
 the one recorded when the ticket was filed.

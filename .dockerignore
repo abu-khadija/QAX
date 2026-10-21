@@ -5,5 +5,4 @@ __pycache__
 output
 .git
 *.pyc
-qa data
 config/projects/*/app_map.json

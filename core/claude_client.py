@@ -45,8 +45,8 @@ class ClaudeClient:
         client = ClaudeClient()
         test_cases = client.analyze_code(
             code="def submit_incident(...):\n    ...",
-            file_path="src/incidents/forms.py",
-            module_hint="Incident"
+            file_path="src/orders/forms.py",
+            module_hint="Orders"
         )
     """
 
