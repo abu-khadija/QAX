@@ -72,6 +72,72 @@ STOP_WORDS = {
 _ENV_REF = re.compile(r"^\{\{\s*env:(QAX_VAR_[A-Z0-9_]+)\s*\}\}$")
 
 
+async def _by_visible_text(page, action_text: str) -> str:
+    """
+    'Click "Save"' / "Click '1'": the ONE element whose visible text (or accessible name) is exactly the
+    quoted value — a button, then a link, then a submit input, then any element. "" when there is none or
+    more than one (ambiguous: never pick one).
+    """
+    q = re.findall(r"['\"“”]([^'\"“”]{1,80})['\"“”]", action_text or "")
+    if not q:
+        return ""
+    try:      # count() does not wait: let the page finish loading and rendering first
+        await page.wait_for_load_state("load", timeout=10_000)
+        from core.dom_analyzer import _wait_dom_stable
+        await _wait_dom_stable(page, max_ms=2_000, quiet_polls=2)
+    except Exception:  # noqa: BLE001
+        pass
+    v = q[0].replace("\\", "\\\\").replace('"', '\\"')
+    scope = ""
+    # 'Click "Edit" in the "Alice" row' / 'next to "Alice"': only inside that row or list item
+    if len(q) > 1 and re.search(r"\b(row|line|item|next to|beside|for)\b", action_text or "", re.I):
+        w = q[1].replace('"', '\\"')
+        for container in (f'tr:has-text("{w}")', f'li:has-text("{w}")', f'[role=row]:has-text("{w}")'):
+            try:
+                if await page.locator(container).count() == 1:
+                    scope = container + " >> "
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        if not scope:
+            return ""
+    for sel in (f'{scope}role=button[name="{v}" s]', f'{scope}role=link[name="{v}" s]',
+                f'{scope}input[type=submit][value="{v}"]', f'{scope}text="{v}"'):
+        try:
+            n = await page.locator(sel).count()
+        except Exception:  # noqa: BLE001
+            continue
+        if n == 1:
+            return sel
+        if n > 1:
+            return ""
+    return ""
+
+
+def _word_match(name: str, table: dict) -> "str | None":
+    """
+    The selector whose key matches `name` by whole words (never substrings): every word of the key is a
+    word of the name, or every word of the name is a word of the key. With several, the closest in size
+    wins. None when nothing matches — an unmatched element is not found, never guessed.
+    """
+    words = {w for w in re.split(r"[_\s\-]+", (name or "").lower()) if w and w not in STOP_WORDS}
+    if not words:
+        return None
+    best, best_gap = None, 99
+    for key, sel in (table or {}).items():
+        kw = {w for w in re.split(r"[_\s\-]+", str(key).lower()) if w and w not in STOP_WORDS}
+        if not kw or not isinstance(sel, str):
+            continue
+        # the key fully described by the name, or the name a real part of the key (at least half of its
+        # words, and not just a number: "1" must not match "bundles_preview_page_1")
+        name_in_key = words <= kw and len(words) * 2 >= len(kw) and not all(w.isdigit() for w in words)
+        if kw <= words or name_in_key:
+            gap = abs(len(kw) - len(words))
+            if gap < best_gap:
+                best, best_gap = sel, gap
+    return best
+
+
 def render_case_vars(value, case_vars: "dict | None") -> str:
     """Replace {{unique}} (and any other per-case variable) in a step value/assertion."""
     out = str(value if value is not None else "")
@@ -383,20 +449,12 @@ class ActionMapper:
         if normalized in self.selectors:
             return self.selectors[normalized]
 
-        # ── 2. Partial match (key contains the element name) ───────────────
-        for key, selector in self.selectors.items():
-            if normalized in key.lower() or key.lower() in normalized:
-                return selector
-
-        # ── 3. First meaningful word match ─────────────────────────────────
-        words = [w for w in re.split(r"[_\s]+", normalized) if w not in STOP_WORDS]
-        if words:
-            first_word = words[0]
-            for key, selector in self.selectors.items():
-                if first_word in key.lower():
-                    return selector
-
-        return None
+        # ── 2. Whole-word match ────────────────────────────────────────────
+        # Words, never substrings: "Log in button" → "log" used to match a key containing
+        # "login" that pointed at the USERNAME field, and the click "passed" on the wrong
+        # element (found 2026-10-21). A key matches when all its words are among the name's
+        # words, or all the name's words are among the key's.
+        return _word_match(normalized, self.selectors)
 
     @staticmethod
     def _page_section(url: str) -> str:
@@ -497,37 +555,36 @@ class ActionMapper:
         # ── Level 1: Static selectors.json ────────────────────────────────
         selector = self.find_selector(element_name)
         if selector and not selector.startswith("TODO"):
-            logger.debug("Selector found: Level 1 (static) for '%s'", element_name)
-            return selector, "Level 1 (static)"
+            on_page = True
+            if playwright_page is not None:
+                # a name from the map may belong to ANOTHER page ("1" = a pagination link elsewhere):
+                # only an element that is on this page counts — otherwise read this page
+                try:
+                    on_page = await playwright_page.locator(selector).count() > 0
+                except Exception:  # noqa: BLE001
+                    on_page = True
+            if on_page:
+                logger.debug("Selector found: Level 1 (static) for '%s'", element_name)
+                return selector, "Level 1 (static)"
 
         # ── Level 2: Live DOM discovery via DOMAnalyzer ────────────────────
         try:
             current_url = playwright_page.url if playwright_page else ""
             if current_url and current_url not in ("about:blank", ""):
-                if current_url not in self._discovery_cache:
-                    from core.dom_analyzer import DOMAnalyzer
-                    analyzer = DOMAnalyzer()
-                    # Derive page name from URL path
-                    from urllib.parse import urlparse as _urlparse
-                    url_path = _urlparse(current_url).path.rstrip("/")
-                    page_name = url_path.split("/")[-1] if url_path else "page"
-                    logger.debug("Level 2: discovering selectors for '%s'", current_url)
-                    discovered = await analyzer.discover_selectors(
-                        current_url, page_name, playwright_page
-                    )
-                    self._discovery_cache[current_url] = discovered
-                else:
-                    discovered = self._discovery_cache[current_url]
+                # Read the page AS IT IS — never navigate or log in here: this runs in the
+                # middle of a case, and reloading the page wiped what earlier steps had typed
+                # (found 2026-10-21: "Enter demo…", "Enter demo123…", "Click Log in" → the click
+                # submitted an empty form). Not cached: the same URL changes as the case acts.
+                from core.dom_analyzer import label_elements_deterministic
+                logger.debug("Level 2: reading the elements of '%s' as they are", current_url)
+                discovered = await label_elements_deterministic(playwright_page)
 
-                # Search in discovered dict
+                # Search in discovered dict — whole words only (see find_selector)
                 norm = element_name.lower().strip().replace(" ", "_").replace("-", "_")
-                for key, sel in discovered.items():
-                    if norm in key.lower() or key.lower() in norm:
-                        logger.info(
-                            "Selector found: Level 2 (discovered) for '%s': %s",
-                            element_name, sel
-                        )
-                        return sel, "Level 2 (discovered)"
+                sel = _word_match(norm, discovered)
+                if sel:
+                    logger.info("Selector found: Level 2 (discovered) for '%s': %s", element_name, sel)
+                    return sel, "Level 2 (discovered)"
         except Exception as _l2_err:
             logger.debug("Level 2 fallback failed (non-fatal): %s", _l2_err)
 
@@ -635,7 +692,8 @@ class ActionMapper:
                 return q if q.startswith("http") else f"{base_url}{q}"
 
         # Look for bare URL patterns
-        url_pattern = re.findall(r"(https?://\S+|/[A-Za-z0-9/_-]+)", action_text)
+        # a path keeps its query and fragment ("/tags?search=x" must not become "/tags")
+        url_pattern = re.findall(r"(https?://\S+|/[A-Za-z0-9/_.~%-]*(?:\?[^\s'\"]*)?(?:#[^\s'\"]*)?)", action_text)
         if url_pattern:
             candidate = url_pattern[0]
             return candidate if candidate.startswith("http") else f"{base_url}{candidate}"
@@ -656,7 +714,12 @@ class ActionMapper:
         """
         quoted = re.findall(r"['\"]([^'\"]+)['\"]", action_text)
         # Return the last quoted string (usually the value, not the field name)
-        return quoted[-1] if quoted else ""
+        if quoted:
+            return quoted[-1]
+        # unquoted: "Enter demo in the Username field", "Type milk into the note input"
+        m = re.match(r"^\s*(?:enter|type|fill(?:\s+in)?|input|write|put)\s+(.+?)\s+(?:in|into|on)\s+(?:the\s+)?\S",
+                     action_text, re.I)
+        return m.group(1).strip() if m else ""
 
     # ─────────────────────────────────────────────────────────────────────────
     # Action Detection
@@ -814,8 +877,20 @@ class ActionMapper:
                     selector = selector_override
                     level = "override"
                 else:
-                    selector, level = await self.find_selector_with_fallback(element_name, page)
-                    selector = selector or f"[data-testid='{element_name}']"
+                    selector, level = "", ""
+                    if re.search(r"['\"“”][^'\"“”]+['\"“”]", action_text or ""):
+                        # 'Click "Login"': what the user SEES wins over a map key with the same name —
+                        # the map's "login" was the nav link, and the form was never submitted
+                        selector = await _by_visible_text(page, action_text)
+                        level = "visible text" if selector else ""
+                    if not selector:
+                        selector, level = await self.find_selector_with_fallback(element_name, page)
+                    if not selector:
+                        # never click a guessed selector: a miss would read as the app's failure
+                        base_result.update({"status": "SKIP", "actual_result":
+                                            f"Could not identify '{element_name.replace('_', ' ')}' on this page — "
+                                            "name it as it appears, in quotes (Click \"Save\")"})
+                        return base_result
                 base_result["selector_used"] = selector
                 logger.debug("click selector (%s): %s", level, selector)
                 await page.click(selector, timeout=15_000)
@@ -828,15 +903,38 @@ class ActionMapper:
             elif action_type == "fill":
                 element_name = self._extract_element_name(action_text)
                 value = self._extract_fill_value(action_text)
+                if not value and not re.search(r"\b(clear|empty|blank)\b", action_text, re.I):
+                    # typing "" because the value could not be read is not doing the step
+                    base_result.update({"status": "SKIP",
+                                        "actual_result": "Could not tell what to type from the step — put the value "
+                                                         "in quotes (Type \"milk\" in the note field)"})
+                    return base_result
                 if selector_override:
                     selector = selector_override
                     level = "override"
                 else:
                     selector, level = await self.find_selector_with_fallback(element_name, page)
-                    selector = selector or f"input[name='{element_name}']"
+                    if not selector:
+                        base_result.update({"status": "SKIP", "actual_result":
+                                            f"Could not identify the field '{element_name.replace('_', ' ')}' on this "
+                                            "page — name it as it appears (Type \"milk\" in the \"Note\" field)"})
+                        return base_result
                 base_result["selector_used"] = selector
                 logger.debug("fill selector (%s): %s", level, selector)
-                await page.fill(selector, value, timeout=15_000)
+                # {{env:QAX_VAR_*}} in a plain-language step (a ticket's login): same rules as structured steps
+                real_value, from_env = resolve_step_value(render_case_vars(value, self.case_vars))
+                if from_env:
+                    from core.origin_guard import is_allowed, refusal
+                    if os.getenv(from_env) is None:
+                        base_result.update({"status": "ERROR", "actual_result": f"{from_env} is not set — nothing was typed",
+                                            "error": f"environment: {from_env} is not set on the machine running QAX"})
+                        return base_result
+                    if not is_allowed(page.url):
+                        base_result.update({"status": "ERROR", "actual_result": f"Refused to type {from_env} here",
+                                            "error": refusal(page.url)})
+                        return base_result
+                    value = "••••"
+                await page.fill(selector, real_value, timeout=15_000)
                 base_result.update({
                     "status": "PASS",
                     "actual_result": f"Filled '{selector}' with value: "
@@ -1351,10 +1449,41 @@ class ActionMapper:
         text = action_text.lower()
 
         try:
+            # "Verify that 'milk' is shown" / "I should see "Saved"" / "'Error' is not displayed": the page's
+            # visible text, waited for like every structured assertion (QAX_ASSERT_TIMEOUT_MS)
+            quoted = re.findall(r"['\"“”]([^'\"“”]{1,200})['\"“”]", action_text)
+            if quoted and "url" not in text and re.search(r"\b(shown|shows|displayed|displays|visible|appears?|see|"
+                                                          r"sees|contains?|says|reads|present)\b", text):
+                want = quoted[-1]
+                negated = bool(re.search(r"\b(not|no longer|never|doesn't|does not|isn't|is not|disappears?)\b", text))
+                import asyncio
+                import time as _time
+                try:
+                    budget = max(0, int(os.getenv("QAX_ASSERT_TIMEOUT_MS", "5000"))) / 1000
+                except ValueError:
+                    budget = 5.0
+                deadline = _time.monotonic() + budget
+                while True:
+                    body = (await page.inner_text("body")).lower()
+                    found = want.lower() in body
+                    if found != negated:
+                        return {"status": "PASS", "actual_result":
+                                f"'{want}' is {'not ' if negated else ''}on the page"}
+                    if _time.monotonic() >= deadline:
+                        return {"status": "FAIL", "actual_result":
+                                (f"'{want}' is still on the page" if negated else
+                                 f"'{want}' is not on the page (still missing after {budget:g}s)"),
+                                "error": "Text assertion failed"}
+                    await asyncio.sleep(0.25)
+
             # URL assertion
             if "url" in text or "page" in text and "address" in text:
                 current_url = page.url
-                expected_fragment = self._extract_fill_value(expected_result) or expected_result[:50]
+                expected_fragment = (self._extract_fill_value(expected_result) or expected_result[:50]
+                                     or (re.findall(r"['\"“”]([^'\"“”]+)['\"“”]", action_text) or [""])[-1])
+                if not expected_fragment.strip():
+                    # "" is in every URL: a check with nothing to compare is not a pass
+                    return {"status": "SKIP", "actual_result": f"URL check has no expected value (URL is {current_url})"}
                 if expected_fragment.lower() in current_url.lower():
                     return {"status": "PASS", "actual_result": f"URL contains '{expected_fragment}': {current_url}"}
                 return {

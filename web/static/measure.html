@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How QAX measures</title>
+<meta name="description" content="Every number QAX claims, what it measures, where its truth comes from, how many cases, its limits, and the command that re-runs it.">
+<style>
+:root{
+  --bg:#0a0d14; --bg2:#0e1220; --card:#121828; --card2:#182035; --line:#233047; --line2:#2e3e5c;
+  --txt:#e7ecf5; --muted:#9aa6bb; --faint:#6b7689;
+  --accent:#6366f1; --accent2:#22d3ee; --ok:#2ee6a6; --p1:#f0485f; --p2:#f6a338;
+  --r:12px; --w:1060px; --w-text:700px;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.65 Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent2)}
+code{font-family:var(--mono);font-size:.88em;background:var(--card2);padding:1px 6px;border-radius:6px;word-break:break-word}
+.wrap{max-width:var(--w);margin:0 auto;padding:0 max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px))}
+header{border-bottom:1px solid var(--line);padding:18px 0}
+header .wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.logo{font-weight:800;font-size:22px;letter-spacing:-.5px;color:var(--txt);text-decoration:none}.logo span{color:var(--accent2)}
+.nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:14px}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.12;letter-spacing:-.02em;margin:56px 0 14px;max-width:820px;text-wrap:balance}
+.lede{color:var(--muted);font-size:18px;max-width:var(--w-text);margin:0 0 10px}
+h2{font-size:24px;margin:56px 0 6px;letter-spacing:-.01em}
+h2 + p{color:var(--muted);max-width:var(--w-text);margin:0 0 18px}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:28px 0 8px}
+.rule{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+.rule b{display:block;margin-bottom:4px}.rule span{color:var(--muted);font-size:14px}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);background:var(--bg2)}
+tr:last-child td{border-bottom:0}
+td.num{font:700 18px var(--mono);white-space:nowrap;color:var(--ok)}
+td .n{display:block;color:var(--faint);font:12px var(--mono);margin-top:2px}
+td.how{color:var(--muted)}
+.not{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--p2);border-radius:var(--r);padding:18px 20px;max-width:var(--w-text)}
+.not ul{margin:8px 0 0;padding-left:20px}.not li{margin:6px 0;color:var(--muted)}.not li b{color:var(--txt)}
+pre{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;overflow-x:auto;font:13px/1.7 var(--mono);color:var(--muted)}
+pre b{color:var(--txt);font-weight:600}
+footer{border-top:1px solid var(--line);margin-top:72px;padding:28px 0 48px;color:var(--faint);font-size:14px}
+:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><div class="wrap"><a class="logo" href="/">QA<span>X</span></a>
+  <nav class="nav"><a href="/">Product</a><a href="/app">Open the app</a></nav></div></header>
+<main class="wrap">
+  <h1>How we measure — every number, its truth, and the command that repeats it</h1>
+  <p class="lede">A percentage without a method is a slogan. Below is everything QAX claims, what each number counts,
+    who decided the right answer before QAX ran, how many cases it covers, and how you re-run it on your own machine.</p>
+  <p class="lede" style="font-size:15px">Last measured 21 October 2026 · QAX branch <code>feat/functional-qa-track</code> · one machine (macOS, Chromium).</p>
+
+  <div class="rules">
+    <div class="rule"><b>Truth comes first</b><span>Every expected outcome is written before the run — by a person, an upstream maintainer, or an independent author. QAX never grades itself.</span></div>
+    <div class="rule"><b>Did-not-run is not a pass</b><span>A step or check that could not run is ERROR or SKIP, and counts against the score — never as a pass.</span></div>
+    <div class="rule"><b>No AI decides</b><span>Pass, fail, "vulnerable" and "reproduced" come from deterministic checks. AI may write cases; its cases are judged by the same code.</span></div>
+    <div class="rule"><b>Numbers carry their n</b><span>Each result says how many apps and cases it covers. None is a general rate for every app.</span></div>
+  </div>
+
+  <h2>Functional testing (end to end, in a real browser)</h2>
+  <p>Cases run in Chromium against real open-source apps started locally: Django, Flask, Go, Java (Spring), Angular, .NET, Svelte and React apps.</p>
+  <div class="tw"><table>
+    <tr><th>Claim</th><th>Result</th><th>Truth from</th><th>How it is measured</th><th>Re-run</th></tr>
+    <tr><td>Verdicts equal the truth</td><td class="num">125/125<span class="n">15 sets · 10 apps + demo · run twice</span></td><td>Expected outcome written per case before the run</td><td class="how">Healthy cases must pass, known defects and negative controls must fail, cases that cannot run must not pass. Two runs; a case that changes verdict between them counts as wrong.</td><td><code>make bench-functional</code></td></tr>
+    <tr><td>False bug reports</td><td class="num">0<span class="n">of 71 healthy cases</span></td><td>Same</td><td class="how">A healthy case reported as FAIL would become a bug in Jira.</td><td><code>make bench-functional</code></td></tr>
+    <tr><td>Real bugs, not planted</td><td class="num">2/2<span class="n">linkding, fixed upstream</span></td><td>The maintainer's own fix and test (commits 62091c4, 96c4ef3)</td><td class="how">The version before each fix must fail at the expected check; version 1.47.0 must pass.</td><td><code>make bench-functional</code> (linkding-realbugs)</td></tr>
+    <tr><td>Cases by someone who doesn't know QAX</td><td class="num">24/24<span class="n">12 cases + 12 negative twins</span></td><td>An independent author working only from microblog's source and curl</td><td class="how">The twins make the last check impossible: an engine that passes everything scores 12/24.</td><td><code>make bench-functional</code> (microblog-independent)</td></tr>
+    <tr><td>The benchmark notices a broken engine</td><td class="num">13/13<span class="n">mutants killed</span></td><td>—</td><td class="how">Thirteen realistic regressions are written into a copy of the engine (an assertion that always passes, a shared browser session, no wait after a click…). Each must change a verdict.</td><td><code>make eval-functional-mutants</code></td></tr>
+    <tr><td>Same 79 cases, engine before vs now</td><td class="num">8 → 79<span class="n">correct of 79 · 34 → 7.7 min</span></td><td>Same truth files</td><td class="how">The engine as of 19 Oct 2026 and today, same apps, selectors and cases; the old engine ran first on clean data.</td><td>scripted comparison (internal)</td></tr>
+  </table></div>
+
+  <h2>Change-aware checks</h2>
+  <p>Seeded changes to Spring PetClinic: a real edit is made in a git worktree, built and started; the truth is which cases change verdict against the unchanged app.</p>
+  <div class="tw"><table>
+    <tr><th>Claim</th><th>Result</th><th>Truth from</th><th>How it is measured</th><th>Re-run</th></tr>
+    <tr><td>Running only what a change can break misses nothing</td><td class="num">0 missed<span class="n">3 seeded changes</span></td><td>Every case run on the changed build</td><td class="how">Selection must include every case whose verdict changed. Cases saved: 11 %, 89 %, 0 % (a shared file runs everything).</td><td><code>python -m evals.change_bench</code></td></tr>
+    <tr><td>Release check decides right</td><td class="num">4/4<span class="n">control + 3 changes</span></td><td>Unchanged app = GO, each regression = NO-GO</td><td class="how">Affected cases in the browser + a read-only security scan → GO / NO-GO / NOT PROVEN.</td><td><code>make eval-release</code></td></tr>
+  </table></div>
+
+  <h2>Bug reproduction from a ticket</h2>
+  <p>A ticket in plain language — steps, expected, actual — is run as written. No AI is used when the ticket names its check.</p>
+  <div class="tw"><table>
+    <tr><th>Claim</th><th>Result</th><th>Truth from</th><th>How it is measured</th><th>Re-run</th></tr>
+    <tr><td>"Does this bug still happen?"</td><td class="num">6/6<span class="n">2 real bugs × 2 versions + 2 demo</span></td><td>Upstream fixes (bug present before, gone after); a planted bug; a working feature</td><td class="how">REPRODUCED where the bug exists, NOT REPRODUCED where it was fixed. A step QAX cannot do as written is reported, never guessed.</td><td><code>make eval-repro</code></td></tr>
+    <tr><td>Recorded flows run as recorded</td><td class="num">3/3 + 3/3<span class="n">Chrome Recorder, Playwright Python, Playwright TS</span></td><td>The recorded flow passes; its broken twin fails</td><td class="how">A recorded password never reaches the case file.</td><td><code>pytest tests/test_recording_import.py</code></td></tr>
+  </table></div>
+
+  <h2>Security scanning</h2>
+  <p>Deterministic probes against the running app; a finding is "confirmed" only when a control request proves it. AI leads are listed separately and never counted.</p>
+  <div class="tw"><table>
+    <tr><th>Claim</th><th>Result</th><th>Truth from</th><th>How it is measured</th><th>Re-run</th></tr>
+    <tr><td>Planted vulnerabilities found</td><td class="num">32/32<span class="n">golden target</span></td><td>32 documented planted bugs</td><td class="how">Recall on the golden app; its secure twin must stay silent.</td><td><code>make eval</code></td></tr>
+    <tr><td>False positives on the golden app</td><td class="num">0</td><td>Same</td><td class="how">Any confirmed finding that is not one of the 32.</td><td><code>make eval</code></td></tr>
+    <tr><td>The gate notices a broken probe</td><td class="num">40/40<span class="n">probes</span></td><td>—</td><td class="how">Each probe is disabled in turn; a confirmed finding must disappear.</td><td><code>make eval-mutants</code></td></tr>
+    <tr><td>Real applications</td><td class="num">8 / 8<span class="n">confirmed = true · 10 apps</span></td><td>Each finding re-checked by hand against the app's database</td><td class="how">0 false positives in the final scans; 4 found on the way were fixed with regression tests.</td><td>strategy/evidence (corpus)</td></tr>
+  </table></div>
+
+  <h2>What we do not claim yet</h2>
+  <div class="not">
+    <ul>
+      <li><b>AI-written test cases are not measured yet.</b> The harness exists (<code>make eval-generation</code>); it has not run against a live model.</li>
+      <li><b>No general accuracy rate.</b> The numbers above hold for these apps, these cases and this machine — n is stated on each.</li>
+      <li><b>Jira and Xray end to end</b> (story in, results and bugs out) have not been exercised against a live instance for functional runs.</li>
+      <li><b>No comparison with another tool or with a person yet.</b> A fair baseline (same apps, same stories, same time box) is planned, not done.</li>
+      <li><b>"Time saved", "AI confidence", "quality score"</b> — we show none: there is no honest way to measure them yet.</li>
+    </ul>
+  </div>
+
+  <h2>Run it yourself</h2>
+  <pre><b># the merge gate (security recall, false positives, functional verdicts on the demo app)</b>
+make eval
+<b># functional verdicts on every app you have running (truth per case), twice</b>
+make bench-functional
+<b># break the engine on purpose — the benchmark must notice</b>
+make eval-functional-mutants
+<b># decisions per change, and bug reproduction from tickets</b>
+make eval-release
+make eval-repro</pre>
+</main>
+<footer><div class="wrap">QAX — Runtime proof for releases. <a href="/">Product</a> · <a href="/app">App</a></div></footer>
+</body>
+</html>

@@ -81,6 +81,13 @@ TOOLS = [
      "description": "Turn a Chrome DevTools Recorder JSON export or a Playwright codegen script into a QAX test "
                     "case (no AI; a recorded password becomes {{env:QAX_VAR_PASSWORD}}).",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
+    {"name": "qax_reproduce_bug",
+     "description": "Does the bug in this ticket still happen? Runs the ticket's steps to reproduce in a real browser "
+                    "and answers REPRODUCED / NOT REPRODUCED / COULD NOT RUN / NOT DECIDABLE with the steps and, when "
+                    "reproduced, a fix brief. Give the ticket text, or a Jira key (read-only).",
+     "inputSchema": {"type": "object", "required": ["url", "authorized"], "properties": {
+         "url": {"type": "string"}, "text": {"type": "string"}, "jira": {"type": "string"},
+         "project": {"type": "string"}, "repo": {"type": "string"}, "authorized": _AUTH}}},
     {"name": "qax_bug_preview",
      "description": "Turn failed results into ISTQB-shaped Jira bug drafts (dry run: nothing is filed).",
      "inputSchema": {"type": "object", "required": ["results"], "properties": {
@@ -166,6 +173,11 @@ def call_tool(name: str, args: dict) -> "tuple[dict, bool]":
         elif name == "qax_import_recording":
             d = _call_route("/api/import-recording", {"text": args.get("text", "")})
             if d.get("case"):
+                return d, False
+        elif name == "qax_reproduce_bug":
+            d = _call_route("/api/reproduce", {k: args.get(k, "") for k in ("url", "text", "jira", "project", "repo")}
+                            | {"authorized": bool(args.get("authorized"))})
+            if d.get("verdict"):
                 return d, False
         elif name == "qax_bug_preview":
             d = _call_route("/api/functional/bugs", {"results": args.get("results") or [],

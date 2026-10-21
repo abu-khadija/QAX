@@ -22,7 +22,8 @@ async function toggleSetup(){
       +' — the run fails the job when a case fails; ready-made file: <code>ci/github_action_e2e.yml</code>.<br>'
       +'<b>Only what a change can break</b>: add <code>--changed-since origin/main --repo .</code><br>'
       +'<b>From a coding agent</b> (Claude Code, Cursor, any MCP client): <code>python main.py mcp</code> — QAX becomes a tool the agent calls to check its own change. Setup: <code>docs/MCP.md</code>.<br>'
-      +'<b>Full accessibility audit from the command line</b>: <code>QAX_A11Y=axe</code>.</div>';
+      +'<b>Full accessibility audit from the command line</b>: <code>QAX_A11Y=axe</code>.<br>'
+      +'<b>Every number QAX claims, and how to re-run it</b>: <a href="/how-we-measure" target="_blank" rel="noopener">How we measure</a>.</div>';
   }catch(e){ box.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
 }
 async function openArtifact(path){
@@ -455,6 +456,33 @@ function downloadReleaseMd(){
   const d=window._lastRelease; if(!d) return;
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([d.report_md],{type:'text/markdown'}));
   a.download='qax-release-check.md'; a.click();
+}
+async function reproduceTicket(){
+  // a bug ticket → its steps in the browser → REPRODUCED / NOT REPRODUCED / COULD NOT RUN / NOT DECIDABLE
+  const out=$('reproout'), url=$('mapurl').value.trim();
+  if(!url){ out.innerHTML='<div class="hk">Enter the app URL above first.</div>'; return; }
+  if(!$('reproauth').checked){ out.innerHTML='<div class="hk">Confirm you are authorized to test this app.</div>'; return; }
+  const btn=$('reprobtn'); btn.disabled=true; out.innerHTML='<div class="hk">Running the ticket\u2019s steps in the browser…</div>';
+  try{
+    const r=await api('/api/reproduce',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url,text:$('reprotext').value,jira:$('reprojira').value.trim(),project:$('mapproj').value.trim(),
+        repo:(($('exrepo')||{}).value||'').trim(),authorized:true})});
+    const d=await r.json();
+    if(d.error){ out.innerHTML='<div class="hk">⚠️ '+esc(d.error)+'</div>'; return; }
+    window._lastRepro=d;
+    const cls={'REPRODUCED':'bad','NOT REPRODUCED':'ok'}[d.verdict]||'warn';
+    out.innerHTML='<div class="rcverdict '+cls+'"><div class="rcv">'+esc(d.verdict)+'</div><div>'+esc(d.why)
+      +((d.notes||[]).length?'<br><span class="hint" style="margin:0">'+d.notes.map(esc).join('<br>')+'</span>':'')+'</div></div>'
+      +(d.results||[]).map(x=>'<div class="hk"><b>'+esc(x.test_case_id)+'</b> '+esc(x.status)+'<br>'
+        +(x.steps||[]).map(s=>({PASS:'✓',FAIL:'✗',ERROR:'✗',SKIP:'–'}[s.status]||'?')+' '+esc(s.step_number)+'. '+esc(String(s.actual_result||'').slice(0,140))).join('<br>')+'</div>').join('')
+      +(d.fix_brief?'<div class="row" style="justify-content:flex-end"><button class="btn2" onclick="downloadReproBrief()">⤓ Fix brief for your coding agent</button></div>':'');
+  }catch(e){ out.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
+  finally{ btn.disabled=false; }
+}
+function downloadReproBrief(){
+  const d=window._lastRepro; if(!d||!d.fix_brief) return;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([d.fix_brief],{type:'text/markdown'}));
+  a.download='qax-fix-reproduced.md'; a.click();
 }
 async function downloadJUnit(){
   // the last run's results as JUnit XML, for a CI dashboard (the same file `main.py execute --junit` writes)

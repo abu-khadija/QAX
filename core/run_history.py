@@ -38,6 +38,25 @@ def _evidence(r: dict) -> dict:
                                                                          for s in steps))}
 
 
+def _quality(rs: list) -> dict:
+    """Per page the run visited (first observation wins): accessibility issues and timings — for the overview."""
+    pages = {}
+    for r in rs:
+        for p in ((r.get("quality") or {}).get("pages") or []):
+            url = str(p.get("url") or "")
+            if not url or url in pages:
+                continue
+            a11y = p.get("accessibility") or []
+            pages[url] = {"engine": p.get("a11y_engine") or "basic",
+                          "a11y": [{"rule": str(i.get("rule", ""))[:120], "wcag": i.get("wcag", ""),
+                                    "impact": i.get("impact", ""), "target": str(i.get("target", ""))[:80]}
+                                   for i in a11y[:30]],
+                          "a11y_count": len(a11y),
+                          "perf": {k: (p.get("performance") or {}).get(k) for k in ("lcp_ms", "load_ms", "cls", "ttfb_ms")},
+                          "slow": list(p.get("slow") or [])}
+    return {"pages": pages} if pages else {}
+
+
 def save_run(project: str, url: str, results: list, root: Path | None = None, *,
              cost: dict | None = None, selection: dict | None = None) -> str:
     """
@@ -57,6 +76,9 @@ def save_run(project: str, url: str, results: list, root: Path | None = None, *,
                "causes": {str(r.get("test_case_id")): r.get("cause") for r in rs if r.get("cause")},
                "titles": {str(r.get("test_case_id")): str(r.get("title") or "")[:120] for r in rs},
                "evidence": {str(r.get("test_case_id")): _evidence(r) for r in rs if r.get("status") != "PASS"}}
+        quality = _quality(rs)
+        if quality:
+            rec["quality"] = quality
         if cost:
             rec["cost"] = cost
         if selection:

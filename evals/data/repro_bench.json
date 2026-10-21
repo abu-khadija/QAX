@@ -1,0 +1,11 @@
+{
+ "_comment": "Bug reproduction from tickets (evals/repro_bench.py). Truth written before the run: the linkding tickets describe two REAL bugs fixed upstream (62091c4: /admin/tasks/ served to anonymous visitors; 96c4ef3: the Tags page's bookmark count did not open the tag's bookmarks). Old = linkding at c633db5 (bugs present), fixed = 1.47.0. The demo tickets: one planted bug, one working feature. The tag ticket needs a tag 'qaxticket' with exactly one bookmark on each instance (a precondition, created once).",
+ "runs": [
+  {"ticket": "tests/data/tickets/demo_empty_note.md", "app": "builtin", "project": "uidemo", "truth": "REPRODUCED"},
+  {"ticket": "tests/data/tickets/demo_wrong_password.md", "app": "builtin", "project": "uidemo", "truth": "NOT REPRODUCED"},
+  {"ticket": "tests/data/tickets/linkding_admin_tasks.md", "app": "http://127.0.0.1:9190", "project": "linkding", "truth": "REPRODUCED", "version": "old c633db5"},
+  {"ticket": "tests/data/tickets/linkding_admin_tasks.md", "app": "http://127.0.0.1:9090", "project": "linkding", "truth": "NOT REPRODUCED", "version": "fixed 1.47.0"},
+  {"ticket": "tests/data/tickets/linkding_tag_count_link.md", "app": "http://127.0.0.1:9190", "project": "linkding", "truth": "REPRODUCED", "version": "old c633db5", "needs_env": ["QAX_VAR_LD_USER", "QAX_VAR_LD_PASSWORD"]},
+  {"ticket": "tests/data/tickets/linkding_tag_count_link.md", "app": "http://127.0.0.1:9090", "project": "linkding", "truth": "NOT REPRODUCED", "version": "fixed 1.47.0", "needs_env": ["QAX_VAR_LD_USER", "QAX_VAR_LD_PASSWORD"]}
+ ]
+}

@@ -261,6 +261,12 @@ def index():
     return send_from_directory(_STATIC, page)
 
 
+@app.get("/how-we-measure")
+def how_we_measure():
+    """Every number QAX claims, its truth, its n and the command that repeats it."""
+    return send_from_directory(_STATIC, "measure.html")
+
+
 @app.get("/app")
 def app_ui():
     """The working app — two tracks: the security scan, and functional QA (generate or load test
@@ -867,6 +873,36 @@ def import_recording_route():
         return jsonify({"error": "Paste or load a recording (Chrome Recorder JSON or Playwright codegen)."}), 400
     r = convert(text, case_id=str(data.get("case_id", ""))[:40], title=str(data.get("title", ""))[:120])
     return (jsonify(r), 400) if not r["case"] else jsonify(r)
+
+
+@app.post("/api/reproduce")
+def reproduce_route():
+    """
+    A bug ticket (text, or a Jira key read with JIRA_* — read-only) → its steps run in the browser →
+    REPRODUCED / NOT REPRODUCED / COULD NOT RUN / NOT DECIDABLE, with the steps, why, and a fix brief.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "Enter the URL of your running app (http:// or https://)."}), 400
+    text = str(data.get("text", ""))[:100_000]
+    key = str(data.get("jira", "")).strip()
+    if not text.strip() and key:
+        import re as _re
+        if not _re.fullmatch(r"[A-Z][A-Z0-9_]+-\d+", key):
+            return jsonify({"error": "A Jira key looks like SHOP-123."}), 400
+        from cli.reproduce_cmd import _jira_text
+        text = _jira_text(key)
+        if not text:
+            return jsonify({"error": f"Could not read {key} from Jira (check JIRA_* in .env), or paste the ticket."}), 400
+    if not text.strip():
+        return jsonify({"error": "Paste the ticket (title, steps to reproduce, expected, actual) or give its Jira key."}), 400
+    if not _target_authorized():
+        return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
+    with _browser_lock():
+        from core.ticket_repro import reproduce
+        r = reproduce(text, url, _clean_project(data.get("project")), repo=_local_checkout(data.get("repo", "")))
+    return jsonify(r)
 
 
 @app.post("/api/junit")

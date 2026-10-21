@@ -572,6 +572,21 @@ def test_a_chrome_recording_runs_as_recorded_and_its_check_can_fail(ui_app, monk
     assert by == {"REC-1": "PASS", "REC-NEG": "FAIL"}, by
 
 
+def test_a_ticket_reproduces_the_planted_bug_and_not_a_working_feature(ui_app, monkeypatch):
+    """Plain-language tickets, no AI: the planted bug (an empty note is accepted) is REPRODUCED; the wrong-password
+    message, which works, is NOT REPRODUCED — each decided at the ticket's own check."""
+    from core.ticket_repro import reproduce
+
+    def run(cases):
+        return _run(cases)["results"]
+    tickets = ROOT / "tests/data/tickets"
+    bug = reproduce((tickets / "demo_empty_note.md").read_text(), f"http://127.0.0.1:{ui_app}", "uidemo", run=run)
+    ok = reproduce((tickets / "demo_wrong_password.md").read_text(), f"http://127.0.0.1:{ui_app}", "uidemo", run=run)
+    assert bug["verdict"] == "REPRODUCED", bug
+    assert ok["verdict"] == "NOT REPRODUCED", ok
+    assert "fix_brief" in bug and "Note cannot be empty" in bug["fix_brief"]
+
+
 def test_a_coding_agent_can_run_qax_over_mcp(ui_app, monkeypatch):
     """`main.py mcp`: the protocol handshake, the tool list, the authorization gate, and a real
     browser run of the demo cases — the planted bug FAILS, the unrunnable step is not a PASS."""

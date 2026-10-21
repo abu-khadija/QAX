@@ -408,3 +408,29 @@ def test_the_junit_download_turns_ui_results_into_junit(monkeypatch, tmp_path):
         {"test_case_id": "T2", "title": "broken", "status": "FAIL", "steps": [{"status": "FAIL", "actual_result": "x"}]}]})
     body = r.get_data(as_text=True)
     assert r.status_code == 200 and "<testsuite" in body and "T2" in body and "<failure" in body
+
+
+# ── 11 · accessibility and speed cards from what the run saw ─────────────────
+
+
+def test_accessibility_and_speed_cards_come_from_the_pages_the_run_visited(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    import core.app_mapper as am
+    from core.project_overview import build_overview
+    from core.run_history import save_run
+    monkeypatch.setattr(am, "CONFIG_DIR", tmp_path / "projects")
+    pages = [{"url": "/signup", "a11y_engine": "axe-core 4.13.0", "slow": ["lcp_ms"],
+              "performance": {"lcp_ms": 3900, "load_ms": 4100, "cls": 0.02},
+              "accessibility": [{"rule": "Images must have alternative text", "wcag": "1.1.1", "impact": "critical",
+                                 "target": "img"}, {"rule": "Form elements must have labels", "wcag": "4.1.2",
+                                                    "impact": "serious", "target": "#email"}]},
+             {"url": "/", "a11y_engine": "axe-core 4.13.0", "slow": [], "performance": {"lcp_ms": 900},
+              "accessibility": []}]
+    save_run("shop", "http://shop.local", [{"test_case_id": "T1", "status": "PASS", "quality": {"pages": pages}}])
+    ov = build_overview("shop", tmp_path / "projects", str(tmp_path / "runs"))
+    cards = {c["id"]: c for c in ov["cards"]}
+    a, sp = cards["accessibility"], cards["speed"]
+    assert a["state"] == "bad" and a["value"] == "2 issue(s) on 1 of 2 page(s)"
+    assert a["rows"][0]["verdict"] == "CRITICAL" and a["rows"][0]["id"] == "1.1.1" and "axe-core" in a["detail"]
+    assert sp["value"] == "1 of 2 page(s) over budget" and sp["rows"][0]["id"] == "/signup" and "3.9 s" in sp["rows"][0]["text"]
+    assert "experience" in [g["id"] for g in ov["groups"]]

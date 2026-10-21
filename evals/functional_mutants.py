@@ -79,8 +79,10 @@ MUTANTS = [
      '''                note = await _click_through_obstacles(page, selector)''',
      "no wait for the page after a click"),
     ("fill_types_nothing", AM,
-     "await page.fill(selector, real_value, timeout=15_000)",
-     "await page.fill(selector, '', timeout=15_000)",
+     """                        return base_result
+                await page.fill(selector, real_value, timeout=15_000)""",
+     """                        return base_result
+                await page.fill(selector, '', timeout=15_000)""",
      "a fill step that clears the field instead of typing"),
     ("failed_step_not_failing_case", TE,
      'if step_result["status"] == "FAIL":\n                overall_status = "FAIL"',

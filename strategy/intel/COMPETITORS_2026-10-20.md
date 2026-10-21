@@ -79,8 +79,8 @@ the loop live (PR comment + Jira) before the next round of launches.
 **Closed the same week (2026-10-21):** a release check per change (GO / NO-GO / NOT PROVEN with a PR-ready report —
 their "analyzes each PR"), import of Chrome Recorder / Playwright recordings (their Chrome recording), and a fix brief
 per failure for Claude/Codex/Cursor over MCP (their agent hand-off) — each measured (see PRODUCT_AUDIT P2-2, 7, 8).
-Still theirs: live integrations and customers; reproducing a bug from a ticket (needs AI credit here); production
-session mining.
+Then also closed: reproducing a bug from its ticket (6/6, no AI when the ticket names its check). Still theirs: live
+integrations and customers; production session mining.
 
 ## Sources
 - ContextQA Ship product page: https://contextqa.com/ship/ (read 2026-10-21)

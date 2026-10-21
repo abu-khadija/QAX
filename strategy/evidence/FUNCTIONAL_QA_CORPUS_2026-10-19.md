@@ -232,3 +232,8 @@ flips**, no slowdown (memos 11.1 s/case vs 10.7; beszel 11.7 vs 11.7) — output
 
 Limits: n = 11 apps, one machine; the 79 corpus cases are still written by QAX's author (checks 2–3 are
 the independent part); generation by AI is still unmeasured (no credit).
+
+**Re-run after the plain-language reader fixes (2026-10-21, afternoon):** all 15 sets, twice — every set equal to its
+truth on the first run; 14/15 also on the second. Healthchecks' second run: all 6 cases ERROR, cause environment, "the
+app rate-limited QAX" (its login throttle, after dozens of logins that day) — reported as the environment, never as a
+bug, which is the designed behaviour (output/bench/functional_all_2026-10-21b.json).

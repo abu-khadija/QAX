@@ -136,6 +136,22 @@
       <div class="field"><label for="tcfile">Load test cases — a QAX cases file, or a flow you recorded in the browser
         (Chrome DevTools Recorder → Export as JSON, or Playwright codegen) — no AI needed</label>
         <input type="file" id="tcfile" accept=".json,.py,.js,.ts,application/json,text/plain" onchange="loadTests(this)"></div>
+      <details class="adv" id="reprobox"><summary>Does a reported bug still happen? Reproduce it from the ticket</summary>
+        <div class="hint" style="margin-top:8px">Paste the ticket — title, <b>Steps to reproduce</b>, <b>Expected</b>, <b>Actual</b> — or give
+          its Jira key. QAX runs the steps on the app above and answers <b>REPRODUCED</b>, <b>NOT REPRODUCED</b>, or says which step
+          it could not do. Name the check in quotes (<i>Expected: "Saved" is shown</i>) or give the page (<i>/admin/login/</i>).
+          Logins as <code>{{env:QAX_VAR_…}}</code>, never the password itself.</div>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <div class="field" style="flex:3;min-width:220px"><label for="reprotext">Ticket</label>
+            <textarea id="reprotext" rows="7" placeholder="Background tasks page is visible without logging in&#10;&#10;Steps to reproduce:&#10;1. Go to /admin/tasks/&#10;&#10;Expected: you are sent to the login page (/admin/login/)&#10;Actual: the tasks page opens"></textarea></div>
+          <div class="field" style="flex:1;min-width:140px"><label for="reprojira">or Jira key</label>
+            <input id="reprojira" placeholder="SHOP-123" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <label class="consent" for="reproauth"><input type="checkbox" id="reproauth">
+          <span><b>I own this app or am authorized to test it.</b></span></label>
+        <div class="row" style="justify-content:flex-end"><button class="btn" id="reprobtn" onclick="reproduceTicket()">Reproduce</button></div>
+        <div id="reproout"></div>
+      </details>
       <label class="consent" for="mapexplore"><input type="checkbox" id="mapexplore">
         <span><b>Also follow create / edit / delete / logout links while reading</b> (a disposable staging app only —
           this CHANGES DATA; every write is listed).</span></label>

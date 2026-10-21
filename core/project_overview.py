@@ -278,6 +278,41 @@ def build_overview(project: str, config_dir: Path, runs_dir: str, url: str = "")
                       "rows": [{"id": "•", "text": b, "verdict": ""} for b in blockers],
                       "detail": "A rule over the last run, the requirements and the last scan — what QAX did not test "
                                 "is not covered by it.", "action": "run"})
+    # 16 · Accessibility and 17 · Speed — what every page the last run visited showed (observations)
+    qual = ((hist[0].get("quality") if hist else None) or {}).get("pages") or {}
+    if qual:
+        rank = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3, "": 4}
+        issues = [dict(i, page=u) for u, pg in qual.items() for i in pg.get("a11y") or []]
+        total = sum(pg.get("a11y_count", 0) for pg in qual.values())
+        engines = sorted({pg.get("engine", "basic") for pg in qual.values()})
+        worst = sorted(issues, key=lambda i: rank.get(str(i.get("impact", "")).lower(), 4))
+        by_impact = {}
+        for i in issues:
+            by_impact[i.get("impact") or "unrated"] = by_impact.get(i.get("impact") or "unrated", 0) + 1
+        cards.append({"id": "accessibility", "title": "Accessibility",
+                      "state": "ok" if not total else ("bad" if by_impact.get("critical") else "warn"),
+                      "value": (f"{total} issue(s) on {sum(1 for pg in qual.values() if pg.get('a11y_count'))} of "
+                                f"{len(qual)} page(s)") if total else f"No issue on {len(qual)} page(s)",
+                      "rows": [{"id": i.get("wcag") or "—", "verdict": (i.get("impact") or "").upper(),
+                                "text": f"{i.get('rule', '')} — {i.get('page', '')}"} for i in worst[:8]],
+                      "detail": "Checked by " + " + ".join(engines) + (" · " + ", ".join(f"{v} {k}" for k, v in by_impact.items())
+                                                                       if by_impact else "")
+                                + ". Observations: they never fail a case. Run with the full WCAG 2.2 audit (axe-core) "
+                                  "for about 100 rules.", "action": "run"})
+        slow = [(u, pg) for u, pg in qual.items() if pg.get("slow")]
+        def _ms(v):
+            return f"{v / 1000:.1f} s" if isinstance(v, (int, float)) else "–"
+        cards.append({"id": "speed", "title": "Page speed",
+                      "state": "warn" if slow else "ok",
+                      "value": f"{len(slow)} of {len(qual)} page(s) over budget" if slow else f"All {len(qual)} page(s) within budget",
+                      "rows": [{"id": u, "verdict": ", ".join(pg["slow"]).upper(),
+                                "text": f"LCP {_ms(pg['perf'].get('lcp_ms'))} · load {_ms(pg['perf'].get('load_ms'))} · "
+                                        f"CLS {pg['perf'].get('cls') if pg['perf'].get('cls') is not None else '–'}"}
+                               for u, pg in sorted(slow, key=lambda t: -(t[1]['perf'].get('lcp_ms') or 0))[:8]],
+                      "detail": "Budgets (Google's \"good\" Core Web Vitals): LCP ≤ 2.5 s, CLS ≤ 0.1, first byte ≤ 0.8 s, "
+                                "load ≤ 4 s — measured in the test browser on this machine, not real users.",
+                      "action": "run"})
+
     # 15 · Not tested — what nobody can rely on (cases that did not run, scan checks that could not)
     if hist or scan:
         nr_rows = []
@@ -300,6 +335,8 @@ _GROUPS = [
     ("decide", "Decide", "Can this build ship?", ("readiness", "critical", "requirements", "security")),
     ("investigate", "Investigate", "What happened in the last run, and why?",
      ("last_run", "changes", "not_tested", "evidence", "change_selection")),
+    ("experience", "User experience", "What users meet on every page the run visited (observations).",
+     ("accessibility", "speed")),
     ("maintain", "Keep the suite healthy", "Things that drift if nobody looks.",
      ("flaky", "regression", "app_map", "cost")),
 ]

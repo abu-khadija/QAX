@@ -7,6 +7,27 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### Added
+- **Reproduce a bug from its ticket** (`qax reproduce --ticket FILE | --jira KEY`, the web "Does a reported bug still
+  happen?" section, MCP `qax_reproduce_bug`): the ticket's steps run in the browser → REPRODUCED / NOT REPRODUCED /
+  COULD NOT RUN (the step is named) / NOT DECIDABLE, with a fix brief when reproduced. No AI when the ticket names its
+  check (a quoted text or a page); an optional AI writer for loose tickets is judged by the same rules.
+  `make eval-repro`: 6/6 — two real linkding bugs on the versions before and after their upstream fixes, plus demo.
+- **Accessibility** and **Page speed** cards (a new "User experience" group): what every page the last run visited
+  showed — WCAG issues by impact (basic or axe-core), pages over the Core Web Vitals budgets. Each run now keeps a
+  per-page quality summary.
+- **How we measure** page (`/how-we-measure`, linked from the landing page and Setup): every number QAX claims, its
+  truth, its n, its limits, the command that repeats it, and what QAX does not claim yet.
+
+### Fixed
+- Plain-language steps (manual steps, tickets) never pass a step they did not do: names match whole words, not
+  substrings ("Log in button" had clicked the username field — PASS); a map element is used only when it is on the
+  current page; an unreadable fill value is SKIP, not typing ""; a URL check with no expected value is SKIP (it had
+  always passed); the element lookup no longer reloads the page mid-case (typed values were lost); `Click "X"` prefers
+  the element whose visible name is X (the map's "login" nav link had been clicked instead of the Login button) and
+  refuses an ambiguous match; `in the "Y" row` scopes it; a path keeps its query; `{{env:QAX_VAR_*}}` works in plain
+  steps; 'Verify that "X" is (not) shown' checks the page text.
+
+### Added
 - **Release check** (`qax release-check`, web "Release check" button, MCP `qax_release_check`): the cases a change can
   affect in a real browser + a read-only security scan → **GO / NO-GO / NOT PROVEN** (exit 0 / 1 / 2), a PR-ready
   Markdown report that lists what did not run and what was not covered, and a fix brief per blocker. Measured on

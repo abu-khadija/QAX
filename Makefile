@@ -1,6 +1,6 @@
 PY := ./.venv-exec/bin/python
 
-.PHONY: eval eval-deep eval-mutants eval-functional-mutants eval-release audit-deps eval-generation bench-functional test gate install web doctor docker
+.PHONY: eval eval-deep eval-mutants eval-functional-mutants eval-release eval-repro audit-deps eval-generation bench-functional test gate install web doctor docker
 
 ## Run the full test suite.
 test:
@@ -60,3 +60,7 @@ audit-deps:
 ## Release check decisions on seeded PetClinic changes: control → GO, each regression → NO-GO (4/4 on 2026-10-21; needs Java + corpus)
 eval-release:
 	$(PY) -m evals.release_bench
+
+## Bug reproduction from tickets: real upstream linkding bugs on old/fixed versions + demo (6/6 on 2026-10-21)
+eval-repro:
+	$(PY) -m evals.repro_bench
