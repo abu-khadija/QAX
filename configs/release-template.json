@@ -27,8 +27,8 @@
       },
       {
         "_example": "This is a filled example — delete before use",
-        "jira_key": "EXAMPLE-2588",
-        "title": "Proposal Checklists: Admin > Workflows — error saving",
+        "jira_key": "EXAMPLE-103",
+        "title": "Admin > Workflows: error when saving the workflow configuration",
         "priority": "critical",
         "area": "Administration",
         "changed_file": "WebApp/Areas/Admin/Controllers/WorkflowController.cs",
@@ -36,12 +36,12 @@
       },
       {
         "_example": "Second filled example — delete before use",
-        "jira_key": "EXAMPLE-2603",
-        "title": "Proposal Checklist Does Not Load For Child Locations",
+        "jira_key": "EXAMPLE-104",
+        "title": "Order items do not load for orders of a sub-account",
         "priority": "high",
         "area": "Orders",
         "changed_file": "WebApp/Areas/Orders/Controllers/OrderItemController.cs",
-        "what_to_verify": "Create a work request using a CHILD location. Verify the Proposal Checklist loads correctly."
+        "what_to_verify": "Create an order for a sub-account. Verify its order items load correctly."
       }
     ],
     "_issues_comment": "List every Jira issue included in this release. The agent will focus test generation on the changed files."
@@ -69,9 +69,9 @@
   "_test_environment_comment": "The environment where these tests must be executed.",
 
   "notes": [
-    "Always run EXAMPLE-2588 (Business Critical) first — block release if it fails",
-    "EXAMPLE-2603 requires test data: checklist assigned to PARENT location + work request at CHILD location",
-    "EXAMPLE-2583 requires Pre-check questionnaire configured with at least 1 action"
+    "Always run EXAMPLE-103 (Business Critical) first — block release if it fails",
+    "EXAMPLE-104 requires test data: a parent account with a sub-account that has at least one order",
+    "EXAMPLE-105 requires a discount rule configured with at least one condition"
   ],
   "_notes_comment": "Free-text notes visible in the run report. Add anything the tester needs to know."
 }

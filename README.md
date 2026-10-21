@@ -183,7 +183,7 @@ python main.py analyze --file path/to/Controller.cs --project example --dry-run
 python main.py analyze --folder src/Orders/ --ext .cs --project example
 
 # With module hint (improves test case quality)
-python main.py analyze --file ChecklistController.cs --module Orders --project example
+python main.py analyze --file OrderController.cs --module Orders --project example
 
 # Large file: split into 300-line chunks
 python main.py analyze --file BigController.cs --chunk-size 300 --project example

@@ -32,15 +32,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # ── Minimal valid test case (matches xray_schema.json) ────────────────────
 SAMPLE_TEST_CASE = {
-    "test_case_id": "TC-TRK-0001",
-    "title": "Verify checklist step saves successfully with valid data",
+    "test_case_id": "TC-ORD-0001",
+    "title": "Verify order item saves successfully with valid data",
     "description": "Ensures the save endpoint returns success when all required fields are provided.",
     "module": "Orders",
     "test_type": "functional",
     "priority": "high",
     "preconditions": [
         "User is logged in with QA role",
-        "User is on the Checklist Step page",
+        "User is on the Order Item page",
     ],
     "manual_steps": [
         {
@@ -68,7 +68,7 @@ SAMPLE_TEST_CASE = {
         {
             "step_number": 2,
             "playwright_action": "navigate",
-            "selector_key": "TODO_checklist_url",
+            "selector_key": "TODO_order_item_url",
             "value": "/Orders/OrderItem/View",
             "assertion_type": "url",
             "assertion_value": "/OrderItem/View",
@@ -90,10 +90,10 @@ public class OrderItemController : Controller
     public ActionResult Save(OrderItemViewModel model)
     {
         if (!ModelState.IsValid)
-            return Json(new { QuestionsSuccess = false });
+            return Json(new { the success flag = false });
 
         var result = _service.SaveOrderItem(model);
-        return Json(new { QuestionsSuccess = result.Success });
+        return Json(new { the success flag = result.Success });
     }
 
     [HttpGet]
@@ -168,7 +168,7 @@ class TestAnalyzeCommand:
             assert len(result["valid"]) == 1
 
             valid_tc = result["valid"][0]
-            assert valid_tc["test_case_id"] == "TC-TRK-0001"
+            assert valid_tc["test_case_id"] == "TC-ORD-0001"
             assert valid_tc["module"] == "Orders"
             assert valid_tc["confidence_score"] == 7
             assert isinstance(valid_tc["needs_review"], bool)

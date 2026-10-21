@@ -11,7 +11,7 @@ so the generation pipeline can use the right model, depth, and context.
 Usage:
     checker = SmartChecker(project="example")
     checks = checker.run_pre_checks(
-        file_path="src/ChecklistController.cs",
+        file_path="src/OrderController.cs",
         file_content=code,
         module="Orders",
         git_history=git_history_dict,

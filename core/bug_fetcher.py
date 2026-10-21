@@ -105,13 +105,13 @@ class BugFetcher:
             AND labels="{module_name}" ORDER BY resolutiondate DESC
 
         Args:
-            module_name (str): EXAMPLE module name (e.g., "Orders", "Investigator").
+            module_name (str): EXAMPLE module name (e.g., "Orders", "Reports").
                                Used as the Jira label filter.
             max_bugs (int): Maximum number of bugs to retrieve. Default: 20.
 
         Returns:
             list[dict]: List of bug dicts, each with:
-                - key (str): Jira issue key (e.g., "EXAMPLE-2646")
+                - key (str): Jira issue key (e.g., "EXAMPLE-101")
                 - summary (str): Bug summary/title
                 - description (str): Bug description (truncated to 500 chars)
                 - resolution_date (str): When the bug was resolved
@@ -242,7 +242,7 @@ class BugFetcher:
 
         Returns:
             str: Formatted string with recurring failure patterns, e.g.:
-                 "1. Silent success failures — functions return 200 but QuestionsSuccess=false
+                 "1. Silent success failures — functions return 200 but the success flag=false
                   2. Missing null checks — NullReferenceException on optional fields
                   ..."
                  Returns empty string if bugs list is empty or on any error.

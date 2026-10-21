@@ -8,29 +8,29 @@
   "test_type_filter": "smoke",
   "_test_type_filter_comment": "Only generate/push test cases of this type. Options: smoke | regression | functional | security | performance | negative",
 
-  "target_modules": ["Orders", "Investigator", "Reports", "Search", "Administration"],
+  "target_modules": ["Orders", "Reports", "Inventory", "Search", "Administration"],
   "_target_modules_comment": "Which EXAMPLE modules to target. Remove any modules you don't want to test in this run.",
 
   "source_files": [
     {
       "file": "WebApp/Areas/Orders/Controllers/OrderItemController.cs",
       "module": "Orders",
-      "_comment": "Silent failure risk — must check QuestionsSuccess in response body"
+      "_comment": "Silent failure risk — must check the success flag in response body"
     },
     {
-      "file": "WebApp/Areas/Orders/Controllers/ProposalController.cs",
+      "file": "WebApp/Areas/Orders/Controllers/CheckoutController.cs",
       "module": "Orders",
       "_comment": "Core workflow controller — check response body for success flag"
     },
     {
-      "file": "WebApp/Areas/Investigator/Controllers/HomeController.cs",
-      "module": "Investigator",
-      "_comment": "Known bug EXAMPLE-2646 — 404 instead of 302 for unauthenticated requests"
+      "file": "WebApp/Areas/Reports/Controllers/HomeController.cs",
+      "module": "Reports",
+      "_comment": "Known bug EXAMPLE-101 — 404 instead of 302 for unauthenticated requests"
     },
     {
       "file": "WebApp/Controllers/SearchController.cs",
       "module": "Search",
-      "_comment": "Known bug EXAMPLE-2647 — 500 on missing session cookie"
+      "_comment": "Known bug EXAMPLE-102 — 500 on missing session cookie"
     }
   ],
   "_source_files_comment": "List of files to analyze. Each entry needs 'file' (relative path from repo root) and 'module' (EXAMPLE module name).",

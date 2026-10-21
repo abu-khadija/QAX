@@ -10,13 +10,13 @@
 
   "target_modules": [
     "Orders",
-    "Investigator",
     "Reports",
-    "RiskAssessor",
+    "Inventory",
+    "Billing",
     "Analytics",
     "Schedules",
     "Customers",
-    "ViewReport",
+    "Exports",
     "Administration",
     "Search",
     "Dashboard"
@@ -28,25 +28,25 @@
       "dir": "WebApp/Areas/Orders/Controllers",
       "module": "Orders",
       "extensions": [".cs"],
-      "_comment": "All Orders controllers — includes checklist, proposal, action, approval, workflow"
-    },
-    {
-      "dir": "WebApp/Areas/Investigator/Controllers",
-      "module": "Investigator",
-      "extensions": [".cs"],
-      "_comment": "All Investigator controllers — includes incident CRUD, team, attachments"
+      "_comment": "All Orders controllers — includes orders, items, checkout, approvals, workflow"
     },
     {
       "dir": "WebApp/Areas/Reports/Controllers",
       "module": "Reports",
       "extensions": [".cs"],
-      "_comment": "All Reports controllers — includes audit conduct, findings, actions"
+      "_comment": "All Reports controllers — includes report CRUD, sharing, attachments"
     },
     {
-      "dir": "WebApp/Areas/RiskAssessor/Controllers",
-      "module": "RiskAssessor",
+      "dir": "WebApp/Areas/Inventory/Controllers",
+      "module": "Inventory",
       "extensions": [".cs"],
-      "_comment": "All Risk Assessor controllers"
+      "_comment": "All Inventory controllers — includes stock counts, adjustments, transfers"
+    },
+    {
+      "dir": "WebApp/Areas/Billing/Controllers",
+      "module": "Billing",
+      "extensions": [".cs"],
+      "_comment": "All Billing controllers"
     },
     {
       "dir": "WebApp/Controllers",
@@ -67,7 +67,7 @@
   "_output_file_comment": "Output file path. Replace {{VERSION}} and {{DATE}} before running.",
 
   "chunk_size": 200,
-  "_chunk_size_comment": "Lines per chunk. Large controllers like TrackerController.cs (25KB) will be split automatically.",
+  "_chunk_size_comment": "Lines per chunk. Large controllers like OrdersController.cs (25KB) will be split automatically.",
 
   "push_to_xray": false,
   "_push_to_xray_comment": "Set to true to push to Xray. Requires XRAY_CLIENT_ID and XRAY_CLIENT_SECRET in .env.",

@@ -54,7 +54,7 @@ class SkillLibrary:
                 "added_at": "2025-01-15T10:30:00Z"
             }
         ],
-        "Incident": [ ... ]
+        "Reports": [ ... ]
     }
     """
 

@@ -80,7 +80,7 @@ class JiraGapAnalyzer:
 
         Args:
             module (str): Module name used as a Jira label filter
-                          (e.g., "Orders", "Incident").
+                          (e.g., "Orders", "Reports").
 
         Returns:
             list[dict]: Each item contains:

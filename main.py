@@ -162,11 +162,11 @@ def run_analyze_command() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py analyze --file src/Orders/ChecklistController.cs
-  python main.py analyze --file IncidentForm.cs --module Orders --dry-run
+  python main.py analyze --file src/Orders/OrderController.cs
+  python main.py analyze --file OrderForm.cs --module Orders --dry-run
   python main.py analyze --folder src/Orders/ --ext .cs --module Orders
-  python main.py analyze --file IncidentForm.cs --include-deps --include-git
-  python main.py analyze --file IncidentForm.cs --include-bugs --module Orders
+  python main.py analyze --file OrderForm.cs --include-deps --include-git
+  python main.py analyze --file OrderForm.cs --include-bugs --module Orders
         """
     )
 
@@ -1773,7 +1773,7 @@ def show_help() -> None:
     print("  python main.py pipeline --input pr --source 142 --export none --exec-mode ui")
     print("  python main.py pipeline --input story --source 'As a user I want to login' --exec-mode api")
     print("  python main.py pipeline --file src/Controller.cs --export excel  # legacy")
-    print("  python main.py analyze --file src/Orders/ChecklistController.cs --dry-run")
+    print("  python main.py analyze --file src/Orders/OrderController.cs --dry-run")
     print("  python main.py analyze --file src/Orders/Ctrl.cs --output pr_comment.md")
     print("  python main.py run --mode smoke")
     print("  python main.py run --mode generate --file path/to/file.cs")

@@ -13,8 +13,8 @@ from pathlib import Path
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 
-# ── Module detection: map folder name keywords → EXAMPLE module names ────────────
-# Extend this dict as you discover more folder naming patterns in EXAMPLE source
+# ── Module detection: map folder name keywords → module names (a generic default) ──
+# Extend this dict with your application's folder naming patterns
 MODULE_FOLDER_MAP = {
     "incident": "Incident",
     "incidents": "Incident",
@@ -696,7 +696,7 @@ def _detect_module_from_path(file_path: str) -> str | None:
         file_path (str): The file path to inspect.
 
     Returns:
-        str | None: EXAMPLE module name (e.g., "Incident") if detected, None otherwise.
+        str | None: The module name (e.g., "Reports") if detected, None otherwise.
     """
     # Normalize separators and split into path parts
     normalized = file_path.replace("\\", "/").lower()

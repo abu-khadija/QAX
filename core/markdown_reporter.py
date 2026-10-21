@@ -17,7 +17,7 @@ Usage:
     # comment is a plain string ready to POST to a PR/MR API
 
 Also callable from main.py analyze:
-    python main.py analyze --file src/Orders/ChecklistController.cs \
+    python main.py analyze --file src/Orders/OrderController.cs \
                            --output pr_comment.md
     # Saves the comment as a .md file instead of JSON
 """

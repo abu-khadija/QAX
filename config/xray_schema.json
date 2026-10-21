@@ -204,7 +204,7 @@
             },
             "assertion_value": {
               "type": "string",
-              "description": "Expected value for the assertion. Example: 'Checklist saved successfully'.",
+              "description": "Expected value for the assertion. Example: 'Order saved successfully'.",
               "default": ""
             }
           }

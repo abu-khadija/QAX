@@ -11,7 +11,7 @@
   "bugs": [
     {
       "jira_key": "EXAMPLE-XXXX",
-      "_jira_key_comment": "Jira issue key of the bug. Example: EXAMPLE-2646",
+      "_jira_key_comment": "Jira issue key of the bug. Example: EXAMPLE-101",
 
       "title": "{{BUG_TITLE}}",
       "_title_comment": "Full bug title copied from Jira.",
@@ -20,7 +20,7 @@
       "_priority_comment": "Bug priority: critical | high | medium | low",
 
       "module": "{{MODULE_NAME}}",
-      "_module_comment": "Which EXAMPLE module this bug is in. Example: Orders, Investigator, Search",
+      "_module_comment": "Which EXAMPLE module this bug is in. Example: Orders, Reports, Search",
 
       "affected_file": "{{PATH_TO_AFFECTED_FILE}}",
       "_affected_file_comment": "Path to the source file that contains the bug fix. Relative to repo root.",
@@ -42,22 +42,22 @@
       "_actual_behavior_comment": "What the buggy behavior is. Used to write the 'before fix' negative test.",
 
       "test_data_required": "{{ANY_SPECIAL_TEST_DATA_NEEDED}}",
-      "_test_data_required_comment": "Example: 'Need a user without session cookie' or 'Need work request at child location'.",
+      "_test_data_required_comment": "Example: 'Need a user without session cookie' or 'Need order at child location'.",
 
       "status": "open",
       "_status_comment": "open | fixed | verified | wont-fix"
     },
     {
-      "_example": "Filled example for EXAMPLE-2646 — delete before use",
-      "jira_key": "EXAMPLE-2646",
-      "title": "Investigator/Home/Index returns 404 instead of 302 for unauthenticated requests",
+      "_example": "Filled example for EXAMPLE-101 — delete before use",
+      "jira_key": "EXAMPLE-101",
+      "title": "Reports/Home/Index returns 404 instead of 302 for unauthenticated requests",
       "priority": "high",
-      "module": "Investigator",
-      "affected_file": "WebApp/Areas/Investigator/Controllers/HomeController.cs",
-      "bug_description": "When an unauthenticated user navigates to /Investigator/Home/Index, the server returns HTTP 404 Not Found instead of HTTP 302 redirect to /Account/Login.",
+      "module": "Reports",
+      "affected_file": "WebApp/Areas/Reports/Controllers/HomeController.cs",
+      "bug_description": "When an unauthenticated user navigates to /Reports/Home/Index, the server returns HTTP 404 Not Found instead of HTTP 302 redirect to /Account/Login.",
       "steps_to_reproduce": [
         "Log out of EXAMPLE completely (clear session cookie)",
-        "Navigate directly to https://your-app.example.com/Investigator/Home/Index",
+        "Navigate directly to https://your-app.example.com/Reports/Home/Index",
         "Observe HTTP response code"
       ],
       "expected_behavior": "HTTP 302 redirect to /Account/Login page",
@@ -66,13 +66,13 @@
       "status": "open"
     },
     {
-      "_example": "Filled example for EXAMPLE-2647 — delete before use",
-      "jira_key": "EXAMPLE-2647",
+      "_example": "Filled example for EXAMPLE-102 — delete before use",
+      "jira_key": "EXAMPLE-102",
       "title": "Search/Execute returns 500 when session cookie is missing",
       "priority": "high",
       "module": "Search",
       "affected_file": "WebApp/Controllers/SearchController.cs",
-      "bug_description": "POST to /Search/Execute returns HTTP 500 Internal Server Error when the session session cookie is missing. Should return 302 redirect to login.",
+      "bug_description": "POST to /Search/Execute returns HTTP 500 Internal Server Error when the session cookie is missing. Should return 302 redirect to login.",
       "steps_to_reproduce": [
         "Open browser DevTools → Application tab → delete session cookie",
         "POST to /Search/Execute?isTriggerSearch=true with valid search body",
