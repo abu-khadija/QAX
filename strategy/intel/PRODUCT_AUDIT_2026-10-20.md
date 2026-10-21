@@ -32,7 +32,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | Capability | State | Evidence |
 |---|---|---|
 | Security scan (deterministic probes, control requests) | ✅ verified | evals/gate.py, PLAN §9, 10 apps |
-| Browser E2E execution (Chromium, Firefox, WebKit, mobile emulation, iframes, shadow DOM) | ✅ verified | tests/test_browser_engine.py (44 tests), corpus |
+| Browser E2E execution (Chromium, Firefox, WebKit, mobile emulation, iframes, shadow DOM) | ✅ verified — 2026-10-21: 2 real upstream bugs caught (linkding), 24/24 on cases by an independent author, 13/13 functional mutants killed, 79/79 vs 8/79 for the engine at 6cca1c6 | tests/test_browser_engine.py, corpus, strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md (2026-10-21) |
 | Reading an app from its URL (`map`) | ✅ verified | 10-app corpus; 6 reader defects found by Java/Angular/.NET apps, fixed |
 | API execution | ✅ verified | test_api_runner_egress.py, gate |
 | Traceability (criteria → cases → verdicts) | ✅ deterministic part; ⚠️ the `Covers:` tag depends on the model | tests; live model not run |
@@ -276,7 +276,16 @@ internal agents is not justified by any measured gap today — each would add co
 | Evidence completeness | can a finding be verified independently? | ✅ built (steps + screenshot + observed result per non-pass) | — |
 | Critical findings (cross-track) | one list of P1s from both tracks | ✅ built | — |
 
-**Deliberately not built:** "time saved", "AI confidence", "quality score" — no trustworthy measurement exists; a number there would be invented. Layout: the overview sits at the top of Functional QA; P2 moves it to a project home that both tracks open into.
+**Deliberately not built:** "time saved", "AI confidence", "quality score" — no trustworthy measurement exists; a number there would be invented.
+
+**Layout (built 2026-10-21, after the founder found 14 equal tiles too many):** three groups, read in order —
+**Decide** (Release readiness · Critical findings · Requirements · Security), **Investigate** (Last run with the
+pass-rate sparkline · Since the run before · Not tested · Evidence · Last change → cases run), **Keep the suite
+healthy** (Flaky · Regression suite · What QAX knows of the app · Cost). Folded: the pass-rate trend into Last run,
+coverage gaps into Requirements (its NOT COVERED rows). New: **Not tested** (cases that did not run + scan checks that
+could not — what the release decision does not cover). A card with no data yet is not a tile: it is one line in a
+"Not measured yet" checklist with a Start link. At most 13 tiles; a new project shows only the checklist.
+Next candidates (data exists, not built): accessibility summary (axe), slow pages.
 
 ## 8. Market positioning
 
@@ -342,7 +351,7 @@ them), vet last name not shown (vetList.html → 1 of 9, TC-PC-007 caught), a me
 messages.properties (→ all 9, by the shared-file rule, TC-PC-004 caught). **0 regressions missed**; cases saved
 11 % / 89 % / 0 %. n = 3 seeds on one app — the method, not a general rate.
 
-**Now in the merge gate [V]:** functional verdicts == truth on the demo app, twice, no flips.
+**Now in the merge gate [V]:** functional verdicts == truth on the demo app and its depth set (one case per engine regression the functional mutants showed), twice, no flips. 2026-10-21 functional evidence (before/after 8/79 → 79/79, 2 real upstream bugs, independent author 24/24, mutants 13/13): strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md.
 Corpus result on record (2026-10-20): 10 apps, 68/68 correct, 20/20 negative controls failed — n=10,
 hand-written cases, one machine; not a general accuracy claim.
 

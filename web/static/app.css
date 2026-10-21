@@ -173,7 +173,17 @@ footer b{color:var(--muted)}
 .ovcard.empty{border-style:dashed;opacity:.85}
 .ovcard .rq{font-size:12px;margin-top:6px}.ovcard .rq b{font-weight:600}
 .ovcard button{margin-top:8px}
-.ovhead{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 8px}
+.ovhead{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 12px;margin:0 0 8px}
+.ovgroup{margin:0 0 4px}
+.ovgtitle{font-size:13px;margin:10px 0 6px;color:var(--txt)}.ovgtitle span{color:var(--muted);font-weight:400}
+.ovsetup{font-size:12px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;padding:10px 14px;margin:0 0 16px}
+.ovsetup b{color:var(--txt)}.ovsetup ul{margin:6px 0 0;padding-left:18px}.ovsetup li{margin:3px 0}.ovsetup li span{color:var(--txt)}
+.ovcard .spark{display:block;margin-top:6px}.ovcard .spark polyline{fill:none;stroke:var(--accent,#58a6ff);stroke-width:1.5}
+.ovcard .spark circle{fill:var(--accent,#58a6ff)}
 
 /* consent / option sentences: readable case (the global label style is uppercase for short field labels) */
 .consent,.consent span{text-transform:none;letter-spacing:0;font-weight:400}
+
+.pagechecks{border:1px solid var(--line);border-radius:12px;padding:10px 14px 4px;margin:12px 0}
+.pagechecks legend{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding:0 6px}
+.mode .md.gets{margin-top:6px;font-size:12px;opacity:.85}

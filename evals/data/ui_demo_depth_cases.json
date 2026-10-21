@@ -1,0 +1,269 @@
+{
+ "_comment": "Depth cases for the built-in demo app, added 2026-10-21 because 5 functional mutants survived the benchmark: each case makes one kind of engine regression visible (a late page update, a hidden element, a field value, a crashed step, colliding test data). Truth written before the run.",
+ "test_cases": [
+  {
+   "test_case_id": "TC-UD-001",
+   "title": "A late status update is waited for (Saved! appears 3 s after the click, as after a slow API call)",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/delayed?ms=3000",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "#save-btn",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#status",
+     "assertion_type": "text",
+     "assertion_value": "Saved!",
+     "step_number": 3
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-002",
+   "title": "A hidden menu item is NOT visible before the menu is opened",
+   "expected_outcome": "FAIL (negative control)",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/menu-page",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#profile-link",
+     "assertion_type": "visible",
+     "step_number": 2
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-003",
+   "title": "Opening the menu shows the Profile link",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/menu-page",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "#menu-btn",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#profile-link",
+     "assertion_type": "visible",
+     "step_number": 3
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-004",
+   "title": "A typed username is the field's value",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/login",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#username",
+     "value": "demo",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#username",
+     "assertion_type": "value",
+     "assertion_value": "demo",
+     "step_number": 3
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-005",
+   "title": "A field's value is compared, not just read",
+   "expected_outcome": "FAIL (negative control)",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/login",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#username",
+     "value": "demo",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#username",
+     "assertion_type": "value",
+     "assertion_value": "someone-else",
+     "step_number": 3
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-006",
+   "title": "A step on an element no one defined is an error, never a pass",
+   "expected_outcome": "ERROR (a step that crashes proves nothing)",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/login",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "no_such_named_element",
+     "step_number": 2
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-007",
+   "title": "A new label with a unique name is created",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/labels",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#label-name",
+     "value": "label-{{unique}}",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "#label-save",
+     "step_number": 3
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#label-msg",
+     "assertion_type": "text",
+     "assertion_value": "Label created",
+     "step_number": 4
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-008",
+   "title": "A second label with its own unique name is created too",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/labels",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#label-name",
+     "value": "label-{{unique}}",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "#label-save",
+     "step_number": 3
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#label-msg",
+     "assertion_type": "text",
+     "assertion_value": "Label created",
+     "step_number": 4
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-009",
+   "title": "A text check compares the text (the login page does not greet anyone)",
+   "expected_outcome": "FAIL (negative control)",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/login",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Welcome, demo",
+     "step_number": 2
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-010",
+   "title": "A URL check compares the URL (the login page is not the dashboard)",
+   "expected_outcome": "FAIL (negative control)",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/login",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "assert",
+     "assertion_type": "url",
+     "assertion_value": "/dashboard",
+     "step_number": 2
+    }
+   ]
+  },
+  {
+   "test_case_id": "TC-UD-011",
+   "title": "After a slow in-place update (fetch, no navigation), typing lands in the new form",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "playwright_action": "navigate",
+     "value": "/wizard-spa",
+     "step_number": 1
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "#next",
+     "step_number": 2
+    },
+    {
+     "playwright_action": "fill",
+     "selector_key": "#name",
+     "value": "qa-{{unique}}",
+     "step_number": 3
+    },
+    {
+     "playwright_action": "click",
+     "selector_key": "#confirm",
+     "step_number": 4
+    },
+    {
+     "playwright_action": "assert",
+     "selector_key": "#done",
+     "assertion_type": "text",
+     "assertion_value": "Confirmed: qa-{{unique}}",
+     "step_number": 5
+    }
+   ]
+  }
+ ]
+}

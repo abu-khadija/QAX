@@ -52,9 +52,32 @@ with the vendor**, not facts. Labels: [S] = stated by a source (linked), [I] = o
 | Momentic / mabl / testRigor (AI E2E) | write and run UI tests; SaaS | requirement-level verdicts, security cases from the same story, honest verdicts, self-hosted |
 | Xray AI / Marketplace apps | generate cases in Jira | run them on the real app and report per criterion back to the story |
 | Canary | PR-driven E2E from the code | self-hosted, security probes, ISTQB + Jira traceability |
+| ContextQA Ship (launched 2026-10-05) | per-PR impact → regressions on the deployed app; bug reproduction from Jira/Linear/Slack; production-session mining; root cause + fix handed to Claude/Codex; SaaS (on-prem: Enterprise only), credits ($49–$249/mo) | self-hosted by default; security proven in the same flow; deterministic verdicts with a published method (their 72% / 94% figures have no stated method — and 72% caught means 28% missed); a test that did not run is never a pass |
 | Playwright MCP / test agents | free building blocks for agents | an independent, criteria-traced check with security, exposed over MCP |
 
+## ContextQA Ship — read 2026-10-21 (their own page, contextqa.com/ship)
+
+**Claims:** analyzes each PR, maps impact, runs regressions on the deployed app before merge; reproduces bugs from
+Linear/Jira/Slack/support desks with steps, trace and a suggested fix; mines production sessions; converts
+requirement documents to tests; release quality report; integrations GitHub, GitLab, Linear, Jira, Slack, Teams,
+Intercom, Zendesk, Claude, Codex; evidence = video, trace, screenshots, network traces.
+**Not on the page:** API or security testing; how pass/fail is decided (AI judgement or assertions); where code and
+session data are processed; how the headline numbers (72% regressions caught before merge, 94% change-to-test
+coverage, 68% faster resolution, 43% lower cost) were measured. Workflow demos are labelled illustrative. Mobile:
+"coming soon". Hosted; on-prem only on Enterprise.
+**Where they are ahead of QAX today [V]:** live PR/CI integration and the integrations above actually connected,
+bug reproduction from a ticket, production-session mining, a Chrome recorder, a polished hosted onboarding, paying
+customers, ISO/SOC 2 badges.
+**Where QAX is ahead [V]:** self-hosted by default (nothing leaves the machine); security bugs proven by control
+requests in the same flow (32/32, 0 FP on the gate; 10 real apps); verdicts by deterministic code with a public
+method — 125/125 on 15 benchmark sets, 2 real upstream bugs caught, 13/13 functional mutants; a test that did not
+run is never counted as a pass; no per-step credits.
+**What it means:** the change-aware proof loop (strategy §9, option 2) is now a funded, launched category — it
+confirms the bet and removes "first" as a claim. QAX must win on trust (proof, self-hosted, security) and on getting
+the loop live (PR comment + Jira) before the next round of launches.
+
 ## Sources
+- ContextQA Ship product page: https://contextqa.com/ship/ (read 2026-10-21)
 - [xbow-funding] https://www.tamradar.com/funding-rounds/xbow-series-c-120m · https://www.sentinelone.com/s-ventures/blog/xbow-series-c-investment/
 - [xbow-review] https://codeant.ai/blogs/xbow-features · https://stackpick.net/tools/xbow/
 - [xbow-alts] https://zerothreat.ai/blog/xbow-alternatives

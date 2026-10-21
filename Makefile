@@ -1,6 +1,6 @@
 PY := ./.venv-exec/bin/python
 
-.PHONY: eval eval-deep eval-mutants eval-generation bench-functional test gate install web doctor docker
+.PHONY: eval eval-deep eval-mutants eval-functional-mutants audit-deps eval-generation bench-functional test gate install web doctor docker
 
 ## Run the full test suite.
 test:
@@ -20,6 +20,10 @@ eval-deep:
 ## target would NOT notice dying (zero-LLM, ~7 min).
 eval-mutants:
 	$(PY) -m evals.mutants
+
+## Break the functional engine on purpose (13 mutants): does the functional benchmark notice? (13/13 on 2026-10-21)
+eval-functional-mutants:
+	$(PY) -m evals.functional_mutants --app ui-demo,ui-demo-depth --min-killed 13
 
 ## One-command install: a Python 3.11/3.12 venv in .venv-exec, the packages, Chromium.
 install:

@@ -1,0 +1,1561 @@
+{
+ "_comment": "Written by an INDEPENDENT author (a separate agent that never read QAX's engine code or other case files; it used only the case schema, microblog's selectors.json, microblog's source and curl to fix each expected_outcome \u2014 see truth_note). 2026-10-21. 12 cases of real behaviour (PASS) + 12 negative twins generated from them by making the last assertion impossible (FAIL): a checker that passes everything cannot score well here.",
+ "test_cases": [
+  {
+   "test_case_id": "MB-IND-01",
+   "title": "Login with valid credentials lands on the home page",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Hi, "
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "say_something",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "app/auth/routes.py:19-28 login_user then redirect to main.index; index.html:5 renders 'Hi, <username>!' and base.html shows Logout link when authenticated. curl: POST /auth/login with valid creds -> 302 /index; GET /index shows <h1>Hi, qaxtester!</h1> and textarea#post."
+  },
+  {
+   "test_case_id": "MB-IND-02",
+   "title": "Login with wrong password shows 'Invalid username or password' and stays on login",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "wrong-{{unique}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Invalid username or password"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "login_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "app/auth/routes.py:22-24 flash('Invalid username or password') + redirect to auth.login. curl: POST wrong password -> final URL /auth/login, alert 'Invalid username or password', <h1>Sign In</h1>."
+  },
+  {
+   "test_case_id": "MB-IND-03",
+   "title": "Logout ends the session and protected home page redirects to login",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "logout_link"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "login_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Please log in to access this page."
+    }
+   ],
+   "truth_note": "auth/routes.py:33-36 logout_user + redirect to main.index; main/routes.py:27 @login_required -> app/__init__.py:24-25 login_view 'auth.login', message 'Please log in to access this page.'. curl: GET /auth/logout -> 302 /index; then GET /index -> 302 /auth/login?next=%2Findex."
+  },
+  {
+   "test_case_id": "MB-IND-04",
+   "title": "Anonymous visitor opening /edit_profile is redirected to login",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "next=%2Fedit_profile"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Please log in to access this page."
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "username",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "about_me",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:97-99 @login_required; __init__.py:24-25. curl (no cookies): GET /edit_profile -> 302 http://127.0.0.1:9094/auth/login?next=%2Fedit_profile; following it shows alert 'Please log in to access this page.'. Same for /index, /explore, /user/qaxtester."
+  },
+  {
+   "test_case_id": "MB-IND-05",
+   "title": "After forced login, user is returned to the originally requested page",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/edit_profile"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Edit Profile"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "about_me",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "auth/routes.py:25-28: next_page = request.args.get('next'), used if it has no netloc; /edit_profile is relative so redirect goes there. edit_profile.html:5 <h1>Edit Profile</h1>. Verified the login redirect carries next=%2Fedit_profile via curl."
+  },
+  {
+   "test_case_id": "MB-IND-06",
+   "title": "Submitting a new post shows confirmation and the post on the home timeline",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "fill",
+     "selector_key": "say_something",
+     "value": "QAX post {{unique}}"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Your post is now live!"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "QAX post {{unique}}"
+    }
+   ],
+   "truth_note": "main/routes.py:30-40 PostForm valid -> Post saved, flash 'Your post is now live!', redirect index; following_posts includes own posts (models.py:166-179). curl: POST /index post=... -> final /index with alert and <span id=post13> containing the text."
+  },
+  {
+   "test_case_id": "MB-IND-07",
+   "title": "A new post appears on the Explore page",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "fill",
+     "selector_key": "say_something",
+     "value": "QAX explore {{unique}}"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Your post is now live!"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "click",
+     "selector_key": "explore_link"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/explore"
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "QAX explore {{unique}}"
+    },
+    {
+     "step_number": 11,
+     "playwright_action": "assert",
+     "selector_key": "say_something",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:54-67 explore lists all posts newest first, renders index.html without form (so #post absent). curl: after posting, GET /explore contained the new post body."
+  },
+  {
+   "test_case_id": "MB-IND-08",
+   "title": "Empty post is not accepted",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "say_something",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "div.alert-info",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/forms.py PostForm.post DataRequired+Length(1,140); rendered textarea#post has 'required minlength=1 maxlength=140' (curl of /index), so the browser blocks the submit; if it reached the server, curl shows 'This field is required.' and no flash. Either way no 'Your post is now live!' alert and URL stays /index."
+  },
+  {
+   "test_case_id": "MB-IND-09",
+   "title": "Editing 'About me' saves and shows it on the profile page",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "fill",
+     "selector_key": "about_me",
+     "value": "About QAX {{unique}}"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/edit_profile"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Your changes have been saved."
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "assert",
+     "selector_key": "about_me",
+     "assertion_type": "value",
+     "assertion_value": "About QAX {{unique}}"
+    },
+    {
+     "step_number": 11,
+     "playwright_action": "click",
+     "selector_key": "profile_link"
+    },
+    {
+     "step_number": 12,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "About QAX {{unique}}"
+    }
+   ],
+   "truth_note": "main/routes.py:97-111 saves about_me, flash 'Your changes have been saved.', redirect to edit_profile; GET pre-fills about_me. user.html:9 shows user.about_me. curl GET /edit_profile showed prefilled textarea and username qaxtester (profile_link targets /user/qaxtester; env user is qaxtester)."
+  },
+  {
+   "test_case_id": "MB-IND-10",
+   "title": "'About me' and post fields are limited to 140 characters",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "textarea#post[maxlength='140']",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "textarea#about_me[maxlength='140']",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/forms.py EditProfileForm.about_me Length(0,140), PostForm.post Length(1,140); WTForms renders maxlength=140 (curl: <textarea ... id=about_me maxlength=140> and <textarea ... id=post maxlength=140>). Server side, curl POST of 141-char about_me returns 'Field must be between 0 and 140 characters long.' - not used in the browser case because maxlength blocks typing more."
+  },
+  {
+   "test_case_id": "MB-IND-11",
+   "title": "Follow and then unfollow another user",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/user/otheruser"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "input[type='submit'][value='Follow']"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "You are following otheruser!"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "1 followers"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "input[type='submit'][value='Unfollow']",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "click",
+     "selector_key": "input[type='submit'][value='Unfollow']"
+    },
+    {
+     "step_number": 11,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "You are not following otheruser."
+    },
+    {
+     "step_number": 12,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "0 followers"
+    },
+    {
+     "step_number": 13,
+     "playwright_action": "assert",
+     "selector_key": "input[type='submit'][value='Follow']",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:114-153 and user.html follow/unfollow forms. User 'otheruser' exists (id 2) with 0 followers and is not followed by qaxtester. curl: POST /follow/otheruser -> alert 'You are following otheruser!', '1 followers', Unfollow button; POST /unfollow/otheruser -> 'You are not following otheruser.', '0 followers'. Case restores state."
+  },
+  {
+   "test_case_id": "MB-IND-12",
+   "title": "Explore page beyond the last page shows no posts",
+   "expected_outcome": "PASS",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/explore?page=99"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/explore?page=99"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Hi, "
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "span[id^='post']",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:57-60 db.paginate(..., error_out=False) -> out-of-range page returns 200 with empty list instead of 404; POSTS_PER_PAGE=25 (config.py) and explore has ~13 posts. index.html renders posts as <span id=post{id}>."
+  },
+  {
+   "test_case_id": "MB-NEG-01",
+   "title": "NEGATIVE TWIN: Login with valid credentials lands on the home page",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Hi, "
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "say_something",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "app/auth/routes.py:19-28 login_user then redirect to main.index; index.html:5 renders 'Hi, <username>!' and base.html shows Logout link when authenticated. curl: POST /auth/login with valid creds -> 302 /index; GET /index shows <h1>Hi, qaxtester!</h1> and textarea#post."
+  },
+  {
+   "test_case_id": "MB-NEG-02",
+   "title": "NEGATIVE TWIN: Login with wrong password shows 'Invalid username or password' and stays on login",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "wrong-{{unique}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Invalid username or password"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "login_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "app/auth/routes.py:22-24 flash('Invalid username or password') + redirect to auth.login. curl: POST wrong password -> final URL /auth/login, alert 'Invalid username or password', <h1>Sign In</h1>."
+  },
+  {
+   "test_case_id": "MB-NEG-03",
+   "title": "NEGATIVE TWIN: Logout ends the session and protected home page redirects to login",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "logout_link"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "login_link",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Please log in to access this page.-qax-impossible-zz"
+    }
+   ],
+   "truth_note": "auth/routes.py:33-36 logout_user + redirect to main.index; main/routes.py:27 @login_required -> app/__init__.py:24-25 login_view 'auth.login', message 'Please log in to access this page.'. curl: GET /auth/logout -> 302 /index; then GET /index -> 302 /auth/login?next=%2Findex."
+  },
+  {
+   "test_case_id": "MB-NEG-04",
+   "title": "NEGATIVE TWIN: Anonymous visitor opening /edit_profile is redirected to login",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "next=%2Fedit_profile"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Please log in to access this page."
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "username",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "about_me",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:97-99 @login_required; __init__.py:24-25. curl (no cookies): GET /edit_profile -> 302 http://127.0.0.1:9094/auth/login?next=%2Fedit_profile; following it shows alert 'Please log in to access this page.'. Same for /index, /explore, /user/qaxtester."
+  },
+  {
+   "test_case_id": "MB-NEG-05",
+   "title": "NEGATIVE TWIN: After forced login, user is returned to the originally requested page",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/auth/login"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/edit_profile"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Edit Profile"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "about_me",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "auth/routes.py:25-28: next_page = request.args.get('next'), used if it has no netloc; /edit_profile is relative so redirect goes there. edit_profile.html:5 <h1>Edit Profile</h1>. Verified the login redirect carries next=%2Fedit_profile via curl."
+  },
+  {
+   "test_case_id": "MB-NEG-06",
+   "title": "NEGATIVE TWIN: Submitting a new post shows confirmation and the post on the home timeline",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "fill",
+     "selector_key": "say_something",
+     "value": "QAX post {{unique}}"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Your post is now live!"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "QAX post {{unique}}-qax-impossible-zz"
+    }
+   ],
+   "truth_note": "main/routes.py:30-40 PostForm valid -> Post saved, flash 'Your post is now live!', redirect index; following_posts includes own posts (models.py:166-179). curl: POST /index post=... -> final /index with alert and <span id=post13> containing the text."
+  },
+  {
+   "test_case_id": "MB-NEG-07",
+   "title": "NEGATIVE TWIN: A new post appears on the Explore page",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "fill",
+     "selector_key": "say_something",
+     "value": "QAX explore {{unique}}"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Your post is now live!"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "click",
+     "selector_key": "explore_link"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/explore"
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "QAX explore {{unique}}"
+    },
+    {
+     "step_number": 11,
+     "playwright_action": "assert",
+     "selector_key": "say_something",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:54-67 explore lists all posts newest first, renders index.html without form (so #post absent). curl: after posting, GET /explore contained the new post body."
+  },
+  {
+   "test_case_id": "MB-NEG-08",
+   "title": "NEGATIVE TWIN: Empty post is not accepted",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "say_something",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/index"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "div.alert-info",
+     "assertion_type": "visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/forms.py PostForm.post DataRequired+Length(1,140); rendered textarea#post has 'required minlength=1 maxlength=140' (curl of /index), so the browser blocks the submit; if it reached the server, curl shows 'This field is required.' and no flash. Either way no 'Your post is now live!' alert and URL stays /index."
+  },
+  {
+   "test_case_id": "MB-NEG-09",
+   "title": "NEGATIVE TWIN: Editing 'About me' saves and shows it on the profile page",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "fill",
+     "selector_key": "about_me",
+     "value": "About QAX {{unique}}"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "click",
+     "selector_key": "submit_button"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/edit_profile"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Your changes have been saved."
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "assert",
+     "selector_key": "about_me",
+     "assertion_type": "value",
+     "assertion_value": "About QAX {{unique}}"
+    },
+    {
+     "step_number": 11,
+     "playwright_action": "click",
+     "selector_key": "profile_link"
+    },
+    {
+     "step_number": 12,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "About QAX {{unique}}-qax-impossible-zz"
+    }
+   ],
+   "truth_note": "main/routes.py:97-111 saves about_me, flash 'Your changes have been saved.', redirect to edit_profile; GET pre-fills about_me. user.html:9 shows user.about_me. curl GET /edit_profile showed prefilled textarea and username qaxtester (profile_link targets /user/qaxtester; env user is qaxtester)."
+  },
+  {
+   "test_case_id": "MB-NEG-10",
+   "title": "NEGATIVE TWIN: 'About me' and post fields are limited to 140 characters",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "assert",
+     "selector_key": "textarea#post[maxlength='140']",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/edit_profile"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "textarea#about_me[maxlength='140']",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/forms.py EditProfileForm.about_me Length(0,140), PostForm.post Length(1,140); WTForms renders maxlength=140 (curl: <textarea ... id=about_me maxlength=140> and <textarea ... id=post maxlength=140>). Server side, curl POST of 141-char about_me returns 'Field must be between 0 and 140 characters long.' - not used in the browser case because maxlength blocks typing more."
+  },
+  {
+   "test_case_id": "MB-NEG-11",
+   "title": "NEGATIVE TWIN: Follow and then unfollow another user",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/user/otheruser"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "click",
+     "selector_key": "input[type='submit'][value='Follow']"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "You are following otheruser!"
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "1 followers"
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "input[type='submit'][value='Unfollow']",
+     "assertion_type": "visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 10,
+     "playwright_action": "click",
+     "selector_key": "input[type='submit'][value='Unfollow']"
+    },
+    {
+     "step_number": 11,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "You are not following otheruser."
+    },
+    {
+     "step_number": 12,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "0 followers"
+    },
+    {
+     "step_number": 13,
+     "playwright_action": "assert",
+     "selector_key": "input[type='submit'][value='Follow']",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:114-153 and user.html follow/unfollow forms. User 'otheruser' exists (id 2) with 0 followers and is not followed by qaxtester. curl: POST /follow/otheruser -> alert 'You are following otheruser!', '1 followers', Unfollow button; POST /unfollow/otheruser -> 'You are not following otheruser.', '0 followers'. Case restores state."
+  },
+  {
+   "test_case_id": "MB-NEG-12",
+   "title": "NEGATIVE TWIN: Explore page beyond the last page shows no posts",
+   "expected_outcome": "FAIL",
+   "automation_steps": [
+    {
+     "step_number": 1,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/auth/login"
+    },
+    {
+     "step_number": 2,
+     "playwright_action": "fill",
+     "selector_key": "username",
+     "value": "{{env:QAX_VAR_MB_USER}}"
+    },
+    {
+     "step_number": 3,
+     "playwright_action": "fill",
+     "selector_key": "password",
+     "value": "{{env:QAX_VAR_MB_PASSWORD}}"
+    },
+    {
+     "step_number": 4,
+     "playwright_action": "click",
+     "selector_key": "sign_in_button"
+    },
+    {
+     "step_number": 5,
+     "playwright_action": "navigate",
+     "selector_key": "page",
+     "value": "/explore?page=99"
+    },
+    {
+     "step_number": 6,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "url",
+     "assertion_value": "/explore?page=99"
+    },
+    {
+     "step_number": 7,
+     "playwright_action": "assert",
+     "selector_key": "page",
+     "assertion_type": "text",
+     "assertion_value": "Hi, "
+    },
+    {
+     "step_number": 8,
+     "playwright_action": "assert",
+     "selector_key": "span[id^='post']",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    },
+    {
+     "step_number": 9,
+     "playwright_action": "assert",
+     "selector_key": "logout_link",
+     "assertion_type": "not_visible",
+     "assertion_value": null
+    }
+   ],
+   "truth_note": "main/routes.py:57-60 db.paginate(..., error_out=False) -> out-of-range page returns 200 with empty list instead of 404; POSTS_PER_PAGE=25 (config.py) and explore has ~13 posts. index.html renders posts as <span id=post{id}>."
+  }
+ ]
+}

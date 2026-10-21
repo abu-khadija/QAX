@@ -177,3 +177,58 @@ faster: microblog 6.8 → 8.1 s/case in this run (one run — needs a repeat). T
 when either the network is idle or the requests the action started are done (a first version that only did the
 latter made Memos twice as slow — a long-poll that never finishes; measured and replaced before commit).
 Healthchecks needs `SITE_ROOT=http://127.0.0.1:9091` to start (recorded in start-all.sh and the manifest).
+
+## 2026-10-21 — how strong is the functional engine? Four independent checks
+
+Answering "is functional QA as proven as the scan?" (it was not: same author for engine and truth, no
+real unplanted bug, no mutation testing). Everything below was run on this machine on 2026-10-21.
+
+**1 · Before/after on the same 79 cases** (baseline = commit 6cca1c6, where this work started; same case
+files, same apps, same selectors; the old engine ran first on each app, so it always had clean data).
+Raw: scratchpad compare_results.json → summarized here.
+
+| | before (6cca1c6) | now |
+|---|---|---|
+| correct verdicts | 8/79 | 79/79 (77/79 in the comparison run: eShop ran without its login variables — see below) |
+| healthy cases reported as FAIL (false bugs) | 70/71 | 0/71 |
+| known defects caught | 6/7 (because almost everything failed) | 7/7 |
+| wall time, 79 cases | 2066 s | 464 s |
+
+Why the old engine failed (step-level reasons, demo/PetClinic/eShop): every case ran in the SAME browser
+session (the next case found itself logged in and timed out waiting for the login field); assertions were
+checked before the page updated; raw selectors were wrapped into an invalid `data-testid` selector — and
+each of these was reported as FAIL, i.e. a false bug. Missing credentials made no difference to it.
+
+**Found by this run and fixed:** a `{{env:QAX_VAR_*}}` variable that is not set typed "" and let the
+assertion decide → the case FAILED as if the app were broken (eShop 2 cases). Now the step is ERROR,
+cause environment, naming the variable (test: test_an_unset_env_variable_stops_the_case_as_an_environment_error).
+With the variables set: eShop 10/10, two runs, 0 flips.
+
+**2 · Real, unplanted bugs** (truth = the upstream maintainer's own fix and test, not QAX's author).
+linkding at c633db5 (2026-08-07) has two bugs fixed later upstream: the Tags page's bookmark-count link
+did not open the filtered bookmarks (fix 96c4ef3, #1452) and `/admin/tasks/` was served to anonymous
+visitors (fix 62091c4). Cases translated from the maintainer's tests (evals/data/linkding_realbugs_*):
+old version 3/3 correct (both bugs FAIL at the exact assertion — the URL stayed on /tags and the page
+showed "Content missing"; the anonymous visitor got the tasks page), fixed 1.47.0 3/3 PASS; 2 runs, 0 flips.
+
+**3 · Cases written by an independent author** (a separate agent that never read QAX's engine or other
+case files; it fixed each expected outcome from microblog's source and curl). 12/12 PASS, two runs; 12
+negative twins (last assertion made impossible) 12/12 FAIL — evals/data/microblog_independent_cases.json.
+
+**4 · Mutation testing of the functional engine** (evals/functional_mutants.py, 13 realistic regressions
+in the code that decides a verdict). First sweep on 6 apps: 8/13 killed — the benchmark did not notice
+a broken visibility check, a broken field-value check, assertions without waiting, a crashed step counted
+as a pass, or colliding test data. Added one case per gap (evals/data/ui_demo_depth_cases.json, demo
+`/labels` with unique names, `/delayed?ms=`, `/wizard-spa`). Both demo sets are in the merge gate;
+`make eval-functional-mutants` repeats the sweep (13/13 on demo + depth).
+
+**A real engine bug this found:** the settle wait after a click raced "the requests this click started are
+done" against Playwright's `networkidle` — but that load state is sticky: once reached after the page loaded,
+waiting for it again returns at once, even while the click's fetch is still running. So a slow in-place update
+(Turbo/htmx/SPA, `/wizard-spa`: a 1.5 s fetch that swaps the form) was never waited for and the next step typed
+into the form that was being replaced — a false FAIL. Fixed: wait for the action's own requests (bounded by
+QAX_SETTLE_MAX_MS, default 6 s), no race. Then **all 15 benchmark sets, 125 cases, twice: 125/125 correct, 0
+flips**, no slowdown (memos 11.1 s/case vs 10.7; beszel 11.7 vs 11.7) — output/bench/functional_all_2026-10-21.json.
+
+Limits: n = 11 apps, one machine; the 79 corpus cases are still written by QAX's author (checks 2–3 are
+the independent part); generation by AI is still unmeasured (no credit).

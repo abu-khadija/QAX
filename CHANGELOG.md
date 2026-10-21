@@ -12,6 +12,14 @@ Every scan written with `--out` records the exact version and commit that produc
 - **Per-run cost**: each functional run records its duration and AI calls (≈ USD), each generation its AI usage;
   a scoped meter keeps a run's numbers its own. Non-Claude providers are counted, not priced.
 - **Overview cards**: "Last change → cases run", "Evidence of the last run", "Cost".
+- **Functional mutation testing** (`make eval-functional-mutants`, evals/functional_mutants.py): 13 realistic regressions
+  in the verdict code; the first sweep showed 5 the benchmark missed — one depth case each now (demo
+  `/labels`, `/delayed?ms=`), in the merge gate.
+- **Real upstream bugs in the benchmark**: linkding before two upstream fixes (tag link, unauthenticated
+  `/admin/tasks/`) — both caught; cases from the maintainer's own tests. **Independent-author cases**
+  for microblog (12 + 12 negative twins).
+- **Overview in three groups** (Decide · Investigate · Keep the suite healthy), a **Not tested** card,
+  the pass-rate trend inside Last run, coverage gaps inside Requirements, empty cards as a short checklist.
 - **axe-core 4.13.0** (Deque, MPL-2.0, unmodified, `core/vendor/axe-core/`): `QAX_A11Y=axe` audits every page a
   case visits against WCAG 2.0/2.1/2.2 A/AA; the report names the engine per page. THIRD_PARTY_NOTICES.md.
 - **`make audit-deps`** (pip-audit, dev extra): known vulnerabilities in the environment and requirements.txt —
@@ -19,6 +27,14 @@ Every scan written with `--out` records the exact version and commit that produc
 - **Interfaces and data contracts** for every stage: strategy/intel/PRODUCT_AUDIT_2026-10-20.md §4b.
 
 ### Changed
+- After a click, the browser engine waits for the requests that click started (up to `QAX_SETTLE_MAX_MS`, default
+  6 s) instead of racing Playwright's network-idle state, which is sticky and returned at once: a slow in-place
+  update (Turbo/htmx/SPA) was not waited for and the next step typed into the page being replaced.
+- The web UI shows what was only reachable from `.env` or the command line: an **Accessibility** choice per run
+  (basic / full WCAG 2.2 A/AA with axe-core / off), what every page is also checked for, a **JUnit XML**
+  download, and in Setup how to run QAX in CI and from a coding agent (MCP).
+- A `{{env:QAX_VAR_*}}` variable that is not set stops the step as ERROR (cause environment, the variable
+  named) instead of typing "" — a missing login was reported as a FAIL, i.e. a false bug.
 - AI healing (opt-in) only repairs a moved or renamed element: assertions, outcome checks and failures that are
   not a missing element are never healed; a pass that needed healing carries a `verdict_note`.
 - Jira/Xray calls retry 429/503 with backoff (Retry-After honoured); a create is never re-sent after a 5xx or a

@@ -23,7 +23,7 @@ import re
 _ENV = re.compile(r"ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_RESET|ERR_INTERNET_DISCONNECTED|"
                   r"no answer from the app|net::ERR_ADDRESS_UNREACHABLE|Connection refused|Max retries exceeded|"
                   r"Name or service not known|browser stopped|could not be restarted|worker crashed|"
-                  r"rate-limited|Timeout \d+ms exceeded.*\n.*navigating to", re.I | re.S)
+                  r"rate-limited|QAX_VAR_[A-Z0-9_]+ is not set|Timeout \d+ms exceeded.*\n.*navigating to", re.I | re.S)
 _TEST = re.compile(r"No element named|not in the project's selectors|is not a status code|could not run \(ERROR\)|"
                    r"refused: .* is not the app under test|not evaluated|Action '.*' not recognised|no steps", re.I)
 _APP_ASSERT = re.compile(r"Text mismatch|URL '.*' missing|Expected status \d+, got|Element is (not )?|"

@@ -1,0 +1,147 @@
+{
+  "_comment": "REAL (not planted) defects in linkding, fixed upstream: the truth is the maintainer's own fix and test, not QAX's author. 'fixed' = linkding 1.47.0 (includes both fixes), port 9090. Same steps in both files; only expected_outcome differs.",
+  "test_cases": [
+    {
+      "test_case_id": "LD-RB-0",
+      "title": "Control: valid login opens the bookmarks page (healthy in both versions)",
+      "module": "Auth",
+      "priority": "high",
+      "truth_source": "control \u2014 works in both versions",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/bookmarks",
+          "step_number": 5
+        }
+      ],
+      "expected_outcome": "PASS"
+    },
+    {
+      "test_case_id": "LD-RB-1",
+      "title": "The bookmark count on the Tags page opens the bookmarks filtered by that tag",
+      "module": "Tags",
+      "priority": "medium",
+      "truth_source": "linkding commit 96c4ef3 (#1452) and its E2E test test_bookmark_count_link_opens_bookmarks_filtered_by_tag",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/login/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "username",
+          "value": "{{env:QAX_VAR_LD_USER}}",
+          "step_number": 2
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "password",
+          "value": "{{env:QAX_VAR_LD_PASSWORD}}",
+          "step_number": 3
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "login_button",
+          "step_number": 4
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/bookmarks/new",
+          "step_number": 5
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "url",
+          "value": "https://example.com/qax-rb-{{unique}}",
+          "step_number": 6
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "title",
+          "value": "QAX tagged {{unique}}",
+          "step_number": 7
+        },
+        {
+          "playwright_action": "fill",
+          "selector_key": "tags",
+          "value": "qaxrb{{unique_letters}}",
+          "step_number": 8
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "save_button",
+          "step_number": 9
+        },
+        {
+          "playwright_action": "navigate",
+          "value": "/tags?search=qaxrb{{unique_letters}}",
+          "step_number": 10
+        },
+        {
+          "playwright_action": "click",
+          "selector_key": "tr:has(td:text-is('qaxrb{{unique_letters}}')) a.btn-link[href*='/bookmarks']",
+          "step_number": 11
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/bookmarks?q=%23qaxrb{{unique_letters}}",
+          "step_number": 12
+        },
+        {
+          "playwright_action": "assert",
+          "selector_key": "page",
+          "assertion_type": "text",
+          "assertion_value": "QAX tagged {{unique}}",
+          "step_number": 13
+        }
+      ],
+      "expected_outcome": "PASS"
+    },
+    {
+      "test_case_id": "LD-RB-2",
+      "title": "Background tasks admin page asks an anonymous visitor to log in",
+      "module": "Admin / access control",
+      "priority": "high",
+      "truth_source": "linkding commit 62091c4 and its test test_should_redirect_anonymous_user_to_login",
+      "automation_steps": [
+        {
+          "playwright_action": "navigate",
+          "value": "/admin/tasks/",
+          "step_number": 1
+        },
+        {
+          "playwright_action": "assert",
+          "assertion_type": "url",
+          "assertion_value": "/admin/login/",
+          "step_number": 2
+        }
+      ],
+      "expected_outcome": "PASS"
+    }
+  ]
+}

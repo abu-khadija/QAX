@@ -1045,6 +1045,7 @@ def test_the_project_overview_shows_only_measured_data(client, tmp_path, monkeyp
     d = client.get("/api/overview?project=shop").get_json()
     assert {c["id"] for c in d["cards"]} >= {"last_run", "changes", "requirements", "regression", "app_map", "security"}
     assert all(c["state"] == "empty" for c in d["cards"])
+    assert d["groups"] == [] and {c["id"] for c in d["setup"]} >= {"last_run", "requirements"}  # a checklist, no tiles
     save_requirements("shop", [{"id": "AC-1", "text": "add to basket"}, {"id": "AC-2", "text": "checkout"}],
                       {"by_criterion": {"AC-1": ["T1"], "AC-2": ["T2"]}})
     save_run("shop", "http://shop.local", [{"test_case_id": "T1", "status": "PASS"}, {"test_case_id": "T2", "status": "PASS"}])
@@ -1056,7 +1057,10 @@ def test_the_project_overview_shows_only_measured_data(client, tmp_path, monkeyp
     assert "T2" in cards["changes"]["detail"] and cards["changes"]["value"].startswith("1 newly failing")
     assert cards["requirements"]["value"] == "1/2 criteria passed"
     assert [r["verdict"] for r in cards["requirements"]["rows"]] == ["PASSED", "FAILED"]
-    assert cards["trend"]["points"] == [100, 50]
+    assert cards["last_run"]["points"] == [100, 50]                 # the trend lives in "Last run"
+    groups = client.get("/api/overview?project=shop").get_json()["groups"]
+    assert [g["id"] for g in groups] == ["decide", "investigate"]   # nothing to maintain yet: no group
+    assert "requirements" in [c["id"] for c in groups[0]["cards"]]
     assert client.get("/api/overview").status_code == 400
 
 
@@ -1084,7 +1088,9 @@ def test_overview_cards_for_gaps_flaky_critical_and_readiness(client, tmp_path, 
                                                 "cause": "app"}])
         time.sleep(0.01)
     cards = {c["id"]: c for c in client.get("/api/overview?project=shop").get_json()["cards"]}
-    assert cards["coverage_gaps"]["rows"][0]["id"] == "AC-2"
+    assert "coverage_gaps" not in cards                               # folded into the requirements
+    assert ("AC-2", "NOT COVERED") in [(r["id"], r["verdict"]) for r in cards["requirements"]["rows"]]
+    assert "without a case" in cards["requirements"]["detail"]
     assert [r["id"] for r in cards["flaky"]["rows"]] == ["T2"] and cards["flaky"]["rows"][0]["verdict"] == "FLAKY"
     assert cards["critical"]["rows"][0]["id"] == "T2" and cards["readiness"]["value"] == "Not ready"
     assert client.post("/api/quarantine", json={"project": "shop", "case_id": "T2", "on": True}).status_code == 200

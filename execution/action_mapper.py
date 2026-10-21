@@ -89,7 +89,9 @@ def resolve_step_value(value: str) -> "tuple[str, str]":
 
     Returns:
         (value_to_type, env_name) — env_name is "" when the value is literal. A
-        reference to an unset variable types "" (and the step's assertion decides).
+        reference to an unset variable resolves to "" here; the fill step refuses to
+        type it (ERROR, environment) — a missing password is a setup problem, never a
+        bug in the app (found by the before/after benchmark, 2026-10-21).
     """
     m = _ENV_REF.match(str(value or "").strip())
     if not m:
@@ -221,13 +223,20 @@ async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
     if inflight is None and os.getenv("QAX_SETTLE", "").lower() != "networkidle":
         frame_page = getattr(page, "_page", None)            # a step inside an iframe
         inflight = getattr(frame_page, "_qax_inflight", None)
+    try:
+        own_max = max(idle_ms, int(os.getenv("QAX_SETTLE_MAX_MS", "6000")))
+    except ValueError:
+        own_max = 6000
+
     async def _own_requests_done():
         # only requests the action started (or that began just before it) count: a long-poll or
-        # stream fetch opened earlier never finishes (Memos) and must not hold every step
+        # stream fetch opened earlier never finishes (Memos) and must not hold every step.
+        # Bounded by QAX_SETTLE_MAX_MS (default 6 s): a slow fetch that swaps the page in place
+        # (Turbo/htmx/SPA) is waited for — the next step must not type into the page that is leaving.
         import time as _t
         since = _t.monotonic() - 0.5
         quiet, waited = 0, 0
-        while waited < idle_ms:
+        while waited < own_max:
             if any(t0 >= since for t0 in list(inflight.values())):
                 quiet = 0
             else:
@@ -237,22 +246,16 @@ async def _settle_after_action(page, idle_ms: int = 2_000) -> None:
             await asyncio.sleep(0.05)
             waited += 50
 
-    async def _network_idle():
-        try:
-            await page.wait_for_load_state("networkidle", timeout=idle_ms)
-        except Exception:  # noqa: BLE001
-            await asyncio.sleep(idle_ms / 1000)
-
     if inflight is not None:
-        # whichever says "settled" first: Playwright's network idle (no connection for 500 ms) or
-        # "the requests this action started are done" — an app with a live stream never reaches
-        # network idle (every step waited the full idle_ms on Beszel); never slower than before
-        tasks = [asyncio.ensure_future(_own_requests_done()), asyncio.ensure_future(_network_idle())]
+        # wait for the requests this action started. NOT raced against Playwright's "networkidle":
+        # that load state is sticky — once reached after the page loaded, waiting for it again
+        # returns at once even while the click's fetch is still running, so it always "won" and
+        # a slow in-place update was never waited for (found by the functional mutants, 2026-10-21:
+        # demo /wizard-spa, typing landed in the form that was being replaced)
         try:
-            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED, timeout=idle_ms / 1000 + 0.5)
-        finally:
-            for t in tasks:
-                t.cancel()
+            await asyncio.wait_for(_own_requests_done(), timeout=own_max / 1000 + 0.5)
+        except Exception:  # noqa: BLE001
+            pass
     else:
         try:
             await page.wait_for_load_state("networkidle", timeout=idle_ms)
@@ -1044,6 +1047,12 @@ class ActionMapper:
                 selector = await _resolve_selector()
                 base_result["selector_used"] = selector
                 real_value, from_env = resolve_step_value(value)
+                if from_env and os.getenv(from_env) is None:
+                    base_result.update({"status": "ERROR",
+                                        "actual_result": f"{from_env} is not set — nothing was typed",
+                                        "error": f"environment: {from_env} is not set on the machine running "
+                                                 "QAX (add it to .env or the environment)"})
+                    return base_result
                 if from_env:
                     # a secret goes only to the app under test — never to a page (or an
                     # embedded frame) another origin controls

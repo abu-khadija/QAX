@@ -683,7 +683,8 @@ def execute_tests():
             res = _run_browser(cases, url, project, insecure=on(data.get("insecure", "")),
                                watch=on(data.get("watch", "")), trace=on(data.get("trace", "")),
                                browser=str(data.get("browser", "")), device=str(data.get("device", "")),
-                               workers=workers, visual=on(data.get("visual", "")))
+                               workers=workers, visual=on(data.get("visual", "")),
+                               a11y=str(data.get("a11y", "basic")))
         else:
             token = str(data.get("token", "")).strip()
             res = ExecutionService().execute(cases, mode="api", base_url=url,
@@ -754,7 +755,7 @@ def _browser_busy(_exc):
 
 def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
                  watch: bool = False, trace: bool = False, browser: str = "", device: str = "",
-                 workers: int = 1, visual: bool = False):
+                 workers: int = 1, visual: bool = False, a11y: str = "basic"):
     """
     One browser run at a time: the UI engine reads the target and the selector project
     from the process environment, so they are set — and restored — under a lock.
@@ -762,7 +763,8 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
     """
     from services.execution_service import ExecutionService
     keys = ("APP_BASE_URL", "DEFAULT_PROJECT", "QAX_AI_HEAL", "AUTO_BUG_REPORT", "QAX_INSECURE",
-            "QAX_SLOW_MO_MS", "QAX_STEP_SCREENSHOTS", "QAX_TRACE", "QAX_BROWSER", "QAX_DEVICE", "QAX_WORKERS", "QAX_VISUAL")
+            "QAX_SLOW_MO_MS", "QAX_STEP_SCREENSHOTS", "QAX_TRACE", "QAX_BROWSER", "QAX_DEVICE", "QAX_WORKERS", "QAX_VISUAL",
+            "QAX_A11Y", "QAX_PAGE_QUALITY")
     with _browser_lock():
         saved = {k: os.environ.get(k) for k in keys}
         try:
@@ -779,6 +781,10 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
             os.environ["QAX_DEVICE"] = device if device in ("desktop", "mobile", "mobile-ios", "tablet") else "desktop"
             os.environ["QAX_WORKERS"] = str(max(1, min(int(workers or 1), 4))) if not watch else "1"
             os.environ["QAX_VISUAL"] = "true" if visual else "false"
+            # page checks on every page a case visits: off, basic (built in) or axe (full WCAG A/AA)
+            a11y = a11y if a11y in ("off", "basic", "axe") else "basic"
+            os.environ["QAX_PAGE_QUALITY"] = "false" if a11y == "off" else "true"
+            os.environ["QAX_A11Y"] = "axe" if a11y == "axe" else "basic"
             if project:
                 os.environ["DEFAULT_PROJECT"] = project
             return ExecutionService().execute(cases, mode="ui", headless=not watch)
@@ -788,6 +794,17 @@ def _run_browser(cases: list, url: str, project: str, insecure: bool = False,
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+
+@app.post("/api/junit")
+def junit_route():
+    """The results of a run as JUnit XML (for CI dashboards). The results come from the page; nothing is
+    run or stored."""
+    from core.junit import to_junit
+    data = request.get_json(force=True, silent=True) or {}
+    results = [r for r in (data.get("results") or []) if isinstance(r, dict)][:2000]
+    return Response(to_junit({"results": results}), mimetype="application/xml",
+                    headers={"Content-Disposition": "attachment; filename=qax-junit.xml"})
 
 
 @app.get("/api/artifact")

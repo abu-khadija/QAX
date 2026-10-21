@@ -232,6 +232,8 @@ def test_overview_shows_cost_evidence_and_change_selection_from_saved_runs(monke
     assert cards["evidence"]["rows"][0]["id"] == "T3"
     assert cards["change_selection"]["value"] == "3 run · 1 skipped"
     assert "12.5 s" in cards["cost"]["detail"] and "3 AI call(s)" in cards["cost"]["detail"]
+    assert cards["not_tested"]["value"].startswith("1 case(s) did not run")
+    assert cards["not_tested"]["rows"][0]["id"] == "T3"
 
 
 # ── 6 · healing never hides a regression ─────────────────────────────────────
@@ -319,3 +321,90 @@ def test_the_vendored_axe_core_is_the_published_file_with_its_licences():
     assert "Mozilla Public License" in (folder / "LICENSE").read_text()
     assert (folder / "LICENSE-3RD-PARTY.txt").is_file()
     assert page_quality.AXE_VERSION in page_quality.AXE_PATH.read_text()[:40]
+
+
+# ── 8 · a missing login variable is a setup problem, never a bug in the app ──
+
+
+def test_an_unset_env_variable_stops_the_case_as_an_environment_error(monkeypatch):
+    """Found by the before/after benchmark: eShop ran without its QAX_VAR_* login and two cases
+    came back FAIL — a false bug report. Now: ERROR, cause environment, the variable named."""
+    from core.triage import classify
+    from execution.action_mapper import ActionMapper
+    monkeypatch.delenv("QAX_VAR_NOPE", raising=False)
+    am = ActionMapper.__new__(ActionMapper)
+    am.case_vars, am.selectors = {}, {}
+
+    async def resolve(*a, **k):
+        return "#pw", "exact"
+    am.find_selector_with_fallback = resolve
+
+    class _Page:
+        url = "http://127.0.0.1:1/login"
+        typed = []
+        async def fill(self, sel, val, timeout=0):
+            self.typed.append(val)
+    page = _Page()
+    res = asyncio.run(am.map_and_execute({"playwright_action": "fill", "selector_key": "#pw",
+                                          "value": "{{env:QAX_VAR_NOPE}}", "step_number": 1}, page))
+    assert res["status"] == "ERROR" and "QAX_VAR_NOPE is not set" in res["error"] and page.typed == []
+    case = classify({"status": "ERROR", "steps": [res]})
+    assert case["cause"] == "environment"
+
+
+# ── 9 · functional benchmark integrity ───────────────────────────────────────
+
+
+def test_every_functional_mutant_still_applies_to_exactly_one_place():
+    """A refactor that moves a mutated line must fail here, not turn a mutant into a silent no-op."""
+    from evals.functional_mutants import MUTANTS, ROOT
+    stale = [name for name, rel, old, _new, _why in MUTANTS if (ROOT / rel).read_text().count(old) != 1]
+    assert not stale, stale
+    assert len(MUTANTS) == 13
+
+
+def test_the_real_bug_cases_differ_only_in_their_truth():
+    """Old and fixed linkding run the same steps; only expected_outcome changes, and the truth of each
+    real-bug case names its upstream source."""
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "evals" / "data"
+    old = json.loads((root / "linkding_realbugs_old_cases.json").read_text())["test_cases"]
+    fixed = json.loads((root / "linkding_realbugs_fixed_cases.json").read_text())["test_cases"]
+    strip = lambda cs: [{k: v for k, v in c.items() if k != "expected_outcome"} for c in cs]  # noqa: E731
+    assert strip(old) == strip(fixed)
+    assert [c["expected_outcome"][:4] for c in old] == ["PASS", "FAIL", "FAIL"]
+    assert all(c["expected_outcome"] == "PASS" for c in fixed)
+    assert all("linkding commit" in c["truth_source"] for c in old[1:])
+
+
+# ── 10 · what the UI exposes reaches the engine ──────────────────────────────
+
+
+def test_the_accessibility_choice_in_the_ui_reaches_the_run(monkeypatch, tmp_path):
+    import os
+
+    import services.execution_service as es
+    import web.server as srv
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    class _Res:
+        raw, error = {"results": []}, None
+    monkeypatch.setattr(es.ExecutionService, "execute",
+                        lambda self, *a, **k: seen.append((os.getenv("QAX_A11Y"), os.getenv("QAX_PAGE_QUALITY"))) or _Res())
+    for choice in ("axe", "basic", "off", "junk"):
+        srv._run_browser([{"test_case_id": "T"}], "http://127.0.0.1:1", "p", a11y=choice)
+    assert seen == [("axe", "true"), ("basic", "true"), ("basic", "false"), ("basic", "true")]
+    assert os.getenv("QAX_A11Y") is None                     # restored after the run
+
+
+def test_the_junit_download_turns_ui_results_into_junit(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QAX_API_TOKEN", raising=False)
+    from web.server import app
+    r = app.test_client().post("/api/junit", json={"results": [
+        {"test_case_id": "T1", "title": "ok", "status": "PASS", "steps": []},
+        {"test_case_id": "T2", "title": "broken", "status": "FAIL", "steps": [{"status": "FAIL", "actual_result": "x"}]}]})
+    body = r.get_data(as_text=True)
+    assert r.status_code == 200 and "<testsuite" in body and "T2" in body and "<failure" in body

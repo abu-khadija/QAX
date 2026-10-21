@@ -483,11 +483,13 @@ def _functional_bench_check() -> tuple:
         import tempfile as _tf
         from evals.functional_bench import bench
         out = os.path.join(_tf.mkdtemp(), "bench.json")
-        code = bench(["ui-demo"], repeat=2, out=out)
-        app = _json.loads(open(out).read())["apps"][0]
-        detail = (f"{app.get('correct')}/{app.get('cases')} correct, flips {app.get('flipping_cases')}, "
-                  f"false failures {app.get('false_failure_rate')}, missed {app.get('missed_defect_rate')}")
-        return ("functional QA verdicts == truth (demo app, 2 runs)", code == 0, detail)
+        # ui-demo-depth: one case per engine regression the functional mutants showed (late update,
+        # hidden element, field value, crashed step, colliding test data) — evals/functional_mutants.py
+        code = bench(["ui-demo", "ui-demo-depth"], repeat=2, out=out)
+        apps = _json.loads(open(out).read())["apps"]
+        detail = "; ".join(f"{a.get('name')}: {a.get('correct')}/{a.get('cases')} correct, flips {a.get('flipping_cases')}, "
+                           f"false failures {a.get('false_failure_rate')}, missed {a.get('missed_defect_rate')}" for a in apps)
+        return ("functional QA verdicts == truth (demo app, 2 runs)", code == 0 and len(apps) == 2, detail)
     except Exception as exc:  # noqa: BLE001
         return ("functional QA verdicts == truth (demo app, 2 runs)", False, f"bench crashed: {exc}")
 

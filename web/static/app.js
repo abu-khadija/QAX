@@ -16,7 +16,13 @@ async function toggleSetup(){
     box.innerHTML='<div class="sec-title" style="margin-top:0">Setup on this server</div><div class="hk">'
       +(d.checks||[]).map(c=>icon[c.status]+' <b>'+esc(c.name)+'</b> — '+esc(c.detail)+(c.fix?'<br><span style="color:var(--muted);margin-left:22px">→ '+esc(c.fix)+'</span>':'')).join('<br>')
       +'</div><div class="hint">Settings live in <code>.env</code> next to QAX (secrets never leave this machine and are never shown here). '
-      +'Restart the server after a change. Command line: <code>python main.py doctor</code>.</div>';
+      +'Restart the server after a change. Command line: <code>python main.py doctor</code>.</div>'
+      +'<div class="sec-title">Use QAX outside this page</div><div class="hk">'
+      +'<b>In CI</b> (GitHub Actions, GitLab, Jenkins): <code>python main.py execute --file cases.json --project NAME --base-url $APP_URL --yes --junit qax-junit.xml</code>'
+      +' — the run fails the job when a case fails; ready-made file: <code>ci/github_action_e2e.yml</code>.<br>'
+      +'<b>Only what a change can break</b>: add <code>--changed-since origin/main --repo .</code><br>'
+      +'<b>From a coding agent</b> (Claude Code, Cursor, any MCP client): <code>python main.py mcp</code> — QAX becomes a tool the agent calls to check its own change. Setup: <code>docs/MCP.md</code>.<br>'
+      +'<b>Full accessibility audit from the command line</b>: <code>QAX_A11Y=axe</code>.</div>';
   }catch(e){ box.innerHTML='<div class="hk">⚠️ '+esc(String(e))+'</div>'; }
 }
 async function openArtifact(path){
@@ -251,14 +257,23 @@ async function loadOverview(){
     if(d.error){ box.innerHTML=''; return; }
     const go={run:"$('execpanel').scrollIntoView({block:'start'})",analyze:"$('mapurl').focus()",
               bugs:"($('fqreport')||$('execpanel')).scrollIntoView()",scan:"setMode('scan')"};
-    box.innerHTML='<div class="ovhead"><div class="sec-title" style="margin:0">Project overview · '+esc(d.project)+'</div>'
-      +'<span class="hint" style="margin:0">From saved runs only — nothing invented (AI cost is an estimate from token counts)</span></div><div class="ovgrid">'
-      +d.cards.map(c=>'<div class="ovcard '+esc(c.state)+'"><h4>'+esc(c.title)+'</h4><div class="v">'+esc(c.value)+'</div>'
-        +(c.rows?'<div class="rq">'+c.rows.slice(0,8).map(x=>'<code>'+esc(x.id)+'</code> <b>'+esc(x.verdict)+'</b> '+esc(x.text).slice(0,60)
+    const spark=pts=>{ if(!pts||pts.length<2) return ''; const w=120,h=26,n=pts.length;
+      const xy=pts.map((v,k)=>[(k*(w-4)/(n-1)+2).toFixed(1),(h-2-(v/100)*(h-4)).toFixed(1)]);
+      return '<svg class="spark" viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" role="img" aria-label="pass rate over the last '+n+' runs">'
+        +'<polyline points="'+xy.map(p=>p.join(',')).join(' ')+'"/><circle cx="'+xy[n-1][0]+'" cy="'+xy[n-1][1]+'" r="2.5"/></svg>'; };
+    const card=c=>'<div class="ovcard '+esc(c.state)+'"><h4>'+esc(c.title)+'</h4><div class="v">'+esc(c.value)+'</div>'
+        +(c.points?spark(c.points):'')
+        +(c.rows&&c.rows.length?'<div class="rq">'+c.rows.slice(0,8).map(x=>'<code>'+esc(x.id)+'</code> <b>'+esc(x.verdict)+'</b> '+esc(x.text).slice(0,60)
             +(c.id==='flaky'?' <a href="#" onclick="setQuarantine(\''+esc(x.id)+'\','+(!x.quarantined)+');return false">'+(x.quarantined?'release':'quarantine')+'</a>':'')).join('<br>')+'</div>':'')
-        +'<div class="d">'+esc(c.detail||'')+'</div>'
-        +(c.state==='empty'&&go[c.action]?'<button class="btn2" onclick="'+go[c.action]+'">Start here</button>':'')+'</div>').join('')
-      +'</div>';
+        +'<div class="d">'+esc(c.detail||'')+'</div></div>';
+    const groups=d.groups||[];
+    box.innerHTML='<div class="ovhead"><div class="sec-title" style="margin:0">Project overview · '+esc(d.project)+'</div>'
+      +'<span class="hint" style="margin:0">From saved runs only — nothing invented (AI cost is an estimate from token counts)</span></div>'
+      +groups.map(g=>'<div class="ovgroup"><div class="ovgtitle"><b>'+esc(g.title)+'</b> <span>'+esc(g.hint)+'</span></div>'
+        +'<div class="ovgrid">'+g.cards.map(card).join('')+'</div></div>').join('')
+      +((d.setup||[]).length?'<div class="ovsetup"><b>'+(groups.length?'Not measured yet':'To fill this overview')+'</b><ul>'
+        +d.setup.map(c=>'<li><span>'+esc(c.title)+'</span> — '+esc(c.detail)
+          +(go[c.action]?' <a href="#" onclick="'+go[c.action]+';return false">Start</a>':'')+'</li>').join('')+'</ul></div>':'');
   }catch(e){ box.innerHTML=''; }
 }
 function proveWithScanner(){
@@ -357,9 +372,9 @@ function renderReport(d){
         +esc((byId[r.test_case_id]||{}).title||r.title||r.test_case_id)+'</b> — step '+esc(f.step_number)+': '+esc(f.actual_result||r.error||'failed')
         +(unclear?' <span style="color:var(--p2)">· unclear: the app changed or the case is stale — check the screenshot before filing</span>':'')
         +(r.network_log?' <a href="#" onclick="openArtifact(\''+esc(r.network_log)+'\');return false">network log</a>':'')+'</span></label>'; }).join('')
-      +'<div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px"><select id="fqlang" title="Language of the bugs and the report" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select><button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button>'
+      +'<div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px"><select id="fqlang" title="Language of the bugs and the report" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select><button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button><button class="btn2" onclick="downloadJUnit()" title="For CI dashboards (GitHub Actions, GitLab, Jenkins)">⤓ JUnit XML</button>'
       +'<button class="btn" id="fqbugsbtn" onclick="fileBugs()">⤴ File selected bugs to Jira</button></div><div id="fqbugsout"></div></div>';
-  } else h+='<div class="hk">No failed case. <select id="fqlang" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select> <button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button></div>';
+  } else h+='<div class="hk">No failed case. <select id="fqlang" style="width:auto"><option value="en">English</option><option value="ar">العربية</option></select> <button class="btn2" onclick="downloadE2EReport()">⤓ Report (HTML)</button> <button class="btn2" onclick="downloadJUnit()" title="For CI dashboards (GitHub Actions, GitLab, Jenkins)">⤓ JUnit XML</button></div>';
   box.innerHTML=h; box.style.display='block';
 }
 async function fileBugs(){
@@ -387,6 +402,12 @@ const _RW={en:{title:'Functional QA report',app:'App',passed:'passed',failed:'fa
   verdict:'Verdict',failure:'Failure',covers:'Covers',req:'Requirements',note:'A case that did not fully run is never counted as passed.'},
   ar:{title:'تقرير اختبار وظيفي شامل',app:'التطبيق',passed:'نجح',failed:'فشل',notrun:'لم يُنفَّذ',id:'الرقم',tc:'حالة الاختبار',
   verdict:'النتيجة',failure:'سبب الفشل',covers:'يغطي',req:'المتطلبات',note:'الحالة التي لم تُنفَّذ بالكامل لا تُحسب ناجحة أبدًا.'}};
+async function downloadJUnit(){
+  // the last run's results as JUnit XML, for a CI dashboard (the same file `main.py execute --junit` writes)
+  try{ const r=await api('/api/junit',{method:'POST',headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({results:(window._fqLastRun||{}).results||[]})}); if(!r.ok) return;
+    const a=document.createElement('a'); a.href=URL.createObjectURL(await r.blob()); a.download='qax-junit.xml'; a.click(); }catch(e){}
+}
 function downloadE2EReport(){
   const L=(($('fqlang')||{}).value==='ar')?'ar':'en', W=_RW[L];
   const d=window._fqLastRun||{}, t=window._lastTests||[], when=new Date().toISOString().slice(0,16).replace('T',' ');
@@ -414,7 +435,7 @@ async function runTests(preview){
       body:JSON.stringify({tests:window._lastTests,url,preview,read_only:$('exro').checked,
         engine:$('exengine').value,project:$('mapproj').value.trim(),insecure:$('exinsecure').checked,
         watch:$('exwatch').checked,trace:$('extrace').checked,
-        device:$('exdevice').value,browser:$('exbrowser').value,workers:+$('exworkers').value,visual:$('exvisual').checked,
+        device:$('exdevice').value,browser:$('exbrowser').value,workers:+$('exworkers').value,visual:$('exvisual').checked,a11y:$('exa11y').value,
         changed_since:($('exsince')||{}).value?.trim()||'',repo:($('exrepo')||{}).value?.trim()||'',
         authorized:$('exauth').checked,token:$('extoken').value.trim()})});
     const d=await r.json(); const p=d.plan||{};

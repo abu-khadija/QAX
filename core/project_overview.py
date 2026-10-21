@@ -278,4 +278,53 @@ def build_overview(project: str, config_dir: Path, runs_dir: str, url: str = "")
                       "rows": [{"id": "•", "text": b, "verdict": ""} for b in blockers],
                       "detail": "A rule over the last run, the requirements and the last scan — what QAX did not test "
                                 "is not covered by it.", "action": "run"})
-    return {"project": p, "cards": cards}
+    # 15 · Not tested — what nobody can rely on (cases that did not run, scan checks that could not)
+    if hist or scan:
+        nr_rows = []
+        if hist:
+            last, causes, titles = hist[0]["verdicts"], hist[0].get("causes") or {}, hist[0].get("titles") or {}
+            nr_rows = [{"id": k, "text": (titles.get(k, "") or "")[:50] + (" — " + causes[k] if causes.get(k) else ""),
+                        "verdict": v} for k, v in last.items() if v not in ("PASS", "FAIL")]
+        gaps = len((scan or {}).get("coverage_gaps") or [])
+        cards.append({"id": "not_tested", "title": "Not tested",
+                      "state": "warn" if (nr_rows or gaps) else "ok",
+                      "value": f"{len(nr_rows)} case(s) did not run" + (f" · {gaps} security check(s) did not run" if scan else ""),
+                      "rows": nr_rows[:8],
+                      "detail": "A case that did not run proves nothing either way — the release decision does not "
+                                "cover it. Fix the test or the environment and run it again.", "action": "run"})
+    return _organize(p, cards)
+
+
+# How the overview is read: decide first, then investigate, then keep the suite healthy.
+_GROUPS = [
+    ("decide", "Decide", "Can this build ship?", ("readiness", "critical", "requirements", "security")),
+    ("investigate", "Investigate", "What happened in the last run, and why?",
+     ("last_run", "changes", "not_tested", "evidence", "change_selection")),
+    ("maintain", "Keep the suite healthy", "Things that drift if nobody looks.",
+     ("flaky", "regression", "app_map", "cost")),
+]
+
+
+def _organize(project: str, cards: list) -> dict:
+    """
+    Fold duplicates and group the cards: the pass-rate trend becomes part of "Last run", coverage
+    gaps are already the requirements' NOT COVERED rows, and a card with no data yet moves to a
+    short setup checklist instead of taking a tile. Returns {"project", "groups", "setup", "cards"}.
+    """
+    by_id = {c["id"]: c for c in cards}
+    trend, gaps = by_id.pop("trend", None), by_id.pop("coverage_gaps", None)
+    if trend and "last_run" in by_id:
+        by_id["last_run"]["points"] = trend.get("points")
+        by_id["last_run"]["detail"] += f" · pass rate over the last runs: {trend.get('detail', '')}"
+    if gaps and gaps.get("rows") and "requirements" in by_id:
+        by_id["requirements"]["detail"] += f" · {gaps['value']} — write one each (step 3)."
+    setup = [{"id": c["id"], "title": c["title"], "detail": c.get("detail", ""), "action": c.get("action")}
+             for c in by_id.values() if c.get("state") == "empty"]
+    groups = []
+    for gid, title, hint, ids in _GROUPS:
+        g = [dict(by_id[i], group=gid) for i in ids if i in by_id and by_id[i].get("state") != "empty"]
+        if g:
+            groups.append({"id": gid, "title": title, "hint": hint, "cards": g})
+    flat = [c for g in groups for c in g["cards"]] + [dict(c, group="setup") for c in by_id.values()
+                                                      if c.get("state") == "empty"]
+    return {"project": project, "groups": groups, "setup": setup, "cards": flat}

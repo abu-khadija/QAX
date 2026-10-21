@@ -36,6 +36,9 @@
       <div class="mt">▶️ Functional QA (E2E)</div>
       <div class="md">Give it your app's URL, repo and user stories → it understands them, writes the test
         cases, <b>runs them end to end</b>, reports what it found and files the bugs to Jira.</div>
+      <div class="md gets">Each run: a verdict per case and per acceptance criterion · screenshots, network log and trace ·
+        why a case failed (app, test or environment) · accessibility and performance of every page ·
+        only the cases a code change can affect · Chromium, Firefox, WebKit, phone and tablet.</div>
     </button>
   </div>
 
@@ -214,9 +217,21 @@
         <div class="field" style="flex:1;min-width:140px"><label for="exworkers">In parallel</label>
           <select id="exworkers"><option value="1">1 browser</option><option value="2">2 browsers</option><option value="4">4 browsers</option></select></div>
       </div>
-      <label class="consent" for="exvisual"><input type="checkbox" id="exvisual">
-        <span><b>Compare screens with the last run</b> (visual regression — a changed screen is a lead to look at,
-          not a failure; the first run saves the baselines).</span></label>
+      <fieldset class="pagechecks">
+        <legend>Also checked on every page a case visits</legend>
+        <div class="hint" style="margin:0 0 8px">Observations next to the verdicts — they never turn a pass into a fail.
+          Always recorded: <b>performance</b> (load time, Largest Contentful Paint, layout shift) and
+          <b>page errors</b> (JavaScript errors, failed API calls), plus a <b>network log</b> for every case that does not pass.</div>
+        <div class="field" style="max-width:420px"><label for="exa11y">Accessibility</label>
+          <select id="exa11y">
+            <option value="basic">Basic checks — alt text, labels, names, contrast, headings (fast)</option>
+            <option value="axe">Full WCAG 2.2 A/AA audit — axe-core (about 100 rules)</option>
+            <option value="off">Off — no accessibility or performance checks</option>
+          </select></div>
+        <label class="consent" for="exvisual"><input type="checkbox" id="exvisual">
+          <span><b>Compare screens with the last run</b> (visual regression — a changed screen is a lead to look at,
+            not a failure; the first run saves the baselines).</span></label>
+      </fieldset>
       <label class="consent" for="exwatch"><input type="checkbox" id="exwatch">
         <span><b>Watch it run.</b> Opens a visible browser on this machine and slows it down so you can follow every
           step (browser engine).</span></label>

@@ -157,9 +157,13 @@ def stream():
 
 @app.get("/delayed")
 def delayed():
-    """The confirmation appears 800 ms after the click — no page navigation."""
-    return _page("Delayed", """<button id="save-btn" onclick="setTimeout(()=>{
-  document.getElementById('status').innerText='Saved!'}, 800)">Save</button>
+    """The confirmation appears 800 ms (or ?ms=…, at most 4000) after the click — no page navigation."""
+    try:
+        ms = max(0, min(int(request.args.get("ms", "800")), 4000))
+    except ValueError:
+        ms = 800
+    return _page("Delayed", f"""<button id="save-btn" onclick="setTimeout(()=>{{
+  document.getElementById('status').innerText='Saved!'}}, {ms})">Save</button>
 <p id="status"></p>""")
 
 
@@ -190,6 +194,63 @@ def add_user():
     return _page("Add user", """<h1>Add user</h1><form method="post" action="/add-user">
 <input name="username" type="text"><input name="password1" type="password">
 <input name="password2" type="password"><button type="submit">Save</button></form>""")
+
+
+_LABELS: list = []
+
+
+@app.route("/wizard", methods=["GET", "POST"])
+def wizard():
+    """Two steps; step 1 answers slowly (1.5 s, like a slow API) and both steps have a #name field.
+    A tool that acts right after the click types into the page that is leaving, and the value is lost."""
+    import time as _t
+    if request.method == "POST":
+        _t.sleep(1.5)
+        return _page("Wizard step 2", """<h1>Step 2</h1><form method="post" action="/wizard/confirm">
+<input id="name" name="name"><button id="confirm" type="submit">Confirm</button></form>""")
+    return _page("Wizard step 1", """<h1>Step 1</h1><form method="post" action="/wizard">
+<input id="name" name="draft" value="draft"><button id="next" type="submit">Next</button></form>""")
+
+
+@app.get("/wizard-spa")
+def wizard_spa():
+    """The same two steps, but step 2 arrives by fetch() (1.5 s) and replaces the form in place — no
+    navigation, as in Turbo/htmx/SPA apps. Only a wait for the click's own request gets this right."""
+    return _page("Wizard (in place)", """<div id="box"><h1>Step 1</h1>
+<input id="name" value="draft"><button id="next" type="button" onclick="fetch('/wizard-step2').then(r=>r.text()).then(h=>{document.getElementById('box').innerHTML=h})">Next</button></div>""")
+
+
+@app.get("/wizard-step2")
+def wizard_step2():
+    """Step 2's markup, after a slow answer."""
+    import time as _t
+    _t.sleep(1.5)
+    return """<h1>Step 2</h1><form method="post" action="/wizard/confirm"><input id="name" name="name">
+<button id="confirm" type="submit">Confirm</button></form>"""
+
+
+@app.post("/wizard/confirm")
+def wizard_confirm():
+    """Shows what step 2 received."""
+    return _page("Done", f'<p id="done">Confirmed: {html.escape(request.form.get("name", ""))}</p>')
+
+
+@app.route("/labels", methods=["GET", "POST"])
+def labels():
+    """Labels must have unique names (like most apps' tags, usernames, project keys): a duplicate
+    is refused. A run whose test data is not unique collides here (functional mutants)."""
+    msg = ""
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        if not name:
+            msg = '<p id="label-msg">Name is required</p>'
+        elif name in _LABELS:
+            msg = '<p id="label-msg">A label with this name already exists</p>'
+        else:
+            _LABELS.append(name)
+            msg = f'<p id="label-msg">Label created: {html.escape(name)}</p>'
+    return _page("Labels", f"""<h1>Labels</h1>{msg}
+<form method="post" action="/labels"><input id="label-name" name="name"><button id="label-save" type="submit">Create</button></form>""")
 
 
 @app.get("/_posts")
