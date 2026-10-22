@@ -10,11 +10,22 @@ where things are, and what is open. Read section 1 first: **some of the work is 
 | | |
 |---|---|
 | Branch | `feat/functional-qa-track` (all work since 2026-10-19 is here) |
-| Last commit | see `git log -1` — the handover commit, after `c8e2860` |
-| On GitHub? | **No.** The branch has never been pushed (by agreement: no push without the owner). `main` on GitHub is still at `6cca1c6`. |
+| Last commit | see `git log -1` — the handover commit, after `ae0b3d9` |
+| On GitHub? | **No.** The branch has never been pushed (by agreement: no push without the owner). `main` on GitHub is still at `0be95d4`. |
 | Tests | 1020 passed, 4 skipped on the last full run; one mutant guard fixed afterwards (it passes on its own; **re-run the full suite once on the new machine**) |
 | Gate | `make eval` → GATE: PASS |
 | Benchmarks | functional 125/125 on 15 sets (×2); release check 4/4; bug reproduction 6/6; functional mutants 13/13; scan 32/32, 0 FP, mutants 40/40 |
+
+**History rewritten on 2026-10-22.** Everything related to the former employer was removed from **every**
+commit with `git filter-repo`. The current tree is byte-identical (tree `b84ecc1`), so all commit IDs changed:
+`docs/COMMIT_MAP_2026-10-22.txt` maps old IDs to new ones. The evidence documents and run records already use
+the new IDs.
+
+**GitHub was NOT cleaned.** `abu-khadija/QAX` was not reachable with this machine's stored credential ("Repository not
+found"). If that repository still exists, its `main` and `feat/service-layer-and-reliability-fix` branches hold the
+**old** history. Either delete the repository on GitHub yourself, or log in and replace those two branches with the
+clean ones (`git push --force origin main feat/service-layer-and-reliability-fix`). The original history is kept
+only in the private legal archive outside the repo.
 
 ## 2. Move the code (pick one)
 

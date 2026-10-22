@@ -23,7 +23,7 @@ without breaking anything. No number, no merge.
 - Test generation: works (code/story/jira/pr → cases → Xray/Zephyr/Excel). On-ramp.
 - Filing to Jira/Xray: built, DRY_RUN default, waiting on real credentials.
 - UI: one-platform restructure done. CI PR-scan gate built. Pitch deck exists.
-- **PR #1 merged to main** (2026-10-13, merge commit 95322b2).
+- **PR #1 merged to main** (2026-10-13, merge commit 37ff764).
 - Scanner: **28 deterministic probes**; suite **348 passed**, 3 skipped; the gate (quick
   + deep) is green. Work lands directly on `main` (owner's call; harness blocks PR merges).
 - **2026-10-15:** 34 probes; suite **449 passed**; gate green. B4 now **3 real apps** (+Gitea,
@@ -75,7 +75,7 @@ below (self-hardening S, blind-spot B). Rule unchanged: one item at a time, each
 18. ✅ **KB mining batch 1+2 (files 05, 11, 12, 14)** — not-tested ledger, 5 spec-typed probes,
     13-field Jira Bug + `--client-safe` + evidence attachment, `--reverify N` (measured X/X),
     read-back retry, grouped gaps, data-state ledger. (40 probes, suite 527.)
-19. ✅ **`qax verify-fixes` (Q3, step 1 — close the loop) — DONE 2026-10-15 (24436a4)** — re-check filed findings →
+19. ✅ **`qax verify-fixes` (Q3, step 1 — close the loop) — DONE 2026-10-15 (4341b44)** — re-check filed findings →
     FIXED / STILL REPRODUCES / COULD NOT TEST (the not-tested ledger decides the third bucket;
     a probe that merely stopped firing is NOT clearance). Never closes as Duplicate, no
     comment on unfixed, per-batch approval, record a build fingerprint (Last-Modified/ETag/root
@@ -218,7 +218,7 @@ Overlapping Phase-2/3 items are absorbed here.
       issue + one real test exist in a trial project, with screenshots in `strategy/`.
       (Absorbs Phase-2 Jira.)
       **Bug half DONE:** owner's free Jira Cloud (team-managed project SCRUM). First
-      contact exposed 5 gaps, all fixed (commit a839a44): `priority` sent though not
+      contact exposed 5 gaps, all fixed (commit 085b21b): `priority` sent though not
       on a team-managed Bug screen (→ would 400) — now screen-aware; live mode demanded
       Xray creds for a plain Bug; fake dry run; no de-dup; one-line bug body. New
       `core/jira_bugs.py` + `qax file-findings`, bug body in the owner's compact QA

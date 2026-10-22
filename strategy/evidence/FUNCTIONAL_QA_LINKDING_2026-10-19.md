@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| QAX | branch `feat/functional-qa-track` (after `3fd62d4`), Playwright 1.44 + headless Chromium |
+| QAX | branch `feat/functional-qa-track` (after `851c0c7`), Playwright 1.44 + headless Chromium |
 | Target | linkding **1.47.0** (MIT), `git clone --depth 1` of `sissbruecker/linkding` at `27b7303`, Django `runserver` on 127.0.0.1:9090, SQLite, one local test user |
 | Authorization | local copy, run by the operator on their own machine |
 | Engine | browser (`main.py execute --project linkding`), AI healing **off**, no AI calls |

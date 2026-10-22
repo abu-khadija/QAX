@@ -183,11 +183,11 @@ Healthchecks needs `SITE_ROOT=http://127.0.0.1:9091` to start (recorded in start
 Answering "is functional QA as proven as the scan?" (it was not: same author for engine and truth, no
 real unplanted bug, no mutation testing). Everything below was run on this machine on 2026-10-21.
 
-**1 · Before/after on the same 79 cases** (baseline = commit 6cca1c6, where this work started; same case
+**1 · Before/after on the same 79 cases** (baseline = commit 0be95d4, where this work started; same case
 files, same apps, same selectors; the old engine ran first on each app, so it always had clean data).
 Raw: scratchpad compare_results.json → summarized here.
 
-| | before (6cca1c6) | now |
+| | before (0be95d4) | now |
 |---|---|---|
 | correct verdicts | 8/79 | 79/79 (77/79 in the comparison run: eShop ran without its login variables — see below) |
 | healthy cases reported as FAIL (false bugs) | 70/71 | 0/71 |

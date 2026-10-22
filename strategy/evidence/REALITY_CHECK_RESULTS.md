@@ -23,7 +23,7 @@ only (3.4 needed → railsgoat skipped), Docker ✗ (docker-only apps skipped).
 - **Leads (P3): 1** — missing response security headers (legitimate, minor).
 - Auth works (QAX self-registered: created 3 test records), stable across 3 runs.
 
-### Gaps the reality-check surfaced in QAX — and fixed (commit d125319)
+### Gaps the reality-check surfaced in QAX — and fixed (commit 411986a)
 1. **Wrapped request bodies unsupported.** RealWorld wraps every body in
    `{"user":{...}}` / `{"article":{...}}`. QAX sent flat bodies → 422 → could not
    register → every authenticated probe silently skipped. Before the fix, "0
@@ -59,7 +59,7 @@ only (3.4 needed → railsgoat skipped), Docker ✗ (docker-only apps skipped).
 - **Confirmed P1/P2: 0** — zero false alarms on well-written Go.
 - **Leads (P3): 2** — no login rate-limiting, missing security headers (both legit).
 
-### Gap surfaced + fixed (commit 9f6bcf9)
+### Gap surfaced + fixed (commit 2079e07)
 - **QAX couldn't read non-Python/JS source at all.** The model builder's extension
   allow-list was `{.py .ts .tsx .js .jsx}`, so a Go repo gave "No source files found"
   and scanned nothing — despite QAX being advertised as language-generic. Widened to
@@ -97,7 +97,7 @@ and only legitimate low-severity leads — strong "doesn't cry wolf" evidence.
 - **Auth now works (created 2)** and the full probe set runs: **0 confirmed P1/P2**,
   1 legit lead (missing CSP). Stable across runs.
 
-### Gap #4 surfaced — and fixed (commit 7333685)
+### Gap #4 surfaced — and fixed (commit 21a6cf9)
 - **Base-path + body-wrapper recovery when there is no OpenAPI.** This app has no
   springdoc, is served with controllers at root, wraps bodies (`UNWRAP_ROOT_VALUE`),
   and — crucially — uses Spring Security, which answers **401 for unmatched paths**.
@@ -195,8 +195,8 @@ twin flagged). The full journey on this target: **1 → 3 → 6 classes**.
 | stored-xss | ❌ | needs write→read pairing (no stored-XSS probe yet) |
 | zip-slip | ❌ | niche; hard to confirm deterministically without filesystem access |
 
-Commits: `bae15f7` (command-injection), `c137320` (SSRF), `71fb23d` (XSS), plus
-`8ff6b12` (path-traversal query params + per-endpoint CORS).
+Commits: `d5a8edb` (command-injection), `067f726` (SSRF), `c65375c` (XSS), plus
+`2ec0346` (path-traversal query params + per-endpoint CORS).
 
 **Remaining backlog:** blind/boolean SQLi (content-differential), stored XSS
 (write→read), zip-slip. **Precision held at 0 false positives throughout** — every
@@ -221,8 +221,8 @@ A single full ProbeService scan can't demonstrate all 7 at once here because go-
 SQLi login handler does `defer db.Close()` on the shared connection, breaking later
 probes — a target bug, not a QAX one.
 
-Probe commits: `bae15f7` cmd-injection, `c137320` SSRF, `71fb23d` reflected-XSS,
-`73075ff` blind-SQLi, `fd29ca4` stored-XSS, `8ff6b12` path-traversal+CORS.
+Probe commits: `d5a8edb` cmd-injection, `067f726` SSRF, `c65375c` reflected-XSS,
+`c2fe0e5` blind-SQLi, `42b81bb` stored-XSS, `2ec0346` path-traversal+CORS.
 
 **Honest verdict on recall:** QAX's deterministic probes are precise (0 FP, no safe
 twin flagged) but **narrow** — they caught 1 of 9 vuln classes on this target. The

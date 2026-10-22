@@ -126,7 +126,7 @@ class BugFetcher:
 
         # ── Build JQL query ────────────────────────────────────────────────
         # TODO: Adjust the label format if your Jira uses different naming
-        #       (e.g., "tracker" vs "Orders" vs "SHOP-Orders")
+        #       (e.g., "orders" vs "Orders" vs "SHOP-Orders")
         jql = (
             f'project="{self.project_key}" '
             f'AND issuetype=Bug '

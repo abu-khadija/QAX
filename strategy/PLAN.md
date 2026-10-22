@@ -2,10 +2,10 @@
 
 **Status:** Revised draft for founder review  
 **Updated:** 2026-10-17  
-**Verified baseline reported by founder:** commit 436d039  
+**Verified baseline reported by founder:** commit fc867d6  
 **Purpose:** Single execution plan and status/decision log for reaching a public SaaS launch.
 
-> Evidence note: the run results in this plan were supplied by the founder as verified on commit 436d039. They have not been rerun by this reviewer in this session. Keep the evidence attached to the commit and update this plan at every phase gate.
+> Evidence note: the run results in this plan were supplied by the founder as verified on commit fc867d6. They have not been rerun by this reviewer in this session. Keep the evidence attached to the commit and update this plan at every phase gate.
 
 ## 1. Goal and product boundary
 
@@ -21,7 +21,7 @@ For now, keep the product claim narrow: a self-hosted scanner that runs determin
 
 ## 2. Current evidence baseline
 
-The following is the founder’s report of runs against commit 436d039 on 2026-10-17:
+The following is the founder’s report of runs against commit fc867d6 on 2026-10-17:
 
 - Test suite: 768 passed, 3 skipped. The merge gate, make eval, passed.
 - Golden target: 32 documented planted bugs; recall 32/32 and zero false positives. Its SECURE twin stayed silent for every probe.
@@ -95,7 +95,7 @@ The following is the founder’s report of runs against commit 436d039 on 2026-1
 **Exit criteria**
 
 - The current test suite and make eval pass on the release candidate; preserve commit-level output.
-- Golden and SECURE controls pass; mutation evidence records the last full sweep (40/40 on 4c2fabd, source lane included — see §9).
+- Golden and SECURE controls pass; mutation evidence records the last full sweep (40/40 on 7648b2c, source lane included — see §9).
 - Read-only regression still measures zero write requests; per-run ledger agrees with server-side method counts.
 - Spec-less discovery reports its known coverage limits and passes a documented regression corpus.
 - SQL/NoSQL and other ambiguous truth cases cannot be silently accepted by substring overlap.
@@ -283,7 +283,7 @@ These references support the security and operating principles; review current g
 
 ## 9. Status and decision log
 
-**As of 2026-10-17, based on founder-reported runs at 436d039:**
+**As of 2026-10-17, based on founder-reported runs at fc867d6:**
 
 | Area | Status | Evidence / decision |
 |---|---|---|
@@ -291,7 +291,7 @@ These references support the security and operating principles; review current g
 | Merge gate | Done | make eval passed |
 | Golden target | Done | 32 documented planted bugs; recall 32/32; zero false positives |
 | SECURE twin | Done | All probes stayed silent |
-| Mutation coverage | Done, refreshed 2026-10-19 (40/40 on branch feat/functional-qa-track, after the functional-QA work) — earlier: refreshed 2026-10-17 | A full sweep at commit ~f8c31f8 (all lanes incl. the source lane) detected a lost CONFIRMED finding for **40/40** disabled probes (`make eval-mutants`). Later commits (CLI fix, catch-all discovery, web UI) did not touch probe logic; re-run before the next release |
+| Mutation coverage | Done, refreshed 2026-10-19 (40/40 on branch feat/functional-qa-track, after the functional-QA work) — earlier: refreshed 2026-10-17 | A full sweep at commit ~7dc7243 (all lanes incl. the source lane) detected a lost CONFIRMED finding for **40/40** disabled probes (`make eval-mutants`). Later commits (CLI fix, catch-all discovery, web UI) did not touch probe logic; re-run before the next release |
 | Read-only | Done | Zero added write requests on golden target; prior check caught 74 leaked POSTs |
 | Quick-scan AI boundary | Done | Local listener saw zero provider calls after fix, including with API key set |
 | Real applications | **10 of 10 (2026-10-17)** | Apps 1–5 as before; 6–10 (Healthchecks, microblog-api, CTFd, linkding, PocketBase) in `strategy/evidence/PHASE1_CORPUS_2026-10-17.md`: 8 confirmed findings in the final scans, 8 true positives (each re-checked by hand), 0 FP. 4 false positives were produced on the way (one a P1) and fixed with regression tests. n = 10, local, one author: not a general rate |
@@ -327,7 +327,7 @@ These references support the security and operating principles; review current g
 - **A deliberate rule, learned the hard way:** read the gate result BEFORE committing. One commit this day was pushed with a failing gate (BOLA/persistence missed on the golden target) because the commands were chained; it was repaired in the next commit.
 - **Two regressions I introduced and the gate did not see, both found by running the product as a user would:** (1) the cookie/CSRF commit broke `--out` for every scan without credentials and therefore `qax demo` (an import inside an `if`); (2) putting the operator's cookie on the test runner's session turned "anonymous request is rejected" tests into false P1s. Both fixed with regression tests; the gate now runs the real CLI end to end.
 - **Real-app audits against the app's own database** corrected QAX's "left on the target" in both directions (over-reporting twins and under-reporting untracked writes and unverified deletes) until report and database matched exactly on microblog-api, linkding, CTFd, Healthchecks and PocketBase.
-- **Exit criteria still open in Phase 1:** (a) a new user finishes the Quickstart unaided (needs people: Phase 0 demos and the alpha); (b) login-form authentication is not supported (documented); (c) cookie mode has one identity only, so BFLA/BOLA are NOT TESTED there (documented); (d) the mutation sweep was re-run on commit 4c2fabd: 40/40 probes DETECTED (disabling any probe loses a CONFIRMED finding on the gate), 0 ledger-only, 0 noisy.
+- **Exit criteria still open in Phase 1:** (a) a new user finishes the Quickstart unaided (needs people: Phase 0 demos and the alpha); (b) login-form authentication is not supported (documented); (c) cookie mode has one identity only, so BFLA/BOLA are NOT TESTED there (documented); (d) the mutation sweep was re-run on commit 7648b2c: 40/40 probes DETECTED (disabling any probe loses a CONFIRMED finding on the gate), 0 ledger-only, 0 noisy.
 - **Odd-origin checks (2026-10-17):** a dead port exits 1 (not a clean scan); a self-signed https target exits 1 with a hint, and works with `--insecure`; the golden app mounted under a `/myapp` prefix (behind a dispatcher with a 404 root) gives the same 34 endpoints and the same 15 confirmed findings as the root mount. Not tested: a reverse proxy that rewrites paths or redirects between hosts.
 - **Idea logged, not built:** `--examples FILE` of valid request bodies, to unblock apps whose creates need domain data QAX cannot guess (CTFd).
 

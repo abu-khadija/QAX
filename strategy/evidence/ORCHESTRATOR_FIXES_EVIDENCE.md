@@ -1,7 +1,7 @@
 # Orchestrator Reliability Fixes — Before/After Evidence
 
 The 7 orchestrator-weakness fixes (branch `feat/service-layer-and-reliability-fix`,
-commits `5512078`, `f0bb32e`, `04f7033`, `d8aa04b`, `8e1c3b3`) were measured, not
+commits `3f8ec32`, `dabfabb`, `36f805d`, `79525e6`, `449c871`) were measured, not
 asserted. The agreed discipline: *a change that can't be shown to improve things
 without breaking others doesn't get merged.* This is the evidence.
 
@@ -15,10 +15,10 @@ Date: 2026-10-13. Full suite at the time: **321 passed, 3 skipped.**
 endpoints decode the JWT **without verifying the signature** — so a forged token is
 accepted everywhere. Three protected GET endpoints: `/me`, `/admin/users`,
 `/billing/invoices`. The identical **quick scan** (zero-LLM, deterministic) was run
-against the running target twice: once on the pre-fix commit `3bdb314`, once on the
-post-fix tip `8e1c3b3`.
+against the running target twice: once on the pre-fix commit `01d2f64`, once on the
+post-fix tip `449c871`.
 
-| | BEFORE (`3bdb314`) | AFTER (`8e1c3b3`) |
+| | BEFORE (`01d2f64`) | AFTER (`449c871`) |
 |---|---|---|
 | Confirmed bugs | **3** | **5** |
 | `jwt-flaws` on `/admin/users` | yes | yes |

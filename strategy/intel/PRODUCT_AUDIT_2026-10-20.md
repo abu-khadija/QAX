@@ -32,7 +32,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | Capability | State | Evidence |
 |---|---|---|
 | Security scan (deterministic probes, control requests) | ✅ verified | evals/gate.py, PLAN §9, 10 apps |
-| Browser E2E execution (Chromium, Firefox, WebKit, mobile emulation, iframes, shadow DOM) | ✅ verified — 2026-10-21: 2 real upstream bugs caught (linkding), 24/24 on cases by an independent author, 13/13 functional mutants killed, 79/79 vs 8/79 for the engine at 6cca1c6 | tests/test_browser_engine.py, corpus, strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md (2026-10-21) |
+| Browser E2E execution (Chromium, Firefox, WebKit, mobile emulation, iframes, shadow DOM) | ✅ verified — 2026-10-21: 2 real upstream bugs caught (linkding), 24/24 on cases by an independent author, 13/13 functional mutants killed, 79/79 vs 8/79 for the engine at 0be95d4 | tests/test_browser_engine.py, corpus, strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md (2026-10-21) |
 | Reading an app from its URL (`map`) | ✅ verified | 10-app corpus; 6 reader defects found by Java/Angular/.NET apps, fixed |
 | API execution | ✅ verified | test_api_runner_egress.py, gate |
 | Traceability (criteria → cases → verdicts) | ✅ deterministic part; ⚠️ the `Covers:` tag depends on the model | tests; live model not run |
@@ -62,7 +62,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | S5 | P2 | Concurrent web jobs could swap credentials through process env | mapper set APP_* without the browser lock | the reader runs under the browser lock | web tests |
 | S6 | P2 | AI provider: key sent in two headers, redirects followed, plain http allowed | ai_provider.py | one header; no redirects; https unless loopback | test_inputs_cannot_reach_secrets… |
 | S7 | P2 | Repo input: hidden folders (~/.ssh) could be sent to the AI; http clones; MCP cases_file any path | functional.py, mcp_server.py | hidden folders refused, QAX_REPO_ROOTS, https only, no git redirects, workspace-only cases_file | same test |
-| B1 | P1 | **The web UI's JavaScript was broken in commit 65403f7** (an apostrophe in a string) — every Python test passed | node parse | fixed + test_the_ui_javascript_parses | test |
+| B1 | P1 | **The web UI's JavaScript was broken in commit 574b30c** (an apostrophe in a string) — every Python test passed | node parse | fixed + test_the_ui_javascript_parses | test |
 | B2 | P1 | Zephyr Cloud users were sent to the Server v1 path | zephyr_adapter.py | Cloud v2 by default, Server via ZEPHYR_SERVER (unverified live) | payload test |
 | B3 | P2 | History reader treated any JSON in the folder as a run | run_history.py | only time-named run files | overview test |
 | B4 | P2 | Weak tests (`assert … or True`), stale model ids, wrong "valid commands" list | inventory | fixed | tests |
@@ -76,7 +76,7 @@ the strategy behind the next stage. Competitor facts: [COMPETITORS_2026-10-20.md
 | S2 | the operator's real password typed into a phishing page during `map` | an app link or `/login` that 302s to another host | landed URL never re-checked; login on any page with a password field | off-origin pages skipped and listed; login only on the app's origin; attacker server gets no POST |
 | S3 | any local web page (incl. the app under test) can launch an active, non-read-only scan of any URL from the operator's machine | `<img src="http://localhost:8900/api/scan/stream?url=…&authorized=true&read_only=false">` on a localhost page | GET allowed; "same-site" not refused | GET from a browser page refused (403); curl/no-browser GET still answers |
 | S4 | secrets readable by anyone who gets a trace file (attached to Jira, shared folder) | `--trace` + a case with `{{env:}}` → `unzip -p trace.zip \| grep secret` | Playwright traces record typed values | no trace kept for such cases; others 0600 |
-| B1 | the whole web UI non-functional for anyone on that commit | open `/app` at 65403f7 → no button works | an apostrophe in a single-quoted JS string; no test parsed the JS | `node` parse test in the suite |
+| B1 | the whole web UI non-functional for anyone on that commit | open `/app` at 574b30c → no button works | an apostrophe in a single-quoted JS string; no test parsed the JS | `node` parse test in the suite |
 | B2 | Zephyr Cloud users: export silently fails (wrong API) | export with a Cloud token | Server v1 path used for Cloud | Cloud v2 by default; Server via `ZEPHYR_SERVER`; payload test (live unverified) |
 | U1 | a user trusts the wrong number ("37 could not run" vs "14 skipped") — doubts the product | read-only scan of the gate target | plan counted fully-skipped checks; the result listed partly-run checks as "could not run" | wording distinguishes "skipped entirely" from "not fully tested (N ran in part)" |
 | U2 | a team that loads its own browser cases is told they cannot run in the UI | load a browser-cases JSON → Preview run | engine stayed HTTP | engine picked from the cases; reasons name the UI fix |
