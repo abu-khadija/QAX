@@ -12,8 +12,9 @@ where things are, and what is open. Read section 1 first.
 | Branch | `feat/functional-qa-track` (all work since 2026-10-19 is here) |
 | Last commit | see `git log -1` (after `bcd61fd`, the Windows fixes) |
 | On GitHub? | **Yes, private.** `abu-khadija/QAX` was deleted by the owner and recreated private; `main` (`0be95d4`), `feat/service-layer-and-reliability-fix` and `feat/functional-qa-track` were pushed with the **clean** history on 2026-10-22. |
-| Tests | **1031 passed, 0 skipped** (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
+| Tests | **1040 passed, 0 skipped** (2026-10-23, after the CI, UI and dead-code work) (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
 | Gate | `make eval` → GATE: PASS |
+| Release check on GitHub | **Ran on real pull requests 2026-10-23** (QAX's own private repo, demo app): PR #1 harmless change → **GO**; PR #2 login broken → **NO-GO**, closed unmerged. PR #1 is kept open as the proof. Variables set in the repo: `QAX_APP_URL`, `QAX_PROJECT`, `QAX_REPO`, `QAX_APP_START`; branches `demo/clean-change` and `demo/break-login` on GitHub. See `strategy/PLAN.md` §9 for the two defects the first runs found |
 | Benchmarks | functional **120/120 on 15 sets (×2)**; release check 4/4; bug reproduction 6/6; functional mutants 13/13; scan 32/32, 0 FP |
 | Windows | first run 2026-10-23: scan works (demo 44 findings, gate scan rows 32/32). The browser track did **not** run: Chromium would not start on that machine (see §4a) |
 
@@ -126,7 +127,7 @@ PowerShell window. If Chromium stays blocked there, a QAX option to drive the pr
 
 ```bash
 ./.venv-exec/bin/python main.py doctor             # machine ready? (it now starts Chromium for real)
-./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1031 passed, 0 skipped
+./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1040 passed, 0 skipped
 make eval                                          # expect GATE: PASS
 bash demo/prepare_demo.sh                          # all ports 200 (8930 may be 500 — it is an API)
 set -a; . ~/Downloads/qax-corpus/.bench.env; set +a
@@ -175,6 +176,16 @@ Healthchecks rate-limits logins after many runs in a day. Its cases then come ou
 - The plain-language step reader (manual steps, tickets) is now strict: it refuses rather than guesses. Watch
   real tickets for wording it should learn; add each as a test.
 - `QAX_SETTLE_MAX_MS` (default 6 s) bounds the wait after a click. Revisit it if a real app updates slower.
+
+**Added 2026-10-23, engineering, small:**
+- Re-run the release-check demo on GitHub after any change to the workflow: open a PR from `demo/clean-change`
+  (expect GO) and one from `demo/break-login` (expect NO-GO, never merge). The workflow's variables are in
+  Settings → Secrets and variables → Actions → Variables.
+- The workflow's speed is unmeasured after the Chromium cache; the slow part (apt libraries on a slow mirror) is not
+  cached. A Playwright container image is the next experiment, not done.
+- `qax verify-fixes` and the Jira filing still run only from the command line; the web UI has "What changed between
+  two scans?" (`/api/diff`), not the Jira-linked re-check.
+- Removed as dead (static check, 2026-10-23): three services, four result types, two functions; see CHANGELOG.
 
 ## 8. Rules that stay in force
 
