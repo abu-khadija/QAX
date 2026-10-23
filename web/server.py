@@ -305,6 +305,12 @@ def how_we_measure():
     return send_from_directory(_STATIC, "measure.html")
 
 
+@app.get("/setup")
+def setup_page():
+    """Five steps to put the QAX release check on a team's pull requests."""
+    return send_from_directory(_STATIC, "setup.html")
+
+
 @app.get("/app")
 def app_ui():
     """The working app — two tracks: the security scan, and functional QA (generate or load test

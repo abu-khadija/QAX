@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up QAX on GitHub</title>
+<meta name="description" content="Five steps to get a GO / NO-GO decision as a comment on every pull request of your app, using the QAX GitHub Action.">
+<style>
+:root{
+  --bg:#0a0d14; --bg2:#0e1220; --card:#121828; --card2:#182035; --line:#233047;
+  --txt:#e7ecf5; --muted:#9aa6bb; --faint:#6b7689;
+  --accent:#6366f1; --accent2:#22d3ee; --ok:#2ee6a6; --p1:#f0485f; --p2:#f6a338;
+  --r:12px; --w:860px;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.65 Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent2)}
+code{font-family:var(--mono);font-size:.88em;background:var(--card2);padding:1px 6px;border-radius:6px;word-break:break-word}
+.wrap{max-width:var(--w);margin:0 auto;padding:0 max(16px,env(safe-area-inset-left,0px)) 0 max(16px,env(safe-area-inset-right,0px))}
+header{border-bottom:1px solid var(--line);padding:18px 0}
+header .wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.logo{font-weight:800;font-size:22px;letter-spacing:-.5px;color:var(--txt);text-decoration:none}.logo span{color:var(--accent2)}
+.nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:14px}
+h1{font-size:clamp(28px,5vw,42px);line-height:1.12;letter-spacing:-.02em;margin:48px 0 12px;text-wrap:balance}
+.lede{color:var(--muted);font-size:18px;max-width:700px;margin:0 0 10px}
+ol.steps{list-style:none;counter-reset:s;padding:0;margin:32px 0}
+ol.steps > li{counter-increment:s;position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px 18px 62px;margin:0 0 14px}
+ol.steps > li::before{content:counter(s);position:absolute;left:18px;top:16px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font:700 15px var(--mono);display:flex;align-items:center;justify-content:center}
+ol.steps h2{font-size:18px;margin:0 0 4px}
+ol.steps p{margin:6px 0;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin-top:8px}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.tw{overflow-x:auto}
+.row{display:flex;align-items:center;gap:8px;margin:6px 0}
+.row code{flex:1;min-width:0;padding:8px 10px;overflow-x:auto;white-space:nowrap}
+button{font:600 12px var(--mono);background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}
+button:hover{border-color:var(--accent2)}
+.dec{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:12px 0 32px}
+.dec div{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;color:var(--muted);font-size:14px}
+.dec b{display:block;font:700 15px var(--mono);margin-bottom:4px}
+.go b{color:var(--ok)} .no b{color:var(--p1)} .np b{color:var(--p2)}
+.note{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--p2);border-radius:var(--r);padding:14px 18px;color:var(--muted);font-size:15px;margin:24px 0}
+.note b{color:var(--txt)}
+footer{border-top:1px solid var(--line);margin-top:56px;padding:24px 0 48px;color:var(--faint);font-size:14px}
+:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><div class="wrap"><a class="logo" href="/">QA<span>X</span></a>
+  <nav class="nav"><a href="/">Product</a><a href="/how-we-measure">How we measure</a><a href="/app">Open the app</a></nav></div></header>
+<main class="wrap">
+  <h1>Set up QAX on GitHub in about 5 minutes</h1>
+  <p class="lede">After this, every pull request of your app gets <b>one comment</b> with a decision, and the check fails unless the decision is GO.
+    It runs on GitHub's machines, against an app you are allowed to test. Nothing is written to Jira or Xray.</p>
+
+  <div class="dec">
+    <div class="go"><b>GO</b>Every selected case ran and passed, and nothing was confirmed as a blocker. The check passes.</div>
+    <div class="no"><b>NO-GO</b>A case failed because of the app, or a security bug was proven. The check fails and the comment shows the proof.</div>
+    <div class="np"><b>NOT PROVEN</b>Something the decision depends on did not run. It is never counted as a pass.</div>
+  </div>
+
+  <ol class="steps">
+    <li><h2>Copy the workflow into your app's repository</h2>
+      <p>Take <code>ci/github_action_release_check.yml</code> from the QAX repository and save it in your app's repository as:</p>
+      <div class="row"><code id="c1">.github/workflows/qax-release-check.yml</code><button data-copy="c1">Copy</button></div></li>
+
+    <li><h2>Add the test cases and the page map</h2>
+      <p>Commit a cases file (default <code>qa/qax-cases.json</code>, a <code>{"test_cases": [...]}</code> file QAX wrote or you exported)
+        and the project's selectors (<code>config/projects/&lt;project&gt;/selectors.json</code>, made by <code>python main.py map</code>).</p></li>
+
+    <li><h2>Add four repository variables</h2>
+      <p>In GitHub: <b>Settings → Secrets and variables → Actions → Variables</b>.</p>
+      <div class="tw"><table>
+        <tr><th>Name</th><th>What to put</th></tr>
+        <tr><td><code>QAX_APP_URL</code></td><td>The staging or preview URL of your app. Only an app you are allowed to test.</td></tr>
+        <tr><td><code>QAX_PROJECT</code></td><td>Your project name (the folder under <code>config/projects/</code>).</td></tr>
+        <tr><td><code>QAX_REPO</code></td><td><code>owner/name</code> of the QAX repository.</td></tr>
+        <tr><td><code>QAX_APP_START</code></td><td>Only if there is no staging URL: a command that starts the app inside the job, for example <code>python app.py --port 8911</code>. Then <code>QAX_APP_URL</code> is <code>http://127.0.0.1:8911</code>.</td></tr>
+      </table></div></li>
+
+    <li><h2>Add secrets, only if you need them</h2>
+      <p>Same page, <b>Secrets</b> tab.</p>
+      <div class="tw"><table>
+        <tr><th>Name</th><th>When</th></tr>
+        <tr><td><code>QAX_REPO_TOKEN</code></td><td>Only if the QAX repository is private: a token that can read it.</td></tr>
+        <tr><td><code>QAX_VAR_USERNAME</code>, <code>QAX_VAR_PASSWORD</code></td><td>A <b>test</b> user for your app. Cases refer to them as <code>{{env:QAX_VAR_PASSWORD}}</code>, so the password never sits in a file.</td></tr>
+      </table></div></li>
+
+    <li><h2>Open a pull request</h2>
+      <p>The workflow runs by itself. About five minutes later the comment appears and is updated on every push. To try it without a pull request, open
+        <b>Actions → QAX — Release check → Run workflow</b>.</p></li>
+  </ol>
+
+  <div class="note"><b>Good to know.</b>
+    A pull request from a fork gets a read-only token, so the comment cannot be posted; the decision is written to the job summary instead.
+    To let NOT PROVEN pass with a warning, set the variable <code>QAX_ALLOW_NOT_PROVEN</code> to <code>true</code>. To change the severity that blocks, set <code>QAX_FAIL_ON</code> (default <code>P1</code>).
+    To keep the cases somewhere other than <code>qa/qax-cases.json</code>, set <code>QAX_CASES_FILE</code>.</div>
+
+  <div class="note"><b>Safe by default.</b>
+    The check is read-only and runs with <code>DRY_RUN=true</code>. No AI decides GO or NO-GO: pass, fail and "proven" come from deterministic checks.
+    Run it only against apps you own or are authorised to test.</div>
+
+  <p>Stuck? The full list of fixes is in <code>docs/TROUBLESHOOTING.md</code>. How the numbers are measured: <a href="/how-we-measure">How we measure</a>.</p>
+</main>
+<footer><div class="wrap">QAX — the runtime proof layer. This page describes the template as shipped in <code>ci/</code>.</div></footer>
+<script>
+document.querySelectorAll("[data-copy]").forEach(function(b){
+  b.addEventListener("click",function(){
+    var el=document.getElementById(b.getAttribute("data-copy"));
+    try{navigator.clipboard.writeText(el.textContent).then(function(){b.textContent="Copied"},function(){b.textContent="Select it"})}
+    catch(e){b.textContent="Select it"}
+  });
+});
+</script>
+</body>
+</html>

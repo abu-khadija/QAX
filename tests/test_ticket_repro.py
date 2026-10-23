@@ -123,3 +123,19 @@ def test_the_how_we_measure_page_is_served_and_linked(monkeypatch, tmp_path):
     body = c.get("/how-we-measure").get_data(as_text=True)
     assert "How we measure" in body and "120/120" in body and "125/125" not in body and "What we do not claim yet" in body
     assert "/how-we-measure" in c.get("/").get_data(as_text=True)
+
+
+def test_the_github_setup_page_is_served_linked_and_names_the_real_variables(monkeypatch, tmp_path):
+    """The setup page lists exactly the variables and secrets the shipped workflow reads."""
+    import re
+    from pathlib import Path
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QAX_API_TOKEN", raising=False)
+    from web.server import app
+    c = app.test_client()
+    body = c.get("/setup").get_data(as_text=True)
+    assert "Set up QAX on GitHub" in body and "NOT PROVEN" in body
+    assert "/setup" in c.get("/").get_data(as_text=True)
+    wf = (Path(__file__).resolve().parent.parent / "ci" / "github_action_release_check.yml").read_text(encoding="utf-8")
+    for name in set(re.findall(r"(?:vars|secrets)\.(QAX_[A-Z_]+)", wf)):
+        assert name in body, name
