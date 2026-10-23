@@ -1,8 +1,7 @@
 """
 test_phase2_services.py — Unit Tests for Phase 2 Services
 ==========================================================
-Covers the CSV adapter and the ExportService / ExecutionService /
-ReportingService facades. Everything runs offline: no Jira, no browser, no
+Covers the CSV adapter and the ExecutionService facade. Everything runs offline: no Jira, no browser, no
 network. External runners are patched; the CSV path uses a temp directory.
 
 Run with:
@@ -16,9 +15,7 @@ from unittest.mock import patch
 from core.adapters import get_adapter
 from services.context import QAXContext
 from services.execution_service import ExecutionService
-from services.export_service import ExportService
-from services.reporting_service import ReportingService
-from services.results import ExecutionResult, ExportResult, ReportResult
+from services.results import ExecutionResult
 
 
 def _tc(**over) -> dict:
@@ -59,33 +56,6 @@ def test_csv_adapter_writes_valid_file(tmp_path, monkeypatch):
         rows = list(csv.reader(f))
     assert rows[0][0] == "ID"
     assert rows[1][0] == "TC-1"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ExportService
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_export_service_csv_dry_run():
-    """Dry-run CSV export succeeds and returns a target path without writing."""
-    result = ExportService(_ctx()).export([_tc()], target="csv")
-    assert isinstance(result, ExportResult)
-    assert result.success is True
-    assert result.target == "csv"
-    assert result.references and result.references[0].endswith(".csv")
-
-
-def test_export_service_empty_cases():
-    """Exporting nothing is a captured failure, not a crash."""
-    result = ExportService(_ctx()).export([], target="csv")
-    assert result.success is False
-    assert result.error
-
-
-def test_export_service_none_target_is_safe():
-    """The 'none' target (memory only) never fails on valid input."""
-    result = ExportService(_ctx()).export([_tc()], target="none")
-    assert isinstance(result, ExportResult)
-    assert result.target == "none"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,31 +103,3 @@ def test_execution_ui_without_playwright_is_captured():
     assert result.mode == "ui"
     assert result.success is False
     assert "Playwright" in (result.error or "")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ReportingService
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_reporting_generates_html(tmp_path):
-    """ReportingService builds an HTML report from an ExecutionResult."""
-    batch = {"total": 1, "passed": 0, "failed": 1, "errors": 0, "pass_rate": 0.0,
-             "results": [{"test_case_id": "TC-1", "status": "FAIL",
-                          "title": "Login works"}]}
-    exec_result = ExecutionResult(mode="ui", raw=batch)
-    fake_path = str(tmp_path / "report.html")
-
-    with patch("execution.results_reporter.ResultsReporter") as MockReporter:
-        MockReporter.return_value.generate_html_report.return_value = fake_path
-        report = ReportingService(_ctx()).report(exec_result, output_folder=str(tmp_path))
-
-    assert isinstance(report, ReportResult)
-    assert report.success is True
-    assert report.html_path == fake_path
-
-
-def test_reporting_empty_results_is_captured():
-    """No results to report is a captured error, not a crash."""
-    report = ReportingService(_ctx()).report(ExecutionResult(mode="ui", raw={}))
-    assert report.success is False
-    assert report.error

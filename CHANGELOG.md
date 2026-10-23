@@ -21,6 +21,14 @@ Every scan written with `--out` records the exact version and commit that produc
   test skips when `openssl` is missing.
 - Dev extra: `PyJWT` replaces `python-jose` (which pulled in `ecdsa`; pip-audit flagged both). `pip-audit`: none.
 
+### Removed
+- Code nothing used (found by an import-graph and reference check, 2026-10-23): `services/export_service.py`,
+  `services/reporting_service.py`, `services/reporter_service.py` (only their own tests called them; exports go through
+  `core/adapters`, reports through `execution/results_reporter`), the result types only they returned
+  (`ExportResult`, `ReportResult`, `BugReportEntry`, `BugReportResult`), `validate_dual_steps` (no caller anywhere),
+  `usage.estimate_cost`, with their tests (about 860 lines in all, tests included). The legacy `.cs`-only
+  `ci/github_action.yml` went in its own commit.
+
 ### Added
 - **Release check on every pull request** (`ci/github_action_release_check.yml`): runs `qax release-check` against the
   app deployed for the PR, posts the decision as ONE comment that is updated on each push, uploads the report and fix

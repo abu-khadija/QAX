@@ -90,12 +90,6 @@ def _estimate_cost_locked() -> float:
     return round(total, 4)
 
 
-def estimate_cost() -> float:
-    """Approximate USD for the usage recorded so far, priced per model bucket."""
-    with _lock:
-        return _estimate_cost_locked()
-
-
 def snapshot() -> dict:
     """A copy of the current totals plus the cost estimate."""
     with _lock:
