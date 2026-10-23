@@ -58,6 +58,14 @@ def test_release_check_workflow_updates_one_comment_and_keeps_the_proof():
     assert up["if"] == "always()" and ".qax/output/release/" in up["with"]["path"]
 
 
+def test_release_check_workflow_pins_a_runner_that_can_install_the_pinned_playwright():
+    """First real run (2026-10-23): ubuntu-latest moved to an image without libasound2, so Playwright 1.44's
+    `--with-deps` failed. Keep the runner pinned while requirements.txt pins that Playwright."""
+    (job,) = _load("github_action_release_check.yml")["jobs"].values()
+    assert job["runs-on"] == "ubuntu-22.04"
+    assert "playwright==1.44" in (CI.parent / "requirements.txt").read_text(encoding="utf-8")
+
+
 def test_release_check_workflow_can_boot_the_app_before_it_waits_for_it():
     steps = _steps(_load("github_action_release_check.yml"))
     names = [s.get("name", "") for s in steps]

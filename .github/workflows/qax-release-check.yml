@@ -42,7 +42,9 @@ permissions:
 jobs:
   release-check:
     name: QAX release check
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: QAX pins Playwright 1.44, whose `--with-deps` asks apt for libasound2,
+    # a package newer Ubuntu images no longer have (first real run failed here, 2026-10-23).
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
       - name: Checkout the app (with history, to see what the change touches)
@@ -164,5 +166,5 @@ jobs:
             1) echo "::error::QAX: NO-GO. A blocker was proven; see the comment and the fix briefs."; exit 1 ;;
             2) if [ "$ALLOW_NOT_PROVEN" = "true" ]; then echo "::warning::QAX: NOT PROVEN (allowed by QAX_ALLOW_NOT_PROVEN)."
                else echo "::error::QAX: NOT PROVEN. Something the decision depends on did not run."; exit 1; fi ;;
-            *) echo "::error::QAX: the check could not start (exit '$CODE')."; exit 1 ;;
+            *) echo "::error::QAX: no decision was produced (exit '$CODE'): an earlier step failed, read its log."; exit 1 ;;
           esac
