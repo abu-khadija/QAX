@@ -153,6 +153,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
             "output_tokens": usage.get("output_tokens"),
             "llm_calls": usage.get("calls", 0),
             "tracked": usage.get("calls", 0) > 0,
+            "unpriced_calls": usage.get("unpriced_calls", 0),
         }
 
     if truth and truth.get("expected"):
@@ -213,8 +214,13 @@ def render(rec: dict) -> str:
     c = rec.get("cost")
     if c:
         if c.get("tracked"):
-            lines.append(f"     cost: ~${c.get('estimated_usd')}  ({c.get('llm_calls')} LLM calls, "
-                         f"{c.get('input_tokens')}+{c.get('output_tokens')} tok)")
+            unpriced = c.get("unpriced_calls") or 0
+            toks = f"{c.get('input_tokens')}+{c.get('output_tokens')} tok"
+            if unpriced and unpriced >= (c.get("llm_calls") or 0):
+                lines.append(f"     cost: not priced  ({c.get('llm_calls')} LLM calls to a non-Claude provider, {toks})")
+            else:
+                extra = f" + {unpriced} call(s) to a non-Claude provider, not priced" if unpriced else ""
+                lines.append(f"     cost: ~${c.get('estimated_usd')}{extra}  ({c.get('llm_calls')} LLM calls, {toks})")
         else:
             lines.append("     cost: not tracked (no LLM calls recorded this run)")
     a = rec.get("accuracy")

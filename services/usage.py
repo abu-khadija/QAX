@@ -85,7 +85,9 @@ def _estimate_cost_locked() -> float:
     """Cost of the current usage. Caller MUST already hold `_lock` (non-reentrant)."""
     total = 0.0
     for mk, bm in _state["by_model"].items():
-        pin, pout = _PRICES.get(mk, _PRICES["sonnet"])
+        if mk not in _PRICES:       # another provider: counted, never priced (it was priced as Sonnet: $0.13 for a free tier)
+            continue
+        pin, pout = _PRICES[mk]
         total += bm["input"] / 1_000_000 * pin + bm["output"] / 1_000_000 * pout
     return round(total, 4)
 
@@ -99,6 +101,7 @@ def snapshot() -> dict:
             "calls": _state["calls"],
             "by_model": {k: dict(v) for k, v in _state["by_model"].items()},
             "estimated_cost_usd": _estimate_cost_locked(),
+            "unpriced_calls": sum(bm["calls"] for mk, bm in _state["by_model"].items() if mk not in _PRICES),
         }
 
 
