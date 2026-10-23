@@ -662,6 +662,7 @@ def test_the_generation_quality_eval_scores_cases_and_runs_them(tmp_path, monkey
                                       {"playwright_action": "assert", "selector_key": "#error", "assertion_type": "text",
                                        "assertion_value": "Invalid username or password"}]}], None
     code = gq.run(str(ROOT / "evals/data/generation_stories.json"), str(tmp_path / "q.json"), generate=fake)
+    assert json.loads((tmp_path / "q.json").read_text(encoding="utf-8"))["ai"] == "stand-in generator (test)"   # a record names what it measured
     rec = json.loads((tmp_path / "q.json").read_text(encoding="utf-8"))["stories"][0]
     assert rec["review"]["coverage_pct"] == 100 and rec["review"]["grounded_pct"] == 100
     assert rec["run"]["planted_found"] == ["AC-2"] and rec["run"]["false_failures"] == []

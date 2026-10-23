@@ -16,8 +16,10 @@ Measured per story (evals/data/generation_stories.json):
   - in the browser: the planted bug FOUND (a case on that criterion FAILS), no false
     failure elsewhere, and how many cases could not run (ERROR) — a test problem
 
-Exit: 0 bar met · 1 bar missed · 2 not measured (no API key / no credit / no browser).
-Needs ANTHROPIC_API_KEY with credit; costs one generation per story. Never raises.
+Exit: 0 bar met · 1 bar missed · 2 not measured (no AI configured / no credit / no browser).
+Needs an AI provider: ANTHROPIC_API_KEY with credit, or any OpenAI-compatible API (a free tier or a local model):
+QAX_AI_PROVIDER=openai + QAX_AI_MODEL (+ QAX_AI_BASE_URL, QAX_AI_API_KEY). Costs one generation per story.
+The record and the printout name the model: a result belongs to that model only. Never raises.
 """
 
 from __future__ import annotations
@@ -144,13 +146,16 @@ def run(stories_file: str, out: str, generate=None, execute: bool = True) -> int
     from core.traceability import criteria_block, extract_criteria, security_block, security_risks
     stories = json.loads(Path(stories_file).read_text(encoding="utf-8"))["stories"]
     if generate is None:
-        if not os.getenv("ANTHROPIC_API_KEY", "").strip():
-            print("QAX generation quality: NOT MEASURED — ANTHROPIC_API_KEY is not set.")
+        ready, why = _ai_ready()
+        if not ready:
+            print(f"QAX generation quality: NOT MEASURED — {why}")
             return 2
         generate = _live_generate
+    ai_label = _ai_label() if generate is _live_generate else "stand-in generator (test)"
+    print(f"  AI under test: {ai_label}   (a result belongs to this model, not to every model)")
     url, server = _serve_demo()
     project = "qax-generation-eval"
-    record = {"url": url, "stories": []}
+    record = {"url": url, "ai": ai_label, "stories": []}
     worst = 0
     try:
         from core.app_mapper import map_app, save_map
@@ -186,6 +191,26 @@ def run(stories_file: str, out: str, generate=None, execute: bool = True) -> int
     print(f"\n  Record: {out}")
     print("  BAR: " + ("MET ✅" if worst == 0 else "MISSED ❌" if worst == 1 else "NOT MEASURED"))
     return worst
+
+
+def _ai_ready() -> "tuple[bool, str]":
+    """Whether the configured AI provider can be called, and if not, what is missing (any provider, not only Anthropic)."""
+    from core.ai_provider import ai_configured, provider
+    if ai_configured():
+        return True, ""
+    if provider() == "openai":
+        return False, ("QAX_AI_PROVIDER=openai needs QAX_AI_MODEL (and QAX_AI_BASE_URL / QAX_AI_API_KEY unless it is "
+                       "the OpenAI API with OPENAI_API_KEY).")
+    return False, "ANTHROPIC_API_KEY is not set (or use another provider: QAX_AI_PROVIDER=openai with QAX_AI_MODEL)."
+
+
+def _ai_label() -> str:
+    """Which model is being measured, for the printout and the record (never a key)."""
+    from core.ai_provider import describe, provider
+    if provider() == "openai":
+        return describe()
+    from core.claude_client import CLAUDE_MODEL_HEAVY
+    return f"Anthropic · {CLAUDE_MODEL_HEAVY}"
 
 
 def _live_generate(story: str, app_map, ctx: str):

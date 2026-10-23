@@ -44,7 +44,8 @@ doctor:
 docker:
 	docker compose up --build
 
-## Quality of the test cases the AI writes (needs ANTHROPIC_API_KEY with credit; one generation per story)
+## Quality of the test cases the AI writes (an AI provider: ANTHROPIC_API_KEY with credit, or QAX_AI_PROVIDER=openai
+## + QAX_AI_MODEL for a free/local one; one generation per story; the result names the model)
 eval-generation:
 	$(PY) -m evals.generation_quality
 

@@ -52,6 +52,11 @@ Every scan written with `--out` records the exact version and commit that produc
   truth, its n, its limits, the command that repeats it, and what QAX does not claim yet.
 
 ### Fixed
+- **`make eval-generation` runs on any configured AI provider.** It checked `ANTHROPIC_API_KEY` only, so the free or
+  local OpenAI-compatible providers the product supports ("QAX_AI_PROVIDER=openai", a model name, optional URL and key)
+  answered "NOT MEASURED". It now asks the provider module, prints and records the model it measured ("a result belongs
+  to this model, not to every model"), and says what is missing for the provider chosen. Six tests; the old run exited 2
+  with a local provider configured, the new one passes the gate.
 - **Release check's quick scan no longer reads the current directory.** It passed `repo=""` to the orchestrator, and
   `Path("")` is the working directory, so the "quick" scan modelled that source with the AI: it needed an Anthropic key
   (the first run on GitHub ended NOT PROVEN with "ANTHROPIC_API_KEY is not set") and sent code to the provider (the
