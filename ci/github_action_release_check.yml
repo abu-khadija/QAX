@@ -18,7 +18,9 @@
 #      `qax map`).
 #   3. Repository variables: QAX_APP_URL (the staging/preview URL of the app — an app you are
 #      allowed to test), QAX_PROJECT (the project name), QAX_REPO (owner/name of the QAX repository).
-#      Optional: QAX_CASES_FILE, QAX_FAIL_ON (P1 default), QAX_ALLOW_NOT_PROVEN.
+#      Optional: QAX_CASES_FILE, QAX_FAIL_ON (P1 default), QAX_ALLOW_NOT_PROVEN, and QAX_APP_START (a
+#      command that boots the app inside the job, e.g. "python app.py --port 8911", when there is no
+#      preview/staging URL; QAX_APP_URL is then http://127.0.0.1:8911).
 #   4. Secrets: QAX_REPO_TOKEN (only if the QAX repository is private: a token that can read it),
 #      and QAX_VAR_USERNAME / QAX_VAR_PASSWORD for the test user, written in cases as
 #      {{env:QAX_VAR_PASSWORD}}.
@@ -68,6 +70,16 @@ jobs:
           python -m playwright install --with-deps chromium
           mkdir -p ".qax/config/projects/${{ vars.QAX_PROJECT }}"
           cp -r "config/projects/${{ vars.QAX_PROJECT }}/." ".qax/config/projects/${{ vars.QAX_PROJECT }}/" 2>/dev/null || true
+
+      # Optional: the app is booted INSIDE this job when QAX_APP_START is set (e.g. a run command for a
+      # local server; QAX_APP_URL is then http://127.0.0.1:<port>). With a preview/staging URL leave it unset.
+      - name: Start the app under test (only when QAX_APP_START is set)
+        if: ${{ vars.QAX_APP_START != '' }}
+        env:
+          APP_START: ${{ vars.QAX_APP_START }}
+        run: |
+          nohup bash -c "$APP_START" > qax-app.log 2>&1 &
+          echo "started: $APP_START"
 
       - name: Wait for the app (up to ~90 s)
         run: |
@@ -137,6 +149,7 @@ jobs:
             output/qax-release.md
             output/qax-release.json
             .qax/output/release/
+            qax-app.log
           retention-days: 14
 
       # ── The check passes only on GO ──────────────────────────────────────

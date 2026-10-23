@@ -58,6 +58,29 @@ def test_release_check_workflow_updates_one_comment_and_keeps_the_proof():
     assert up["if"] == "always()" and ".qax/output/release/" in up["with"]["path"]
 
 
+def test_release_check_workflow_can_boot_the_app_before_it_waits_for_it():
+    steps = _steps(_load("github_action_release_check.yml"))
+    names = [s.get("name", "") for s in steps]
+    start = next(i for i, n in enumerate(names) if n.startswith("Start the app under test"))
+    wait = next(i for i, n in enumerate(names) if n.startswith("Wait for the app"))
+    install = next(i for i, n in enumerate(names) if n.startswith("Install QAX"))
+    assert install < start < wait                                 # the app's own deps may come from QAX's install
+    assert "QAX_APP_START" in steps[start]["if"] and "nohup" in steps[start]["run"]
+
+
+def test_this_repos_live_workflow_is_the_template():
+    """The copy in .github/workflows (what runs on this repo's PRs) never drifts from the shipped template."""
+    live = CI.parent / ".github" / "workflows" / "qax-release-check.yml"
+    assert live.read_text(encoding="utf-8") == (CI / "github_action_release_check.yml").read_text(encoding="utf-8")
+
+
+def test_the_demo_cases_are_healthy_browser_cases_of_the_demo_app():
+    import json
+    cases = json.loads((CI.parent / "qa" / "qax-cases.json").read_text(encoding="utf-8"))["test_cases"]
+    assert [c["test_case_id"] for c in cases] == ["TC-UI-001", "TC-UI-002", "TC-UI-003"]
+    assert all(c.get("expected_outcome") == "PASS" and c.get("automation_steps") for c in cases)   # no planted-bug case
+
+
 def test_release_check_workflow_is_valid_for_the_installed_cli_flags():
     """Every flag the workflow passes exists in `qax release-check`."""
     import re

@@ -1,0 +1,168 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# QAX — GitHub Actions: release check on every pull request (GO / NO-GO / NOT PROVEN)
+# ─────────────────────────────────────────────────────────────────────────────
+# On every PR: run the cases the change can affect in a real (headless) browser against the app
+# deployed for the PR, scan the same app read-only, and decide. The decision and its proof are
+# posted as ONE comment that is updated on every push (no pile of comments), and the job fails
+# unless the decision is GO. No AI decides anything, and nothing is written to Jira or Xray.
+#
+#   GO          every selected case ran and passed, nothing confirmed at or above the bar  → check passes
+#   NO-GO       a case failed because of the app, or a confirmed security bug              → check fails
+#   NOT PROVEN  something the decision depends on did not run (never counted as a pass)    → check fails
+#               (set the variable QAX_ALLOW_NOT_PROVEN to "true" to let it pass with a warning)
+#
+# Setup:
+#   1. Copy this file to .github/workflows/qax-release-check.yml in YOUR app's repository.
+#   2. Commit the cases file (default qa/qax-cases.json, a {"test_cases": [...]} file QAX wrote or
+#      you exported) and the project's selectors (config/projects/<project>/selectors.json from
+#      `qax map`).
+#   3. Repository variables: QAX_APP_URL (the staging/preview URL of the app — an app you are
+#      allowed to test), QAX_PROJECT (the project name), QAX_REPO (owner/name of the QAX repository).
+#      Optional: QAX_CASES_FILE, QAX_FAIL_ON (P1 default), QAX_ALLOW_NOT_PROVEN, and QAX_APP_START (a
+#      command that boots the app inside the job, e.g. "python app.py --port 8911", when there is no
+#      preview/staging URL; QAX_APP_URL is then http://127.0.0.1:8911).
+#   4. Secrets: QAX_REPO_TOKEN (only if the QAX repository is private: a token that can read it),
+#      and QAX_VAR_USERNAME / QAX_VAR_PASSWORD for the test user, written in cases as
+#      {{env:QAX_VAR_PASSWORD}}.
+#   Pull requests from forks get a read-only token: there the comment cannot be posted, so the
+#   decision is written to the job summary instead.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: QAX — Release check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write   # to post and update the decision comment
+
+jobs:
+  release-check:
+    name: QAX release check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout the app (with history, to see what the change touches)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout QAX
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.QAX_REPO }}
+          token: ${{ secrets.QAX_REPO_TOKEN || github.token }}
+          path: .qax
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: .qax/requirements.txt
+
+      - name: Install QAX and Chromium
+        run: |
+          pip install -r .qax/requirements.txt
+          python -m playwright install --with-deps chromium
+          mkdir -p ".qax/config/projects/${{ vars.QAX_PROJECT }}"
+          cp -r "config/projects/${{ vars.QAX_PROJECT }}/." ".qax/config/projects/${{ vars.QAX_PROJECT }}/" 2>/dev/null || true
+
+      # Optional: the app is booted INSIDE this job when QAX_APP_START is set (e.g. a run command for a
+      # local server; QAX_APP_URL is then http://127.0.0.1:<port>). With a preview/staging URL leave it unset.
+      - name: Start the app under test (only when QAX_APP_START is set)
+        if: ${{ vars.QAX_APP_START != '' }}
+        env:
+          APP_START: ${{ vars.QAX_APP_START }}
+        run: |
+          nohup bash -c "$APP_START" > qax-app.log 2>&1 &
+          echo "started: $APP_START"
+
+      - name: Wait for the app (up to ~90 s)
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS -o /dev/null "${{ vars.QAX_APP_URL }}"; then echo "app is up"; exit 0; fi
+            sleep 2
+          done
+          echo "::warning::the app did not answer at ${{ vars.QAX_APP_URL }}; the check will say NOT PROVEN"
+
+      - name: Release check
+        id: rc
+        continue-on-error: true
+        working-directory: .qax
+        env:
+          CI: 'true'
+          DRY_RUN: 'true'
+          AUTO_BUG_REPORT: 'false'
+          QAX_VAR_USERNAME: ${{ secrets.QAX_VAR_USERNAME }}
+          QAX_VAR_PASSWORD: ${{ secrets.QAX_VAR_PASSWORD }}
+          CASES_FILE: ${{ vars.QAX_CASES_FILE || 'qa/qax-cases.json' }}
+          FAIL_ON: ${{ vars.QAX_FAIL_ON || 'P1' }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set +e
+          mkdir -p ../output
+          SINCE=""
+          if [ -n "$BASE_REF" ]; then SINCE="--changed-since origin/$BASE_REF --repo .."; fi
+          python main.py release-check --file "../$CASES_FILE" --project "${{ vars.QAX_PROJECT }}" \
+            --base-url "${{ vars.QAX_APP_URL }}" $SINCE --fail-on "$FAIL_ON" --authorized \
+            --pr-comment ../output/qax-release.md --json ../output/qax-release.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Decision in the job summary
+        if: always()
+        run: |
+          if [ -f output/qax-release.md ]; then cat output/qax-release.md >> "$GITHUB_STEP_SUMMARY"
+          else echo "**QAX release check:** no report was produced." >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Post the decision on the PR (one comment, updated on every push)
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- qax-release-check -->';
+            let body;
+            try { body = fs.readFileSync('output/qax-release.md', 'utf8'); }
+            catch (e) { body = '## ⚠️ QAX release check: **NOT PROVEN**\n\nNo report was produced, so nothing was proven.'; }
+            body = marker + '\n' + body;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+              const mine = comments.find(c => c.user.type === 'Bot' && c.body && c.body.includes(marker));
+              if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+              else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            } catch (e) {
+              core.warning('Could not post the comment (a pull request from a fork has a read-only token): ' + e.message);
+            }
+
+      - name: Upload the report, fix briefs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qax-release-check
+          path: |
+            output/qax-release.md
+            output/qax-release.json
+            .qax/output/release/
+            qax-app.log
+          retention-days: 14
+
+      # ── The check passes only on GO ──────────────────────────────────────
+      - name: Gate on the decision
+        if: always()
+        env:
+          CODE: ${{ steps.rc.outputs.exit_code }}
+          ALLOW_NOT_PROVEN: ${{ vars.QAX_ALLOW_NOT_PROVEN }}
+        run: |
+          case "$CODE" in
+            0) echo "QAX: GO." ;;
+            1) echo "::error::QAX: NO-GO. A blocker was proven; see the comment and the fix briefs."; exit 1 ;;
+            2) if [ "$ALLOW_NOT_PROVEN" = "true" ]; then echo "::warning::QAX: NOT PROVEN (allowed by QAX_ALLOW_NOT_PROVEN)."
+               else echo "::error::QAX: NOT PROVEN. Something the decision depends on did not run."; exit 1; fi ;;
+            *) echo "::error::QAX: the check could not start (exit '$CODE')."; exit 1 ;;
+          esac
