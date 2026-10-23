@@ -191,6 +191,16 @@
   <section id="history" style="display:none">
     <div class="sec-title">Past scans</div>
     <div id="runs"></div>
+    <div id="compare" style="display:none">
+      <div class="sec-title">What changed between two scans?</div>
+      <div class="row">
+        <div class="field"><label for="cmpold">Before</label><select id="cmpold"></select></div>
+        <div class="field"><label for="cmpnew">After</label><select id="cmpnew"></select></div>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="btn2" id="cmpbtn" onclick="compareRuns()">What changed?</button></div>
+      <div id="cmpout" aria-live="polite"></div>
+    </div>
+    <div class="hint">Filing a scan's bugs to Jira and re-checking them against a fresh scan (<code>qax verify-fixes</code>) still runs from the command line.</div>
   </section>
 
   <section id="genresults">

@@ -843,7 +843,42 @@ async function loadRuns(){
       +'<b>'+esc(x.scanned_at||'')+'</b> · '+esc(x.url||'')
       +' · <b>'+x.claims+'</b> confirmed · '+x.leads+' leads · '+x.not_tested+' not tested'
       +(x.read_only?' · 🔒 read-only':'')+' <span style="color:var(--muted)">(open)</span></div>').join('');
+    fillCompare(runs);
   }catch(e){ /* history is a convenience; never block the page */ }
+}
+// "What changed?": two saved scans of the same app → new / still there / likely fixed (same rule as `qax diff`).
+function fillCompare(runs){
+  const box=$('compare'); if(!box) return;
+  box.style.display=(runs.length>=2 && $('panel-scan').style.display!=='none')?'block':'none';
+  const label=x=>esc((x.scanned_at||'')+' · '+(x.url||'')+' · '+x.claims+' confirmed');
+  const opts=runs.slice(0,30).map(x=>'<option value="'+esc(x.run_id)+'">'+label(x)+'</option>').join('');
+  $('cmpold').innerHTML=opts; $('cmpnew').innerHTML=opts;
+  const newest=runs[0]; const prev=runs.slice(1).find(x=>x.url===newest.url)||runs[1];   // newest vs the one before it on the same app
+  $('cmpnew').value=newest.run_id; $('cmpold').value=prev.run_id;
+}
+const CMP_TITLE={'NEW':'New since before','STILL THERE':'Still there','GONE':'Likely fixed — confirm with a re-scan',
+  'NOT RE-CHECKED':'Not re-checked (its check did not run, so this is not a pass)','FLAKY?':'Vanished on the same build (flaky, not fixed)',
+  'ACCEPTED':'Accepted as known'};
+async function compareRuns(){
+  const out=$('cmpout'); $('cmpbtn').disabled=true; out.innerHTML='<div class="hint">Comparing…</div>';
+  try{
+    const r=await api('/api/diff',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({old:$('cmpold').value,new:$('cmpnew').value})});
+    const d=await r.json();
+    if(!r.ok){ out.innerHTML='<div class="hk">⚠ '+esc(d.error||'Could not compare.')+'</div>'; return; }
+    let h='<div class="stats">'+Object.keys(CMP_TITLE).filter(k=>d.counts[k]).map(k=>
+      '<div class="stat"><div class="n'+(k==='NEW'?' p1':(k==='GONE'?' ok':''))+'">'+d.counts[k]+'</div><div class="l">'+esc(k.toLowerCase())+'</div></div>').join('')+'</div>';
+    if(!d.rows.length) h+='<div class="hk">No confirmed findings in either scan.</div>';
+    (d.warnings||[]).forEach(w=>{ h+='<div class="hk">⚠ '+esc(w)+'</div>'; });
+    Object.keys(CMP_TITLE).forEach(k=>{
+      const rows=d.rows.filter(x=>x.bucket===k); if(!rows.length) return;
+      h+='<div class="sec-title">'+esc(CMP_TITLE[k])+'</div>'+rows.map(x=>
+        '<div class="hk"><b>['+esc(x.severity)+']</b> '+esc(x.title)+(x.why?'<div class="hint" style="margin-top:4px">'+esc(x.why)+'</div>':'')+'</div>').join('');
+    });
+    if(d.ai&&(d.ai.old||d.ai.new)) h+='<div class="hint">AI leads are not compared: they can differ between runs ('+d.ai.old+' → '+d.ai.new+').</div>';
+    out.innerHTML=h;
+  }catch(e){ out.innerHTML='<div class="hk">⚠ '+esc(String(e))+'</div>'; }
+  finally{ $('cmpbtn').disabled=false; }
 }
 async function openRun(id){
   try{

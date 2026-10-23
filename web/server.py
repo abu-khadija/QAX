@@ -235,6 +235,44 @@ def get_run(run_id):
         return jsonify(json.load(fh))
 
 
+def _diff_shape(run: dict) -> dict:
+    """A saved web scan in the shape cli.diff.compare reads (the CLI's run record). Web scans carry no build id."""
+    return {"confirmed": list(run.get("claims") or []), "not_tested": list(run.get("not_tested") or []),
+            "target_url": run.get("url"), "scan_mode": "quick", "build": None, "accepted": []}
+
+
+def _load_run(run_id) -> dict | None:
+    """One saved scan by id (never a path), or None."""
+    rid = os.path.basename(str(run_id or ""))
+    path = os.path.join(_RUNS_DIR, rid + ".json")
+    if not rid or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+@app.post("/api/diff")
+def diff_runs():
+    """What changed between two saved scans, by the rule of `qax diff`: a finding that is gone is NOT called
+    fixed when its check did not run (it is listed as not re-checked) or when the build did not change."""
+    data = request.get_json(silent=True) or {}
+    old, new = _load_run(data.get("old")), _load_run(data.get("new"))
+    if old is None or new is None:
+        return jsonify({"error": "Pick two saved scans from the list."}), 404
+    from cli.diff import ORDER, compare
+    rep = compare(_diff_shape(old), _diff_shape(new))
+    rows = [{"bucket": r["bucket"], "severity": r["finding"].get("severity", "?"),
+             "title": r["finding"].get("title", ""), "target": r["finding"].get("target", ""), "why": r["why"]}
+            for r in rep["rows"]]
+    counts = {b: sum(1 for r in rows if r["bucket"] == b) for b in ORDER}
+    return jsonify({"rows": rows, "counts": counts, "warnings": rep["warnings"], "ai": rep["ai"],
+                    "old": {"run_id": old.get("run_id"), "scanned_at": old.get("scanned_at")},
+                    "new": {"run_id": new.get("run_id"), "scanned_at": new.get("scanned_at")}})
+
+
 @app.post("/api/plan")
 def plan():
     """

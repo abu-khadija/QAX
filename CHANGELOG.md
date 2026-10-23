@@ -30,6 +30,11 @@ Every scan written with `--out` records the exact version and commit that produc
   `ci/github_action.yml` went in its own commit.
 
 ### Added
+- **"What changed between two scans?" in the web UI** (Past scans → pick Before and After → `POST /api/diff`): new, still
+  there, likely fixed, not re-checked (its check did not run: never a pass), flaky, accepted. It is `qax diff`'s rule
+  on the scans the UI already saves; a web scan has no build id, so a vanished finding says "build unknown" instead of
+  "fixed", and scans of different apps carry a warning. Filing to Jira and `qax verify-fixes` stay on the command line
+  (they need a Jira site). Checked in a real browser on the 7 saved scans; `tests/test_web_diff.py`.
 - **Release check on every pull request** (`ci/github_action_release_check.yml`): runs `qax release-check` against the
   app deployed for the PR, posts the decision as ONE comment that is updated on each push, uploads the report and fix
   briefs, and fails the check unless the decision is GO (NOT PROVEN also fails, unless `QAX_ALLOW_NOT_PROVEN`). Never
