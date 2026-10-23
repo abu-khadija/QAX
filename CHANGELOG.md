@@ -22,6 +22,11 @@ Every scan written with `--out` records the exact version and commit that produc
 - Dev extra: `PyJWT` replaces `python-jose` (which pulled in `ecdsa`; pip-audit flagged both). `pip-audit`: none.
 
 ### Added
+- **Release check on every pull request** (`ci/github_action_release_check.yml`): runs `qax release-check` against the
+  app deployed for the PR, posts the decision as ONE comment that is updated on each push, uploads the report and fix
+  briefs, and fails the check unless the decision is GO (NOT PROVEN also fails, unless `QAX_ALLOW_NOT_PROVEN`). Never
+  writes to Jira/Xray. The command it runs was exercised here on the Petclinic corpus app (GO, exit 0); **the workflow
+  itself has not run on GitHub yet.** `tests/test_ci_workflows.py` pins its shape and flags.
 - **Reproduce a bug from its ticket** (`qax reproduce --ticket FILE | --jira KEY`, the web "Does a reported bug still
   happen?" section, MCP `qax_reproduce_bug`): the ticket's steps run in the browser → REPRODUCED / NOT REPRODUCED /
   COULD NOT RUN (the step is named) / NOT DECIDABLE, with a fix brief when reproduced. No AI when the ticket names its
