@@ -12,6 +12,9 @@ with `.content[0].text`, `.stop_reason`, `.usage`):
                           model server: Ollama http://localhost:11434/v1, LM Studio, vLLM
         QAX_AI_API_KEY    the key (OPENAI_API_KEY also read; a local server needs none)
         QAX_AI_MODEL      the model name (required: e.g. gpt-4o, llama3.1:70b)
+        QAX_AI_REASONING_EFFORT  optional: sent as `reasoning_effort` (none / low / medium / high). A reasoning
+                          model spends the output budget THINKING: with the default, Gemini 3.5 Flash returned 11
+                          tokens of a 300 budget and a test-case batch was cut at 8000. `none` fixes that.
 
 The scan's deterministic probes, reading the app and running tests use no AI at all.
 A local model keeps the story and code on this machine. Never logs keys.
@@ -19,8 +22,13 @@ A local model keeps the story and code on this machine. Never logs keys.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from types import SimpleNamespace
+
+logger = logging.getLogger(__name__)
+_SLEEP = time.sleep          # indirection so tests do not really wait between retries
 
 
 def provider() -> str:
@@ -34,6 +42,15 @@ def ai_configured() -> bool:
     if provider() == "openai":
         return bool(os.getenv("QAX_AI_MODEL", "").strip())
     return bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
+
+
+def resolved_key() -> str:
+    """The key to hand to make_ai_client: Anthropic's, or a placeholder when another provider is configured
+    (that client reads its own key). Empty when no AI is configured. Never printed."""
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key
+    return "openai-compatible" if provider() == "openai" and ai_configured() else ""
 
 
 def describe() -> str:
@@ -96,6 +113,8 @@ class _Messages:
             out.append({"role": "system", "content": sys_text})
         out += [{"role": m.get("role", "user"), "content": self._content(m.get("content"))} for m in msgs]
         body = {"model": self._c.model or model, "messages": out, "max_tokens": max_tokens}
+        if self._c.reasoning_effort:
+            body["reasoning_effort"] = self._c.reasoning_effort
         if temperature is not None:
             body["temperature"] = temperature
         headers = {"Content-Type": "application/json"}
@@ -105,8 +124,10 @@ class _Messages:
             else:
                 headers["Authorization"] = f"Bearer {self._c.api_key}"
         # never follow a redirect: the key would travel to wherever it points
-        r = requests.post(f"{self._c.base_url}/chat/completions", json=body, headers=headers, timeout=300,
-                          allow_redirects=False)
+        from core.http_retry import send
+        r = send(lambda: requests.post(f"{self._c.base_url}/chat/completions", json=body, headers=headers,
+                                       timeout=300, allow_redirects=False),
+                 attempts=4, what="AI call", sleep=lambda s: _SLEEP(s))      # 429/503 only; free tiers answer them often
         if 300 <= r.status_code < 400:
             raise RuntimeError(f"Error code: {r.status_code} - the AI endpoint redirected; set QAX_AI_BASE_URL to the final URL")
         if r.status_code >= 400:
@@ -121,6 +142,9 @@ class _Messages:
                         "other:" + str(data.get("model", body["model"])))
         except Exception:  # noqa: BLE001
             pass
+        if choice.get("finish_reason") == "length" and len(text) < max_tokens:
+            logger.warning("AI answer cut after %d visible characters (budget %d tokens): a reasoning model may have spent "
+                           "the budget thinking. Set QAX_AI_REASONING_EFFORT=none (or low).", len(text), max_tokens)
         return SimpleNamespace(
             content=[SimpleNamespace(type="text", text=text)],
             stop_reason="max_tokens" if choice.get("finish_reason") == "length" else "end_turn",
@@ -142,4 +166,5 @@ class OpenAICompatClient:
             raise RuntimeError("QAX_AI_BASE_URL must be https (plain http only for a model on this machine)")
         self.api_key = os.getenv("QAX_AI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
         self.model = os.getenv("QAX_AI_MODEL", "").strip()
+        self.reasoning_effort = os.getenv("QAX_AI_REASONING_EFFORT", "").strip().lower()
         self.messages = _Messages(self)
