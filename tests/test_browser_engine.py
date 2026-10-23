@@ -63,7 +63,7 @@ def ui_app(monkeypatch, tmp_path):
 
 def _cases():
     """The positive-control cases with their true outcomes."""
-    return json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    return json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text(encoding="utf-8"))["test_cases"]
 
 
 def _run(cases):
@@ -194,7 +194,7 @@ def test_a_secret_comes_from_the_environment_and_never_reaches_the_report(ui_app
     shown = " ".join(s.get("actual_result", "") for s in r["steps"])
     assert "demo123" not in shown and "QAX_VAR_DEMO_PASSWORD" in shown
     from execution.results_reporter import ResultsReporter
-    html = Path(ResultsReporter().generate_html_report(batch, output_folder=str(tmp_path))).read_text()
+    html = Path(ResultsReporter().generate_html_report(batch, output_folder=str(tmp_path))).read_text(encoding="utf-8")
     assert "demo123" not in html
 
 
@@ -337,7 +337,7 @@ def test_a_name_used_on_two_pages_resolves_to_the_one_on_this_page(ui_app, tmp_p
     proj.mkdir(parents=True)
     (proj / "selectors.json").write_text(_json.dumps({
         "login": {"name_field": "#username"},
-        "dashboard": {"name_field": "#note-input"}}))
+        "dashboard": {"name_field": "#note-input"}}), encoding="utf-8")
     monkeypatch.setattr(am, "_resolve_selectors_path", lambda project=None: proj / "selectors.json")
     monkeypatch.setenv("DEFAULT_PROJECT", "twopages")
     case = {"test_case_id": "N", "title": "n", "automation_steps": [
@@ -564,7 +564,7 @@ def test_a_chrome_recording_runs_as_recorded_and_its_check_can_fail(ui_app, monk
 
     from core.recording_import import convert
     monkeypatch.setenv("QAX_VAR_PASSWORD", "demo123")
-    case = convert((ROOT / "tests/data/recordings/chrome_add_note.json").read_text(), case_id="REC-1")["case"]
+    case = convert((ROOT / "tests/data/recordings/chrome_add_note.json").read_text(encoding="utf-8"), case_id="REC-1")["case"]
     neg = copy.deepcopy(case)
     neg["test_case_id"] = "REC-NEG"
     neg["automation_steps"][-1]["selector_key"] = 'text="a note nobody added"'
@@ -580,8 +580,8 @@ def test_a_ticket_reproduces_the_planted_bug_and_not_a_working_feature(ui_app, m
     def run(cases):
         return _run(cases)["results"]
     tickets = ROOT / "tests/data/tickets"
-    bug = reproduce((tickets / "demo_empty_note.md").read_text(), f"http://127.0.0.1:{ui_app}", "uidemo", run=run)
-    ok = reproduce((tickets / "demo_wrong_password.md").read_text(), f"http://127.0.0.1:{ui_app}", "uidemo", run=run)
+    bug = reproduce((tickets / "demo_empty_note.md").read_text(encoding="utf-8"), f"http://127.0.0.1:{ui_app}", "uidemo", run=run)
+    ok = reproduce((tickets / "demo_wrong_password.md").read_text(encoding="utf-8"), f"http://127.0.0.1:{ui_app}", "uidemo", run=run)
     assert bug["verdict"] == "REPRODUCED", bug
     assert ok["verdict"] == "NOT REPRODUCED", ok
     assert "fix_brief" in bug and "Note cannot be empty" in bug["fix_brief"]
@@ -662,7 +662,7 @@ def test_the_generation_quality_eval_scores_cases_and_runs_them(tmp_path, monkey
                                       {"playwright_action": "assert", "selector_key": "#error", "assertion_type": "text",
                                        "assertion_value": "Invalid username or password"}]}], None
     code = gq.run(str(ROOT / "evals/data/generation_stories.json"), str(tmp_path / "q.json"), generate=fake)
-    rec = json.loads((tmp_path / "q.json").read_text())["stories"][0]
+    rec = json.loads((tmp_path / "q.json").read_text(encoding="utf-8"))["stories"][0]
     assert rec["review"]["coverage_pct"] == 100 and rec["review"]["grounded_pct"] == 100
     assert rec["run"]["planted_found"] == ["AC-2"] and rec["run"]["false_failures"] == []
     assert code == 0, rec["missed"]
@@ -765,7 +765,7 @@ def test_mobile_device_and_parallel_workers_give_the_same_verdicts(ui_app, monke
     """`--device mobile`: a phone screen with touch and a mobile user agent; `--workers 2`:
     two browsers at once — the verdicts are the truth either way, in the cases' order."""
     from execution.test_executor import run_parallel
-    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text(encoding="utf-8"))["test_cases"]
     probe = {"test_case_id": "DEV", "title": "screen", "automation_steps": [
         {"step_number": 1, "playwright_action": "navigate", "value": "/login"}]}
     monkeypatch.setenv("QAX_DEVICE", "mobile")
@@ -835,7 +835,7 @@ def test_the_same_cases_give_the_same_verdicts_in_firefox_and_webkit(ui_app, mon
     if not _browser_installed(browser):
         pytest.skip(f"{browser} not installed (python -m playwright install {browser})")
     monkeypatch.setenv("QAX_BROWSER", browser)
-    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text(encoding="utf-8"))["test_cases"]
     extra = [{"test_case_id": "SH", "title": "shadow", "automation_steps": [
                  {"playwright_action": "navigate", "value": "/shadow"},
                  {"playwright_action": "fill", "selector_key": "#who", "value": "Sara"},
@@ -1041,7 +1041,7 @@ def test_a_failed_case_keeps_its_network_log_without_secrets_and_a_cause(ui_app,
     """P1 (2026-10-20): a HAR for every case that does not pass — the evidence for "what did the
     server say?" — with no password, token or cookie in it; each failure gets its cause."""
     monkeypatch.setenv("QAX_VAR_CANARY", "demo123")          # the demo password, typed from a secret
-    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text())["test_cases"]
+    cases = json.loads((ROOT / "evals/data/ui_demo_cases.json").read_text(encoding="utf-8"))["test_cases"]
     planted = next(c for c in cases if c["test_case_id"] == "TC-UI-004")
     for st in planted["automation_steps"]:
         if st.get("value") == "demo123":
@@ -1050,10 +1050,10 @@ def test_a_failed_case_keeps_its_network_log_without_secrets_and_a_cause(ui_app,
     res = {r["test_case_id"]: r for r in _run([planted, ok])["results"]}
     bad = res["TC-UI-004"]
     assert bad["status"] == "FAIL" and bad["cause"] == "app" and "network_log" not in res["TC-UI-001"]
-    har = json.loads(open(bad["network_log"]).read())
+    har = json.loads(open(bad["network_log"], encoding="utf-8").read())
     entries = har["log"]["entries"]
     assert har["log"]["version"] == "1.2" and any("/notes" in e["request"]["url"] for e in entries)
-    raw = open(bad["network_log"]).read()
+    raw = open(bad["network_log"], encoding="utf-8").read()
     assert "demo123" not in raw and "sid=" not in raw                       # no password, no session cookie
     import os as _os
     assert oct(_os.stat(bad["network_log"]).st_mode & 0o777) == "0o600"

@@ -269,7 +269,7 @@ def test_export_keys_are_stamped_report_written_and_results_attributed(tmp_path,
     assert [c["jira_key"] for c in cases] == ["QA-1", "QA-2"]
     assert {t["testKey"]: t["status"] for t in sent["tests"]} == {"QA-1": "PASSED", "QA-2": "TODO"}
     assert r["success"] and r["results_upload"][0]["test_execution_key"] == "QA-50"
-    saved = json.loads((tmp_path / "run" / "test_cases.json").read_text())
+    saved = json.loads((tmp_path / "run" / "test_cases.json").read_text(encoding="utf-8"))
     assert saved["test_cases"][0]["jira_key"] == "QA-1"
     assert (tmp_path / "run" / "results.json").exists() and r["report"]["html"]
 
@@ -301,7 +301,7 @@ def test_pr_input_uses_the_fetched_content_not_the_local_disk(tmp_path):
 
 def test_file_input_still_reads_from_disk(tmp_path):
     src = tmp_path / "a.py"
-    src.write_text("x = 1")
+    src.write_text("x = 1", encoding="utf-8")
     p = _pipeline(tmp_path)
     seen = {}
     p._run_generation = lambda file_path, **kw: seen.update(kw) or []
@@ -550,7 +550,7 @@ def test_env_file_fills_gaps_but_never_overrides_what_the_operator_set(tmp_path,
     """A .env with DRY_RUN=false used to override DRY_RUN=true set on the command line / in CI."""
     from core.env_loader import load_env
     env = tmp_path / ".env"
-    env.write_text("DRY_RUN=false\nQAX_T_KEY=from-file\nQAX_T_EMPTY=filled\n")
+    env.write_text("DRY_RUN=false\nQAX_T_KEY=from-file\nQAX_T_EMPTY=filled\n", encoding="utf-8")
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.delenv("QAX_T_KEY", raising=False)
     monkeypatch.setenv("QAX_T_EMPTY", "")
@@ -662,7 +662,7 @@ def test_web_map_needs_authorization_and_saves_the_map(client, monkeypatch, tmp_
     assert client.post("/api/map", json=body).status_code == 400            # not authorized
     d = client.post("/api/map", json=dict(body, authorized=True)).get_json()
     assert d["project"] == "myapp" and [p["path"] for p in d["pages"]] == ["/login", "/notes"]
-    saved = (tmp_path / "myapp" / "app_map.json").read_text()
+    saved = (tmp_path / "myapp" / "app_map.json").read_text(encoding="utf-8")
     assert '"p"' not in saved and "password" not in saved.lower()          # login never stored
     assert (tmp_path / "myapp" / "selectors.json").exists()
 
@@ -826,7 +826,7 @@ def test_run_history_finds_regressions_fixes_and_flaky_cases(tmp_path):
     assert ch["regressions"] == ["A", "C"] and ch["fixed"] == ["B"] and ch["new"] == ["D"]
     assert ch["flaky"] == ["C"] and ch["runs_before"] == 3
     path = add_regression_cases("p", [{"test_case_id": "A", "title": "t", "_verdict": {}}], {"A": "BUG-9"}, root=tmp_path)
-    suite = json.loads(open(path).read())
+    suite = json.loads(open(path, encoding="utf-8").read())
     assert suite["test_cases"] == [{"test_case_id": "A", "title": "t", "regression_for": "BUG-9"}]
 
 
@@ -857,18 +857,18 @@ def test_reading_the_app_again_keeps_the_names_existing_cases_use(tmp_path, monk
     monkeypatch.setattr(am, "CONFIG_DIR", tmp_path)
     (tmp_path / "hand").mkdir()
     (tmp_path / "hand" / "selectors.json").write_text(json.dumps(
-        {"_meta": {"auto_discovered": False}, "dashboard": {"note_input": "#note-input", "welcome_heading": "#welcome"}}))
+        {"_meta": {"auto_discovered": False}, "dashboard": {"note_input": "#note-input", "welcome_heading": "#welcome"}}), encoding="utf-8")
     fresh = AppMap(base_url="http://a", pages=[{"path": "/dashboard", "elements": {"note": "#note-input", "add": "#add"}}])
     save_map(fresh, "hand")
-    d = json.loads((tmp_path / "hand" / "selectors.json").read_text())["dashboard"]
+    d = json.loads((tmp_path / "hand" / "selectors.json").read_text(encoding="utf-8"))["dashboard"]
     assert d == {"note": "#note-input", "add": "#add", "note_input": "#note-input", "welcome_heading": "#welcome"}
     # an auto-discovered file: aliases of live selectors survive, stale selectors go
     (tmp_path / "auto").mkdir()
     (tmp_path / "auto" / "selectors.json").write_text(json.dumps(
         {"_meta": {"auto_discovered": True, "manual_overrides": ["dashboard.pinned"]},
-         "dashboard": {"note_input": "#note-input", "gone": "#old", "pinned": "#pin"}}))
+         "dashboard": {"note_input": "#note-input", "gone": "#old", "pinned": "#pin"}}), encoding="utf-8")
     save_map(fresh, "auto")
-    d = json.loads((tmp_path / "auto" / "selectors.json").read_text())["dashboard"]
+    d = json.loads((tmp_path / "auto" / "selectors.json").read_text(encoding="utf-8"))["dashboard"]
     assert d == {"note": "#note-input", "add": "#add", "note_input": "#note-input", "pinned": "#pin"}
 
 
@@ -887,7 +887,7 @@ def test_the_session_route_says_what_is_saved_and_never_returns_it(client, tmp_p
     monkeypatch.setattr(ss, "CONFIG_DIR", tmp_path / "projects")
     p = ss.state_path("shop")
     p.parent.mkdir(parents=True)
-    p.write_text('{"cookies": [{"name": "sid", "value": "SECRET-SESSION"}]}')
+    p.write_text('{"cookies": [{"name": "sid", "value": "SECRET-SESSION"}]}', encoding="utf-8")
     d = client.post("/api/session", json={"project": "shop"}).get_json()
     assert d["saved"] is True and "SECRET-SESSION" not in json.dumps(d)
     assert client.post("/api/session", json={"project": "shop", "action": "record", "url": "http://a"}).status_code == 400
@@ -954,14 +954,14 @@ def test_the_package_metadata_matches_the_code():
     import tomllib
     from pathlib import Path as _P
     root = _P(__file__).resolve().parents[1]
-    meta = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    meta = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     from core.version import __version__
     assert meta["version"] == __version__
     for target in meta["scripts"].values():
         mod, fn = target.split(":")
         assert callable(getattr(importlib.import_module(mod), fn)), target
     declared = {_re.split(r"[<>=!~\[]", d)[0].lower() for d in meta["dependencies"]}
-    reqs = [l.split("#")[0].strip() for l in (root / "requirements.txt").read_text().splitlines()]
+    reqs = [l.split("#")[0].strip() for l in (root / "requirements.txt").read_text(encoding="utf-8").splitlines()]
     runtime = {_re.split(r"[<>=!~\[]", r)[0].lower() for r in reqs if r and not r.startswith(("pytest",))}
     assert runtime <= declared, runtime - declared
 
@@ -981,7 +981,7 @@ def test_inputs_cannot_reach_secrets_or_leave_safe_channels(tmp_path, monkeypatc
     (tmp_path / "other").mkdir()
     assert "outside" in _repo_source(str(tmp_path / "other"))[1]
     out = tmp_path / "outside.json"
-    out.write_text("[]")
+    out.write_text("[]", encoding="utf-8")
     monkeypatch.chdir(tmp_path / "other")
     d, err = call_tool("qax_run_tests", {"url": "http://a", "cases_file": str(out), "authorized": True})
     assert err and "inside the working folder" in d["error"]
@@ -1067,7 +1067,7 @@ def test_the_project_overview_shows_only_measured_data(client, tmp_path, monkeyp
 def test_one_unreadable_run_file_does_not_hide_the_history(tmp_path):
     from core.run_history import history, save_run
     save_run("p", "http://a", [{"test_case_id": "T", "status": "PASS"}], root=tmp_path)
-    (tmp_path / "functional_runs" / "p" / "29991231T000000000000Z.json").write_text("{half-writ")
+    (tmp_path / "functional_runs" / "p" / "29991231T000000000000Z.json").write_text("{half-writ", encoding="utf-8")
     assert [h["verdicts"] for h in history("p", root=tmp_path)] == [{"T": "PASS"}]
 
 

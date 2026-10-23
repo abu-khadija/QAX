@@ -19,18 +19,18 @@ def _r(cid, statuses):
 
 
 def test_a_ticket_is_read_into_its_parts():
-    t = parse((T / "linkding_tag_count_link.md").read_text())
+    t = parse((T / "linkding_tag_count_link.md").read_text(encoding="utf-8"))
     assert t["title"].startswith("Tag management") and len(t["steps"]) == 6
     assert t["steps"][5] == 'Click "1" in the "qaxticket" row'
     assert "/bookmarks?q=%23qaxticket" in t["expected"] and "Content missing" in t["actual"]
 
 
 def test_checks_come_from_quoted_text_or_a_page_and_preconditions_are_met():
-    b = build(parse((T / "linkding_admin_tasks.md").read_text()))
+    b = build(parse((T / "linkding_admin_tasks.md").read_text(encoding="utf-8")))
     assert b["expected_case"]["manual_steps"][-1]["action"] == 'Verify that the URL contains "/admin/login/"'
     assert b["symptom_case"] is None and "logged-out browser" in b["notes"][0]
     assert [s["action"] for s in b["expected_case"]["manual_steps"]][0] == "Go to /admin/tasks/"
-    b = build(parse((T / "demo_wrong_password.md").read_text()))
+    b = build(parse((T / "demo_wrong_password.md").read_text(encoding="utf-8")))
     assert b["expected_case"]["manual_steps"][-1]["action"] == 'Verify that "Invalid username or password" is shown'
 
 
@@ -102,7 +102,7 @@ def test_the_reproduce_route_keeps_the_gates(monkeypatch, tmp_path):
     monkeypatch.delenv("QAX_API_TOKEN", raising=False)
     from web.server import app
     c = app.test_client()
-    text = (T / "demo_wrong_password.md").read_text()
+    text = (T / "demo_wrong_password.md").read_text(encoding="utf-8")
     assert c.post("/api/reproduce", json={"text": text, "url": "http://127.0.0.1:1"}).status_code == 400   # authorized?
     assert c.post("/api/reproduce", json={"text": text, "url": "ftp://x", "authorized": True}).status_code == 400
     assert c.post("/api/reproduce", json={"jira": "not a key", "url": "http://x", "authorized": True}).status_code == 400

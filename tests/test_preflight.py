@@ -1,4 +1,5 @@
 """core/preflight.py — an unreachable target is an error, never a clean-looking scan."""
+import shutil
 import socket
 import ssl
 import subprocess
@@ -37,6 +38,8 @@ def test_bad_names_and_urls_get_a_plain_reason():
 
 def test_self_signed_https_is_refused_with_the_insecure_hint_and_allowed_with_it(tmp_path):
     key, crt = tmp_path / "k.pem", tmp_path / "c.pem"
+    if shutil.which("openssl") is None:                     # Windows has none by default
+        import pytest; pytest.skip("openssl not available")
     r = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(crt),
                         "-days", "2", "-subj", "/CN=localhost"], capture_output=True)
     if r.returncode != 0:

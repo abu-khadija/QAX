@@ -106,6 +106,7 @@ def test_xray_token_is_renewed_after_expiry_and_after_a_401(monkeypatch):
     import core.xray_client as xc
     monkeypatch.setenv("XRAY_CLIENT_ID", "id")
     monkeypatch.setenv("XRAY_CLIENT_SECRET", "sec")
+    monkeypatch.setenv("JIRA_CLOUD_ID", "cloud-test")      # live mode requires it; was read from the real .env
     c = xc.XrayClient(dry_run=False)
     auths = []
 
@@ -318,9 +319,9 @@ def test_the_vendored_axe_core_is_the_published_file_with_its_licences():
     digest = hashlib.sha256(page_quality.AXE_PATH.read_bytes()).hexdigest()
     assert digest == "c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1", \
         "axe.min.js changed — MPL-2.0 then requires publishing the change; re-vendor the published file instead"
-    assert "Mozilla Public License" in (folder / "LICENSE").read_text()
+    assert "Mozilla Public License" in (folder / "LICENSE").read_text(encoding="utf-8")
     assert (folder / "LICENSE-3RD-PARTY.txt").is_file()
-    assert page_quality.AXE_VERSION in page_quality.AXE_PATH.read_text()[:40]
+    assert page_quality.AXE_VERSION in page_quality.AXE_PATH.read_text(encoding="utf-8")[:40]
 
 
 # ── 8 · a missing login variable is a setup problem, never a bug in the app ──
@@ -358,7 +359,7 @@ def test_an_unset_env_variable_stops_the_case_as_an_environment_error(monkeypatc
 def test_every_functional_mutant_still_applies_to_exactly_one_place():
     """A refactor that moves a mutated line must fail here, not turn a mutant into a silent no-op."""
     from evals.functional_mutants import MUTANTS, ROOT
-    stale = [name for name, rel, old, _new, _why in MUTANTS if (ROOT / rel).read_text().count(old) != 1]
+    stale = [name for name, rel, old, _new, _why in MUTANTS if (ROOT / rel).read_text(encoding="utf-8").count(old) != 1]
     assert not stale, stale
     assert len(MUTANTS) == 13
 
@@ -369,8 +370,8 @@ def test_the_real_bug_cases_differ_only_in_their_truth():
     import json
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent / "evals" / "data"
-    old = json.loads((root / "linkding_realbugs_old_cases.json").read_text())["test_cases"]
-    fixed = json.loads((root / "linkding_realbugs_fixed_cases.json").read_text())["test_cases"]
+    old = json.loads((root / "linkding_realbugs_old_cases.json").read_text(encoding="utf-8"))["test_cases"]
+    fixed = json.loads((root / "linkding_realbugs_fixed_cases.json").read_text(encoding="utf-8"))["test_cases"]
     strip = lambda cs: [{k: v for k, v in c.items() if k != "expected_outcome"} for c in cs]  # noqa: E731
     assert strip(old) == strip(fixed)
     assert [c["expected_outcome"][:4] for c in old] == ["PASS", "FAIL", "FAIL"]

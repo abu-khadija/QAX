@@ -1,0 +1,16 @@
+# Git for Windows checks text out with CRLF line endings (core.autocrlf). That changed the
+# vendored axe-core byte for byte, so its published SHA-256 no longer matched (2026-10-23).
+# Third-party files must stay exactly as published.
+core/vendor/** -text
+
+# Shell scripts must keep LF or bash fails on the \r.
+*.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.xlsx binary

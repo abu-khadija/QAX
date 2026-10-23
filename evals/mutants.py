@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     rep = run({s for s in a.only.split(",") if s} or None)
     print(render(rep))
     if a.json:
-        with open(a.json, "w") as fh:
+        with open(a.json, "w", encoding="utf-8") as fh:
             json.dump(rep, fh, indent=2)
     return 1 if rep["detects"] < a.min_detects else 0
 

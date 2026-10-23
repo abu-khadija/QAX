@@ -8,7 +8,7 @@ from cli.summaries import render_sessions
 def test_save_json_autonames_and_roundtrips(tmp_path):
     path = save_results_json([{"test_case_id": "TC-A-0001", "title": "t"}], out_dir=str(tmp_path))
     assert path.startswith(str(tmp_path)) and path.endswith(".json")
-    assert json.load(open(path))[0]["test_case_id"] == "TC-A-0001"
+    assert json.load(open(path, encoding="utf-8"))[0]["test_case_id"] == "TC-A-0001"
 
 
 def test_find_test_case_searches_saved_files(tmp_path):
@@ -59,5 +59,5 @@ def test_cli_scan_without_credentials_still_writes_the_out_file(tmp_path):
     finally:
         srv.shutdown()
     assert out.exists(), r.stdout[-600:] + r.stderr[-600:]
-    d = json.loads(out.read_text())
+    d = json.loads(out.read_text(encoding="utf-8"))
     assert d["qax_version"] and d["options"]["token_supplied"] is False and d["options"]["read_only"] is True

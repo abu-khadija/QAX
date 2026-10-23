@@ -14,15 +14,15 @@ REC = Path(__file__).resolve().parent / "data" / "recordings"
 
 
 def _steps(name):
-    r = convert((REC / name).read_text())
+    r = convert((REC / name).read_text(encoding="utf-8"))
     assert r["case"], r
     return r, r["case"]["automation_steps"]
 
 
 def test_each_format_is_recognised():
-    assert detect((REC / "chrome_add_note.json").read_text()) == "chrome"
-    assert detect((REC / "playwright_add_note.py").read_text()) == "playwright-python"
-    assert detect((REC / "playwright_add_note.spec.ts").read_text()) == "playwright-js"
+    assert detect((REC / "chrome_add_note.json").read_text(encoding="utf-8")) == "chrome"
+    assert detect((REC / "playwright_add_note.py").read_text(encoding="utf-8")) == "playwright-python"
+    assert detect((REC / "playwright_add_note.spec.ts").read_text(encoding="utf-8")) == "playwright-js"
     assert detect('{"test_cases": []}') == "qax" and detect("hello") == ""
 
 

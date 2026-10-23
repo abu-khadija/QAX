@@ -47,7 +47,7 @@ def run_release_check_command() -> None:
               "  Re-run with --authorized to confirm you own or are authorized to test it.\n")
         sys.exit(3)
     try:
-        cases = json.loads(Path(args.file).read_text()).get("test_cases") or []
+        cases = json.loads(Path(args.file).read_text(encoding="utf-8")).get("test_cases") or []
     except Exception as exc:  # noqa: BLE001
         print(f"\n  QAX: could not read {args.file}: {exc}\n")
         sys.exit(3)
@@ -65,9 +65,9 @@ def run_release_check_command() -> None:
                           progress=lambda m: print(f"  · {m}", flush=True))
     print("\n" + d["report_md"] + "\n")
     if args.pr_comment:
-        Path(args.pr_comment).write_text(d["report_md"])
+        Path(args.pr_comment).write_text(d["report_md"], encoding="utf-8")
     if args.json:
-        Path(args.json).write_text(json.dumps({k: v for k, v in d.items() if k != "report_md"}, indent=2, default=str))
+        Path(args.json).write_text(json.dumps({k: v for k, v in d.items() if k != "report_md"}, indent=2, default=str), encoding="utf-8")
     if d.get("files"):
         print(f"  Report: {d['files'].get('markdown')}")
     sys.exit(d["exit_code"])

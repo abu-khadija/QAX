@@ -123,7 +123,7 @@ def _run_app(root: Path, app: dict) -> "tuple[dict, str]":
             "os.environ.update(APP_BASE_URL=sys.argv[3],DEFAULT_PROJECT=sys.argv[4],QAX_AI_HEAL='false',"
             "AUTO_BUG_REPORT='false',DRY_RUN='true');"
             "from services.execution_service import ExecutionService as E;"
-            "c=json.load(open(sys.argv[2]))['test_cases'];r=E().execute(c,mode='ui',headless=True);"
+            "c=json.load(open(sys.argv[2],encoding='utf-8'))['test_cases'];r=E().execute(c,mode='ui',headless=True);"
             "print('@@'+json.dumps({str(x.get('test_case_id')):x.get('status') for x in (r.raw or {}).get('results',[])}))")
     p = subprocess.run([sys.executable, "-c", code, str(root), str(ROOT / app["cases"]), url, app["project"]],
                        capture_output=True, text=True, timeout=1800, env=os.environ.copy())
@@ -135,7 +135,7 @@ def _wrong(app: dict, verdicts: dict) -> list:
     """Cases whose verdict differs from the truth written before the run."""
     from evals.functional_bench import truth_of
     out = []
-    for c in json.loads((ROOT / app["cases"]).read_text())["test_cases"]:
+    for c in json.loads((ROOT / app["cases"]).read_text(encoding="utf-8"))["test_cases"]:
         cid, truth = str(c.get("test_case_id")), truth_of(c)
         got = verdicts.get(cid, "NOT RUN")
         ok = got == truth or (truth == "NOTPASS" and got != "PASS")
@@ -158,13 +158,13 @@ def run(apps: list, only: "set | None" = None) -> dict:
             if only and name not in only:
                 continue
             path = root / rel
-            src = path.read_text()
+            src = path.read_text(encoding="utf-8")
             row = {"mutant": name, "breaks": why}
             if src.count(old) != 1:
                 row["result"] = "STALE"
                 report["mutants"].append(row)
                 continue
-            path.write_text(src.replace(old, new))
+            path.write_text(src.replace(old, new), encoding="utf-8")
             t0, wrong = time.monotonic(), {}
             try:
                 for a in apps:
@@ -175,7 +175,7 @@ def run(apps: list, only: "set | None" = None) -> dict:
                     if w:
                         wrong[a["name"]] = w
             finally:
-                path.write_text(src)
+                path.write_text(src, encoding="utf-8")
             row.update(result="KILLED" if wrong else "SURVIVED", caught_by=wrong,
                        seconds=round(time.monotonic() - t0, 1))
             report["mutants"].append(row)
@@ -191,7 +191,7 @@ def run(apps: list, only: "set | None" = None) -> dict:
 
 def _apps(names: str) -> list:
     """Manifest entries with a URL; the built-in demo app is started on a free port."""
-    man = json.loads((ROOT / "evals/data/functional_bench.json").read_text())["apps"]
+    man = json.loads((ROOT / "evals/data/functional_bench.json").read_text(encoding="utf-8"))["apps"]
     want = None if names == "all" else set(names.split(","))
     return [a for a in man if want is None or a["name"] in want]
 
@@ -222,7 +222,7 @@ def main(argv: "list | None" = None) -> int:
         if m["result"] != "KILLED":
             print(f"  {m['result']}: {m['mutant']} — {m['breaks']}")
     if args.json:
-        Path(args.json).write_text(json.dumps(rep, indent=2))
+        Path(args.json).write_text(json.dumps(rep, indent=2), encoding="utf-8")
     return 0 if rep["killed"] >= args.min_killed else 1
 
 

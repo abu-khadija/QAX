@@ -202,6 +202,8 @@ def required_missing(required: set, not_tested: list) -> list:
 
 
 def main() -> int:
+    from core.console import force_utf8_output
+    force_utf8_output()
     url = os.getenv("QAX_TARGET_URL", "").strip()
     repo = os.getenv("QAX_REPO", "").strip()                    # empty = live-app-only (no API key needed)
     fail_on = {s.strip().upper() for s in os.getenv("QAX_FAIL_ON", "P1,P2").split(",") if s.strip()}

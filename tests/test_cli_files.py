@@ -1,5 +1,7 @@
 """Source-file collection: language auto-detection (no hard-coded .cs default),
 vendored-dir skipping, and the CLI wrapper's exit codes."""
+from pathlib import Path
+
 import pytest
 
 from cli.files import collect_source_files, resolve_ext
@@ -11,7 +13,7 @@ def _tree(tmp_path, files):
     for rel in files:
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("x = 1\n")
+        p.write_text("x = 1\n", encoding="utf-8")
     return tmp_path
 
 
@@ -43,7 +45,7 @@ def test_no_hardcoded_language_default():
 # ── CLI collection ────────────────────────────────────────────────────────────
 
 def test_single_file_and_missing(tmp_path):
-    f = tmp_path / "a.py"; f.write_text("x")
+    f = tmp_path / "a.py"; f.write_text("x", encoding="utf-8")
     assert collect_source_files(str(f), None) == [str(f)]
     with pytest.raises(FileNotFoundError):
         collect_source_files(str(tmp_path / "nope.py"), None)
@@ -52,14 +54,14 @@ def test_single_file_and_missing(tmp_path):
 def test_folder_auto_detects_and_skips_vendor(tmp_path):
     _tree(tmp_path, ["src/a.ts", "src/b.ts", "src/c.py", "node_modules/z/d.ts", "dist/e.ts"])
     got = collect_source_files(None, str(tmp_path))          # no --ext
-    names = sorted(p.rsplit("/", 1)[-1] for p in got)
-    assert names == ["a.ts", "b.ts"]                          # .ts detected; vendor/build skipped
+    names = sorted(Path(p).name for p in got)                # "\" on Windows, "/" elsewhere
+    assert names == ["a.ts", "b.ts"]                         # .ts detected; vendor/build skipped
 
 
 def test_folder_explicit_ext_and_missing(tmp_path):
     _tree(tmp_path, ["a.py", "sub/b.py", "c.txt"])
     got = collect_source_files(None, str(tmp_path), ext="py")
-    assert sorted(p.rsplit("/", 1)[-1] for p in got) == ["a.py", "b.py"]
+    assert sorted(Path(p).name for p in got) == ["a.py", "b.py"]
     with pytest.raises(FileNotFoundError):
         collect_source_files(None, str(tmp_path / "missing"), ext=".py")
 

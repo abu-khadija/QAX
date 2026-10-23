@@ -48,10 +48,10 @@ def _check(cases, url, project, repo, since, scan):
 
 def run(out: str = "", scan: bool = True) -> int:
     """Control + each seed; prints one line each; returns 0 when every decision is right."""
-    cfg = json.loads((ROOT / "evals/data/change_bench.json").read_text())
+    cfg = json.loads((ROOT / "evals/data/change_bench.json").read_text(encoding="utf-8"))
     app = cfg["app"]
     repo = Path(os.path.expanduser(app["repo"]))
-    cases = _healthy(json.loads((ROOT / app["cases"]).read_text())["test_cases"])
+    cases = _healthy(json.loads((ROOT / app["cases"]).read_text(encoding="utf-8"))["test_cases"])
     port, project = app["port"], app["project"]
     url = f"http://127.0.0.1:{port}"
     rows, wrong = [], 0
@@ -84,7 +84,7 @@ def run(out: str = "", scan: bool = True) -> int:
             subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", branch, str(wt)], check=True,
                            capture_output=True)
             f = wt / seed["file"]
-            f.write_text(f.read_text().replace(seed["find"], seed["replace"], 1))
+            f.write_text(f.read_text(encoding="utf-8").replace(seed["find"], seed["replace"], 1), encoding="utf-8")
             subprocess.run(["git", "-C", str(wt), "commit", "-qam", f"seed: {seed['name']}"], check=True,
                            capture_output=True)
             b = subprocess.run(app["build"], shell=True, cwd=wt, capture_output=True, text=True,
@@ -109,7 +109,7 @@ def run(out: str = "", scan: bool = True) -> int:
     print(f"\n  QAX release check: {len(rows) - wrong}/{len(rows)} decisions right")
     path = Path(out or (Path.cwd() / "output" / "bench" / f"release_check_{int(time.time())}.json"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rows, indent=2, default=str))
+    path.write_text(json.dumps(rows, indent=2, default=str), encoding="utf-8")
     print(f"  Raw results: {path}")
     return 0 if wrong == 0 else 1
 

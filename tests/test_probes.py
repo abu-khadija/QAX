@@ -51,10 +51,10 @@ def test_sign_jwt_matches_a_real_verifier():
     token = sign_jwt_hs(SECRET, "HS256", {"sub": "a@b.com", "exp": 9999999999})
     assert token and token.count(".") == 2
     try:
-        from jose import jwt  # available in the exec venv; skip if absent
+        import jwt  # PyJWT, from the dev extra; skip if absent
     except Exception:
         import pytest
-        pytest.skip("jose not installed in this interpreter")
+        pytest.skip("PyJWT not installed in this interpreter")
     decoded = jwt.decode(token, SECRET, algorithms=["HS256"])
     assert decoded["sub"] == "a@b.com"
 
@@ -83,7 +83,7 @@ class _FakeSession:
             return MagicMock(status_code=401, text="unauthorized")
         # verify the forged token with the real secret to find the subject
         try:
-            from jose import jwt
+            import jwt
             sub = jwt.decode(token, self.secret, algorithms=["HS256"]).get("sub")
         except Exception:
             return MagicMock(status_code=401, text="bad")
@@ -91,16 +91,16 @@ class _FakeSession:
         return MagicMock(status_code=200 if ok else 401, text=(sub if ok else "no"))
 
 
-def _skip_without_jose():
+def _skip_without_pyjwt():
     try:
-        import jose  # noqa: F401
+        import jwt  # noqa: F401
     except Exception:
         import pytest
-        pytest.skip("jose not installed in this interpreter")
+        pytest.skip("PyJWT not installed in this interpreter")
 
 
 def test_forge_jwt_proves_takeover_on_vulnerable_app():
-    _skip_without_jose()
+    _skip_without_pyjwt()
     f = forge_jwt_probe(_model_with_secret(), "http://x", session=_FakeSession(vulnerable=True))
     assert f is not None and f.exploited is True
     assert f.severity == "P1"
@@ -108,7 +108,7 @@ def test_forge_jwt_proves_takeover_on_vulnerable_app():
 
 
 def test_forge_jwt_fails_on_safe_app():
-    _skip_without_jose()
+    _skip_without_pyjwt()
     f = forge_jwt_probe(_model_with_secret(), "http://x", session=_FakeSession(vulnerable=False))
     assert f is not None and f.exploited is False
 

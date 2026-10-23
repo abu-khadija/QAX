@@ -39,7 +39,7 @@ def _svc():
 
 def _big(tmp_path, n=120):
     p = tmp_path / "svc.py"
-    p.write_text("".join(f"def f{i}(x):\n    if x > {i}:\n        return x\n    return {i}\n\n" for i in range(n)))
+    p.write_text("".join(f"def f{i}(x):\n    if x > {i}:\n        return x\n    return {i}\n\n" for i in range(n)), encoding="utf-8")
     return str(p)
 
 
@@ -61,7 +61,7 @@ def test_small_file_single_call_unscoped(tmp_path, monkeypatch):
 
 def test_untestable_real_file_skipped_without_model_call(tmp_path, monkeypatch):
     calls = _setup(monkeypatch)
-    p = tmp_path / "c.py"; p.write_text("A = 1\nB = 2\n")
+    p = tmp_path / "c.py"; p.write_text("A = 1\nB = 2\n", encoding="utf-8")
     r = _svc().generate(str(p), options=GenerationOptions(use_cache=False))
     assert calls == [] and r.test_cases == [] and r.summary.get("skipped")
 

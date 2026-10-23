@@ -10,17 +10,17 @@ def _repo(tmp_path):
     (r / "src/owner").mkdir(parents=True)
     (r / "templates/vets").mkdir(parents=True)
     (r / "templates/fragments").mkdir(parents=True)
-    (r / "src/owner/OwnerController.java").write_text('@GetMapping("/owners/{ownerId}/edit") class X {}')
-    (r / "templates/vets/vetList.html").write_text("<table></table>")
-    (r / "templates/fragments/layout.html").write_text("<html></html>")
-    (r / "src/Billing.java").write_text("class Billing {}")
+    (r / "src/owner/OwnerController.java").write_text('@GetMapping("/owners/{ownerId}/edit") class X {}', encoding="utf-8")
+    (r / "templates/vets/vetList.html").write_text("<table></table>", encoding="utf-8")
+    (r / "templates/fragments/layout.html").write_text("<html></html>", encoding="utf-8")
+    (r / "src/Billing.java").write_text("class Billing {}", encoding="utf-8")
     for c in (["git", "init", "-q"], ["git", "add", "."], ["git", "-c", "user.email=q@x", "-c", "user.name=q", "commit", "-qm", "1"]):
         subprocess.run(c, cwd=r, check=True)
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "app_map.json").write_text(json.dumps({"pages": [{"path": "/owners/find"}, {"path": "/owners/{id}/edit"},
-                                                              {"path": "/vets.html"}, {"path": "/"}]}))
-    (proj / "selectors.json").write_text(json.dumps({"owners_find": {"lastname": "#lastName"}, "vets_html": {"vet_table": "#vets"}}))
+                                                              {"path": "/vets.html"}, {"path": "/"}]}), encoding="utf-8")
+    (proj / "selectors.json").write_text(json.dumps({"owners_find": {"lastname": "#lastName"}, "vets_html": {"vet_table": "#vets"}}), encoding="utf-8")
     return r, proj
 
 
@@ -35,7 +35,7 @@ CASES = [
 
 def test_a_change_selects_the_cases_that_visit_its_pages(tmp_path):
     r, proj = _repo(tmp_path)
-    (r / "templates/vets/vetList.html").write_text("<table>changed</table>")
+    (r / "templates/vets/vetList.html").write_text("<table>changed</table>", encoding="utf-8")
     files, err = changed_files(str(r), "HEAD")
     assert not err and files == ["templates/vets/vetList.html"]
     s = select(CASES, files, str(r), proj)

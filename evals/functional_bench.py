@@ -127,13 +127,13 @@ def _run_cases(cases: list, base_url: str, project: str) -> "tuple[dict, float]"
 
 def bench(names: list, repeat: int = 1, base_url_override: str = "", out: str = "") -> int:
     """Run the benchmark; print the table; write the raw record. Returns the exit code."""
-    manifest = json.loads((ROOT / "evals/data/functional_bench.json").read_text())["apps"]
+    manifest = json.loads((ROOT / "evals/data/functional_bench.json").read_text(encoding="utf-8"))["apps"]
     apps = [a for a in manifest if "all" in names or a["name"] in names]
     record = {"when": datetime.now(timezone.utc).isoformat(), "repeat": repeat, "apps": []}
     worst = 0
     server = None
     for app in apps:
-        cases_doc = json.loads((ROOT / app["cases"]).read_text())
+        cases_doc = json.loads((ROOT / app["cases"]).read_text(encoding="utf-8"))
         cases = cases_doc["test_cases"] if isinstance(cases_doc, dict) else cases_doc
         url = base_url_override if (base_url_override and len(apps) == 1) else app.get("base_url", "")
         if app.get("builtin"):
@@ -166,7 +166,7 @@ def bench(names: list, repeat: int = 1, base_url_override: str = "", out: str = 
             server = None
     path = Path(out or (Path.cwd() / "output" / "bench" / f"functional_{int(time.time())}.json"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2))
+    path.write_text(json.dumps(record, indent=2), encoding="utf-8")
     print(f"\n  Raw results: {path}")
     return worst
 

@@ -136,13 +136,13 @@ def select(cases: list, files: list, repo: str, project_dir: "str | Path") -> di
     """
     project_dir = Path(project_dir)
     try:
-        amap = json.loads((project_dir / "app_map.json").read_text())
+        amap = json.loads((project_dir / "app_map.json").read_text(encoding="utf-8"))
         pages = [p.get("path", "") for p in amap.get("pages") or [] if p.get("path")]
     except Exception:  # noqa: BLE001
         pages = []
     sections: dict = {}
     try:
-        sel = json.loads((project_dir / "selectors.json").read_text())
+        sel = json.loads((project_dir / "selectors.json").read_text(encoding="utf-8"))
         slug = {re.sub(r"[^a-z0-9]+", "_", p.lower()).strip("_") or "home": p for p in pages}
         for sec, keys in sel.items():
             if isinstance(keys, dict) and sec in slug:

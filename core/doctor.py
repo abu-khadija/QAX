@@ -24,6 +24,36 @@ def _set(name: str) -> bool:
     return bool(v) and not any(v.startswith(p) for p in _PLACEHOLDER)
 
 
+def _browsers_dir() -> Path:
+    """Where Playwright keeps its browsers on this OS (PLAYWRIGHT_BROWSERS_PATH wins)."""
+    if os.getenv("PLAYWRIGHT_BROWSERS_PATH"):
+        return Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Caches/ms-playwright"
+    if sys.platform == "win32":
+        return Path(os.getenv("LOCALAPPDATA") or Path.home() / "AppData/Local") / "ms-playwright"
+    return Path.home() / ".cache/ms-playwright"
+
+
+def _chromium_launch_error(timeout: int = 45) -> str:
+    """Start headless Chromium in a child process; "" when it starts, else the first error line."""
+    import subprocess
+    code = ("from playwright.sync_api import sync_playwright\n"
+            "with sync_playwright() as p:\n    p.chromium.launch(headless=True).close()\n")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"no answer after {timeout} s"
+    except OSError as exc:
+        return str(exc)
+    if r.returncode == 0:
+        return ""
+    lines = [ln.strip() for ln in (r.stderr or r.stdout).splitlines() if ln.strip()]
+    hit = next((ln for ln in lines if "Error" in ln or "error" in ln), lines[-1] if lines else "unknown error")
+    return hit[:200]
+
+
 def run_checks(root: str | None = None) -> list:
     """
     Run every readiness check.
@@ -56,16 +86,23 @@ def run_checks(root: str | None = None) -> list:
         add("Browser engine", "warn", "Playwright not installed — functional QA runs over HTTP only",
             "pip install playwright==1.44.0 && python -m playwright install chromium")
     else:
-        cache = Path(os.getenv("PLAYWRIGHT_BROWSERS_PATH", "") or
-                     (Path.home() / ("Library/Caches/ms-playwright" if sys.platform == "darwin"
-                                     else ".cache/ms-playwright")))
+        cache = _browsers_dir()
         names = [p.name for p in cache.iterdir()] if cache.is_dir() else []
         has = any(n.startswith("chromium") for n in names)
         others = [b for b in ("firefox", "webkit") if any(n.startswith(b) for n in names)]
-        add("Browser engine", "ok" if has else "warn",
-            ("Playwright + Chromium" + (" + " + " + ".join(others) if others else "")) if has
-            else "Playwright installed, Chromium not found",
-            "" if has else "python -m playwright install chromium")
+        launch_error = _chromium_launch_error() if has else ""
+        if launch_error:
+            # A Chromium folder is not proof it runs (Windows, 2026-10-23: "spawn UNKNOWN" while
+            # doctor said ready). Start it for real.
+            add("Browser engine", "fail", f"Chromium is installed but does not start: {launch_error}",
+                ("Install the Microsoft Visual C++ Redistributable (winget install Microsoft.VCRedist.2015+.x64), "
+                 "then: python -m playwright install chromium") if sys.platform == "win32"
+                else "python -m playwright install chromium   (then run doctor again)")
+        else:
+            add("Browser engine", "ok" if has else "warn",
+                ("Playwright + Chromium" + (" + " + " + ".join(others) if others else "")) if has
+                else f"Playwright installed, Chromium not found (looked in {cache})",
+                "" if has else "python -m playwright install chromium")
         if has and len(others) < 2:
             add("Other browsers", "warn", "Firefox / WebKit not installed — runs use Chromium",
                 "python -m playwright install firefox webkit   (optional, ~200 MB)")
@@ -77,7 +114,7 @@ def run_checks(root: str | None = None) -> list:
     try:
         (base / "output").mkdir(exist_ok=True)
         probe = base / "output" / ".qax-write-check"
-        probe.write_text("ok")
+        probe.write_text("ok", encoding="utf-8")
         probe.unlink()
         add("Output folder", "ok", str(base / "output"))
     except Exception as exc:  # noqa: BLE001

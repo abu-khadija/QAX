@@ -53,7 +53,7 @@ def test_a_quick_live_scan_needs_no_key_but_deep_or_repo_scans_do():
 def test_lean_requirements_cover_the_scanner_and_exclude_the_heavy_ui():
     from pathlib import Path
     names = {l.split(">")[0].split("=")[0].strip().lower()
-             for l in (D.ROOT / "requirements-scan.txt").read_text().splitlines()
+             for l in (D.ROOT / "requirements-scan.txt").read_text(encoding="utf-8").splitlines()
              if l.strip() and not l.startswith("#")}
     assert {"requests", "flask", "python-dotenv", "jsonschema", "pydantic", "anthropic"} <= names
     assert not ({"streamlit", "pandas", "plotly"} & names)            # the slow installs stay out of the fast path

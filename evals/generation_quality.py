@@ -142,7 +142,7 @@ def run(stories_file: str, out: str, generate=None, execute: bool = True) -> int
     `generate(story_text, app_map, context) -> (cases, error)` is injectable (tests).
     """
     from core.traceability import criteria_block, extract_criteria, security_block, security_risks
-    stories = json.loads(Path(stories_file).read_text())["stories"]
+    stories = json.loads(Path(stories_file).read_text(encoding="utf-8"))["stories"]
     if generate is None:
         if not os.getenv("ANTHROPIC_API_KEY", "").strip():
             print("QAX generation quality: NOT MEASURED — ANTHROPIC_API_KEY is not set.")
@@ -182,7 +182,7 @@ def run(stories_file: str, out: str, generate=None, execute: bool = True) -> int
     finally:
         server.shutdown()
         Path(out).parent.mkdir(parents=True, exist_ok=True)
-        Path(out).write_text(json.dumps(record, indent=2, default=str))
+        Path(out).write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
     print(f"\n  Record: {out}")
     print("  BAR: " + ("MET ✅" if worst == 0 else "MISSED ❌" if worst == 1 else "NOT MEASURED"))
     return worst

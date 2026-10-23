@@ -56,10 +56,10 @@ def _start(cmd: str, cwd: Path, url: str):
 
 def run(out: str = "") -> int:
     from core.change_selection import changed_files, select
-    cfg = json.loads((ROOT / "evals/data/change_bench.json").read_text())
+    cfg = json.loads((ROOT / "evals/data/change_bench.json").read_text(encoding="utf-8"))
     app = cfg["app"]
     repo = Path(os.path.expanduser(app["repo"]))
-    cases = json.loads((ROOT / app["cases"]).read_text())["test_cases"]
+    cases = json.loads((ROOT / app["cases"]).read_text(encoding="utf-8"))["test_cases"]
     port = app["port"]
     url = f"http://127.0.0.1:{port}"
     project_dir = ROOT / "config" / "projects" / app["project"]
@@ -88,9 +88,9 @@ def run(out: str = "") -> int:
             subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", branch, str(wt)], check=True,
                            capture_output=True)
             f = wt / seed["file"]
-            text = f.read_text()
+            text = f.read_text(encoding="utf-8")
             assert seed["find"] in text, f"seed anchor not found in {seed['file']}"
-            f.write_text(text.replace(seed["find"], seed["replace"], 1))
+            f.write_text(text.replace(seed["find"], seed["replace"], 1), encoding="utf-8")
             subprocess.run(["git", "-C", str(wt), "commit", "-qam", f"seed: {seed['name']}"], check=True,
                            capture_output=True)
             files, err = changed_files(str(wt), "HEAD~1", "HEAD")
@@ -128,7 +128,7 @@ def run(out: str = "") -> int:
             shutil.rmtree(wt, ignore_errors=True)
     path = Path(out or (Path.cwd() / "output" / "bench" / f"change_selection_{int(time.time())}.json"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2))
+    path.write_text(json.dumps(record, indent=2), encoding="utf-8")
     print(f"\n  Raw results: {path}")
     return worst
 

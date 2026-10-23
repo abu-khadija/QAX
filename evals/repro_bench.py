@@ -26,7 +26,7 @@ def run() -> int:
     from core.ticket_repro import reproduce
     from evals.functional_bench import _reachable
     from evals.generation_quality import _serve_demo
-    cfg = json.loads((ROOT / "evals/data/repro_bench.json").read_text())
+    cfg = json.loads((ROOT / "evals/data/repro_bench.json").read_text(encoding="utf-8"))
     demo_url, server = _serve_demo()
     right = wrong = skipped = 0
     rows = []
@@ -40,7 +40,7 @@ def run() -> int:
                 print(f"  {name:<52} NOT RUN — {'missing ' + ', '.join(missing) if missing else url + ' not reachable'}")
                 continue
             t0 = time.monotonic()
-            got = reproduce((ROOT / r["ticket"]).read_text(), url, r["project"])
+            got = reproduce((ROOT / r["ticket"]).read_text(encoding="utf-8"), url, r["project"])
             ok = got["verdict"] == r["truth"]
             right, wrong = right + ok, wrong + (not ok)
             rows.append({"run": name, "truth": r["truth"], "got": got["verdict"], "why": got["why"],
@@ -52,7 +52,7 @@ def run() -> int:
     print(f"\n  QAX bug reproduction: {right}/{right + wrong} right ({skipped} not run)")
     out = Path.cwd() / "output" / "bench" / f"repro_{int(time.time())}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(rows, indent=2))
+    out.write_text(json.dumps(rows, indent=2), encoding="utf-8")
     return 0 if wrong == 0 else 1
 
 

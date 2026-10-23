@@ -103,7 +103,7 @@ def _scan(base_url: str, *, deep: bool = False, prog=None, ctx=None, auth=None, 
     from services.orchestrator_service import OrchestratorService
     from services.scorecard import score_run
 
-    truth = json.load(open(TRUTH))
+    truth = json.load(open(TRUTH, encoding="utf-8"))
     empty = tempfile.mkdtemp(prefix="qax_gate_")          # no source → exercises live grounding + fallback
     usage = None
     if deep:
@@ -161,7 +161,7 @@ def _cli_end_to_end() -> list[tuple[str, bool, str]]:
     finally:
         proc.terminate()
     wrote = os.path.exists(out)
-    rec = _json.load(open(out)) if wrote else {}
+    rec = _json.load(open(out, encoding="utf-8")) if wrote else {}
     dead = subprocess.run([sys.executable, main_py, "scan", "--url", f"http://127.0.0.1:{_free_port()}", "--quick",
                            "--authorized"], capture_output=True, text=True, timeout=120)
     return [
@@ -486,7 +486,7 @@ def _functional_bench_check() -> tuple:
         # ui-demo-depth: one case per engine regression the functional mutants showed (late update,
         # hidden element, field value, crashed step, colliding test data) — evals/functional_mutants.py
         code = bench(["ui-demo", "ui-demo-depth"], repeat=2, out=out)
-        apps = _json.loads(open(out).read())["apps"]
+        apps = _json.loads(open(out, encoding="utf-8").read())["apps"]
         detail = "; ".join(f"{a.get('name')}: {a.get('correct')}/{a.get('cases')} correct, flips {a.get('flipping_cases')}, "
                            f"false failures {a.get('false_failure_rate')}, missed {a.get('missed_defect_rate')}" for a in apps)
         return ("functional QA verdicts == truth (demo app, 2 runs)", code == 0 and len(apps) == 2, detail)

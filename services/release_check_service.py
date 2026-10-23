@@ -129,7 +129,7 @@ def run_release_check(cases: list, base_url: str, project: str = "", *, repo: st
         d["report_md"] += ("\n\n**Fix briefs for your coding agent** (steps, evidence, where to look, how to verify): "
                            + ", ".join(f"`{Path(b).name}`" for b in briefs) + "\n")
         try:
-            Path(d["files"]["markdown"]).write_text(d["report_md"])
+            Path(d["files"]["markdown"]).write_text(d["report_md"], encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
     say(f"verdict: {d['verdict']}")
@@ -151,7 +151,7 @@ def _write_briefs(d: dict, functional, cases: list, base_url: str, project: str,
                 continue
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"{b['id']}.md"
-            path.write_text(build(res[b["id"]], by_id.get(b["id"]), base_url=base_url, project=project, repo=repo))
+            path.write_text(build(res[b["id"]], by_id.get(b["id"]), base_url=base_url, project=project, repo=repo), encoding="utf-8")
             out.append(str(path))
         return out
     except Exception as exc:  # noqa: BLE001
@@ -184,8 +184,8 @@ def _write(d: dict, functional, scan_out, out_dir) -> dict:
         rec = {k: v for k, v in d.items() if k != "report_md"}
         rec["functional_results"] = (functional or {}).get("results", [])
         rec["scan"] = scan_out
-        (base / "release.json").write_text(json.dumps(rec, indent=2, default=str))
-        (base / "release.md").write_text(d["report_md"])
+        (base / "release.json").write_text(json.dumps(rec, indent=2, default=str), encoding="utf-8")
+        (base / "release.md").write_text(d["report_md"], encoding="utf-8")
         return {"json": str(base / "release.json"), "markdown": str(base / "release.md")}
     except Exception as exc:  # noqa: BLE001
         logger.warning("QAX release: could not write the report: %s", exc)

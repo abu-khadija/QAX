@@ -235,7 +235,7 @@ def test_client_safe_ticket_comment_names_no_tool():
 
 def _run_cli(monkeypatch, tmp_path, scan, tickets, extra=()):
     import cli.verify_fixes as V
-    p = tmp_path / "scan.json"; p.write_text(json.dumps(scan))
+    p = tmp_path / "scan.json"; p.write_text(json.dumps(scan), encoding="utf-8")
 
     class _R:
         def __init__(self, *a, **k): pass

@@ -56,7 +56,7 @@ def test_files_serves_screenshots_only(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "output" / "repos" / "x").mkdir(parents=True)
     (tmp_path / "output" / "repos" / "x" / "a.png").write_bytes(b"\x89PNG")
-    (tmp_path / "output" / "report.json").write_text("{}")
+    (tmp_path / "output" / "report.json").write_text("{}", encoding="utf-8")
     (tmp_path / "output" / "shot.png").write_bytes(b"\x89PNG")
     c = _c()
     assert c.get("/files/report.json").status_code == 404

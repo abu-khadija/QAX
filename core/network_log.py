@@ -73,7 +73,7 @@ def save(case_id: str, entries: list, folder: "str | None" = None) -> str:
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(case_id))[:60] or "case"
         path = d / f"{safe}_{time.strftime('%Y%m%d_%H%M%S')}.har"
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(to_har(entries), fh, indent=1)
         return str(path.relative_to(Path.cwd())) if str(path).startswith(str(Path.cwd())) else str(path)
     except Exception:  # noqa: BLE001

@@ -38,7 +38,7 @@ def run_reproduce_command() -> None:
     text = ""
     if args.ticket:
         try:
-            text = Path(args.ticket).read_text()
+            text = Path(args.ticket).read_text(encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             print(f"\n  QAX: could not read {args.ticket}: {exc}\n")
             sys.exit(3)
@@ -60,9 +60,9 @@ def run_reproduce_command() -> None:
     if args.out:
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
-        (out / "result.json").write_text(json.dumps({k: v for k, v in r.items() if k != "fix_brief"}, indent=2, default=str))
+        (out / "result.json").write_text(json.dumps({k: v for k, v in r.items() if k != "fix_brief"}, indent=2, default=str), encoding="utf-8")
         if r.get("fix_brief"):
-            (out / "fix-brief.md").write_text(r["fix_brief"])
+            (out / "fix-brief.md").write_text(r["fix_brief"], encoding="utf-8")
             print(f"\n  Fix brief for a coding agent: {out / 'fix-brief.md'}")
     sys.exit(EXIT.get(r["verdict"], 2))
 

@@ -17,7 +17,7 @@ def _entry(**kw):
 
 def _write(tmp_path, rows):
     p = tmp_path / "accepted.json"
-    p.write_text(json.dumps({"accepted": rows}))
+    p.write_text(json.dumps({"accepted": rows}), encoding="utf-8")
     return str(p)
 
 
@@ -76,7 +76,7 @@ def test_missing_default_file_is_silent_but_missing_explicit_file_is_reported(tm
     assert A.load(None)["error"] is None
     bad = A.load(str(tmp_path / "nope.json"))
     assert bad["error"] and bad["entries"] == []
-    (tmp_path / "broken.json").write_text("{not json")
+    (tmp_path / "broken.json").write_text("{not json", encoding="utf-8")
     assert A.load(str(tmp_path / "broken.json"))["error"]
 
 
@@ -97,7 +97,7 @@ def test_pr_gate_does_not_fail_on_an_accepted_finding(tmp_path, monkeypatch):
     monkeypatch.setattr("services.orchestrator_service.OrchestratorService", _Orch)
     monkeypatch.setattr("core.build_fingerprint.build_fingerprint", lambda u: None)
     assert pr.main() == 0
-    assert "Known / accepted findings" in (tmp_path / "c.md").read_text()
+    assert "Known / accepted findings" in (tmp_path / "c.md").read_text(encoding="utf-8")
     # without the file the same finding blocks
     monkeypatch.setenv("QAX_ACCEPTED", str(tmp_path / "missing.json"))
     res2 = OrchestratorResult(confirmed=[dict(_finding(), source="probe")])

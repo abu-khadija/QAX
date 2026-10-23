@@ -148,7 +148,7 @@ def test_fix_brief_route_builds_markdown_without_secrets(monkeypatch, tmp_path):
 
 def test_import_recording_route(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
-    text = (ROOT / "tests/data/recordings/playwright_add_note.spec.ts").read_text()
+    text = (ROOT / "tests/data/recordings/playwright_add_note.spec.ts").read_text(encoding="utf-8")
     d = c.post("/api/import-recording", json={"text": text}).get_json()
     assert d["format"] == "playwright-js" and d["case"]["automation_steps"] and d["needs_env"] == ["QAX_VAR_PASSWORD"]
     assert c.post("/api/import-recording", json={"text": "nope"}).status_code == 400
@@ -158,7 +158,7 @@ def test_mcp_offers_the_new_tools():
     from core.mcp_server import TOOLS, call_tool
     names = {t["name"] for t in TOOLS}
     assert {"qax_release_check", "qax_fix_brief", "qax_import_recording"} <= names
-    d, is_err = call_tool("qax_import_recording", {"text": (ROOT / "tests/data/recordings/chrome_add_note.json").read_text()})
+    d, is_err = call_tool("qax_import_recording", {"text": (ROOT / "tests/data/recordings/chrome_add_note.json").read_text(encoding="utf-8")})
     assert not is_err and d["case"]["test_case_id"]
     d, is_err = call_tool("qax_release_check", {"url": "http://127.0.0.1:1", "test_cases": [{"test_case_id": "T"}]})
     assert is_err and "authoriz" in str(d.get("error", "")).lower()

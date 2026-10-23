@@ -32,14 +32,14 @@ def run_import_recording_command() -> None:
     cases = []
     if args.append and out.exists():
         try:
-            cases = json.loads(out.read_text()).get("test_cases") or []
+            cases = json.loads(out.read_text(encoding="utf-8")).get("test_cases") or []
         except Exception:  # noqa: BLE001
             cases = []
     ids = {c.get("test_case_id") for c in cases}
     failed = 0
     for f in args.files:
         try:
-            text = Path(f).read_text()
+            text = Path(f).read_text(encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             print(f"  ✗ {f}: {exc}")
             failed += 1
@@ -63,6 +63,6 @@ def run_import_recording_command() -> None:
         if r["needs_env"]:
             print(f"      · set before running: {', '.join(r['needs_env'])} (the recorded value was dropped)")
     out.write_text(json.dumps({"_comment": "Imported from browser recordings (qax import-recording).",
-                               "test_cases": cases}, indent=2))
+                               "test_cases": cases}, indent=2), encoding="utf-8")
     print(f"\n  {len(cases)} case(s) in {out}")
     sys.exit(1 if failed else 0)

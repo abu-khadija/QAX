@@ -68,13 +68,13 @@ def test_config_file_prefers_repo_then_installed(tmp_path, monkeypatch):
     assert paths.config_file("system_prompt.md") == ROOT / "config" / "system_prompt.md"
     installed = tmp_path / "site" / "qax_config"
     installed.mkdir(parents=True)
-    (installed / "xray_schema.json").write_text("{}")
+    (installed / "xray_schema.json").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paths, "REPO_ROOT", tmp_path / "no-repo")
     monkeypatch.setattr(paths, "_installed_dir", lambda pkg: installed if pkg == "qax_config" else None)
     assert paths.config_file("xray_schema.json") == installed / "xray_schema.json"
     (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "xray_schema.json").write_text("{}")   # the user's copy in the run folder wins
+    (tmp_path / "config" / "xray_schema.json").write_text("{}", encoding="utf-8")   # the user's copy in the run folder wins
     assert paths.config_file("xray_schema.json") == tmp_path / "config" / "xray_schema.json"
     # neither has it → the repo path, so the caller's "not found" message names it
     assert paths.config_file("nope.md") == tmp_path / "no-repo" / "config" / "nope.md"
@@ -83,14 +83,14 @@ def test_config_file_prefers_repo_then_installed(tmp_path, monkeypatch):
 def test_configs_template_falls_back_to_shipped_copy(tmp_path, monkeypatch):
     shipped = tmp_path / "site" / "qax_configs"
     shipped.mkdir(parents=True)
-    (shipped / "smoke.json").write_text("{}")
+    (shipped / "smoke.json").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(paths, "REPO_ROOT", tmp_path / "no-repo")
     monkeypatch.setattr(paths, "_installed_dir", lambda pkg: shipped if pkg == "qax_configs" else None)
     assert paths.configs_template("configs/smoke.json") == shipped / "smoke.json"
     assert paths.configs_template("mine.json") == Path("mine.json")      # not a template: untouched
     (tmp_path / "configs").mkdir()
-    (tmp_path / "configs" / "smoke.json").write_text("{}")
+    (tmp_path / "configs" / "smoke.json").write_text("{}", encoding="utf-8")
     assert paths.configs_template("configs/smoke.json") == Path("configs/smoke.json")  # the user's copy wins
 
 
@@ -117,18 +117,18 @@ def test_wheel_install_writes_under_the_run_folder(tmp_path, monkeypatch):
 def test_editable_config_file_copies_the_shipped_prompt_once(tmp_path, monkeypatch):
     shipped = tmp_path / "site-packages" / "qax_config"
     shipped.mkdir(parents=True)
-    (shipped / "system_prompt.md").write_text("shipped")
+    (shipped / "system_prompt.md").write_text("shipped", encoding="utf-8")
     run = tmp_path / "work"
     run.mkdir()
     monkeypatch.chdir(run)
     monkeypatch.setattr(paths, "REPO_ROOT", tmp_path / "site-packages")
     monkeypatch.setattr(paths, "_installed_dir", lambda pkg: shipped if pkg == "qax_config" else None)
     target = paths.editable_config_file("system_prompt.md")
-    assert target == run / "config" / "system_prompt.md" and target.read_text() == "shipped"
-    target.write_text("edited")
-    assert paths.editable_config_file("system_prompt.md").read_text() == "edited"   # not re-copied
+    assert target == run / "config" / "system_prompt.md" and target.read_text(encoding="utf-8") == "shipped"
+    target.write_text("edited", encoding="utf-8")
+    assert paths.editable_config_file("system_prompt.md").read_text(encoding="utf-8") == "edited"   # not re-copied
     assert paths.config_file("system_prompt.md") == target                           # and it is what is read
-    assert (shipped / "system_prompt.md").read_text() == "shipped"                   # package untouched
+    assert (shipped / "system_prompt.md").read_text(encoding="utf-8") == "shipped"                   # package untouched
 
 
 def test_no_module_builds_output_or_config_paths_from_its_install_location():

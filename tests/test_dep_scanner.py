@@ -42,8 +42,8 @@ def test_parse_package_json_bad_input():
 
 
 def test_collect_dependencies_reads_repo(tmp_path):
-    (tmp_path / "requirements.txt").write_text("requests==2.32.3\nflask>=3.0.0\n")
-    (tmp_path / "package.json").write_text('{"dependencies":{"left-pad":"1.3.0"}}')
+    (tmp_path / "requirements.txt").write_text("requests==2.32.3\nflask>=3.0.0\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"dependencies":{"left-pad":"1.3.0"}}', encoding="utf-8")
     deps = collect_dependencies(str(tmp_path))
     names = {d["name"] for d in deps}
     assert {"requests", "flask", "left-pad"} <= names
@@ -109,7 +109,7 @@ def test_check_licenses_quiet_on_permissive():
 # ── orchestration ────────────────────────────────────────────────────────────
 
 def test_scan_offline_only_parses(tmp_path):
-    (tmp_path / "requirements.txt").write_text("requests==2.32.3\n")
+    (tmp_path / "requirements.txt").write_text("requests==2.32.3\n", encoding="utf-8")
     rep = scan_dependencies(str(tmp_path), online=False)
     assert rep["summary"]["total"] == 1 and rep["summary"]["pinned"] == 1
     assert rep["vulns"] == [] and rep["license_flags"] == []

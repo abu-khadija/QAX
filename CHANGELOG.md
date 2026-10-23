@@ -6,6 +6,21 @@ Every scan written with `--out` records the exact version and commit that produc
 
 ## [Unreleased]
 
+### Fixed (first run on Windows, 2026-10-23)
+- **UTF-8 everywhere**: every text file read or written names `encoding="utf-8"` (148 calls; Windows used cp1252
+  and failed on "✅" or Arabic text), and the web server, CI script and evals print UTF-8 — a scan's API-test step
+  had died with "'charmap' codec can't encode character". `tests/test_text_encoding.py` fails on any new call
+  that leaves the encoding to the OS.
+- **Vendored axe-core stays byte-exact**: `.gitattributes` keeps `core/vendor/**` out of line-ending conversion.
+  Git for Windows had checked it out with CRLF, so its SHA-256 no longer matched the published file (the file was
+  not altered otherwise: the Windows hash is exactly the CRLF form). Shell scripts keep LF.
+- **doctor** looks for Playwright's browsers where Windows keeps them (`%LOCALAPPDATA%\ms-playwright`) and starts
+  Chromium for real: an installed Chromium that does not start is a failure with a fix, not "ready".
+- **The test suite never reads the developer's real `.env`** (`tests/conftest.py`): a test passed on the owner's
+  machine only because `JIRA_CLOUD_ID` was set there. Two path tests no longer assume "/"; the self-signed HTTPS
+  test skips when `openssl` is missing.
+- Dev extra: `PyJWT` replaces `python-jose` (which pulled in `ecdsa`; pip-audit flagged both). `pip-audit`: none.
+
 ### Added
 - **Reproduce a bug from its ticket** (`qax reproduce --ticket FILE | --jira KEY`, the web "Does a reported bug still
   happen?" section, MCP `qax_reproduce_bug`): the ticket's steps run in the browser → REPRODUCED / NOT REPRODUCED /

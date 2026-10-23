@@ -41,7 +41,7 @@ def _mask(text: str) -> str:
 def _failed_requests(har_path: str, limit: int = 8) -> list:
     """Requests that failed or answered >= 400, from a QAX network log (HAR 1.2)."""
     try:
-        har = json.loads(Path(har_path).read_text())
+        har = json.loads(Path(har_path).read_text(encoding="utf-8"))
         out = []
         for e in (har.get("log") or {}).get("entries") or []:
             st = (e.get("response") or {}).get("status", 0)

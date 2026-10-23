@@ -88,11 +88,11 @@ def test_report_counts_and_summary():
 
 def test_cli_exit_codes(tmp_path, capsys):
     f = tmp_path / "c.json"
-    f.write_text(json.dumps([_case(), _case(manual_steps=[])]))
+    f.write_text(json.dumps([_case(), _case(manual_steps=[])]), encoding="utf-8")
     assert run(["--file", str(f)]) == 0
     assert run(["--file", str(f), "--fail-on", "error"]) == 1
     g = tmp_path / "ok.json"
-    g.write_text(json.dumps({"test_cases": [_case()]}))
+    g.write_text(json.dumps({"test_cases": [_case()]}), encoding="utf-8")
     assert run(["--file", str(g), "--fail-on", "warn"]) == 0
     assert run(["--file", str(tmp_path / "missing.json")]) == 2
     assert load_cases(str(g))[0]["title"].startswith("[Orders]")

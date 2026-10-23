@@ -97,7 +97,7 @@ async def record_session(url: str, project: str, *, timeout_s: int = 600, insecu
             path.parent.mkdir(parents=True, exist_ok=True)
             import json
             fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(last_state, fh)
             try:
                 await browser.close()

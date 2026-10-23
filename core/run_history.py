@@ -89,7 +89,7 @@ def save_run(project: str, url: str, results: list, root: Path | None = None, *,
                                 "files": int(selection.get("files") or 0)}
         path = folder / f"{ts}.json"
         tmp = folder / f".{ts}.tmp"
-        tmp.write_text(json.dumps(rec, indent=2))
+        tmp.write_text(json.dumps(rec, indent=2), encoding="utf-8")
         os.replace(tmp, path)
         return str(path)
     except Exception:  # noqa: BLE001
@@ -103,7 +103,7 @@ def save_generation_cost(project: str, usage: dict, root: Path | None = None) ->
         folder.mkdir(parents=True, exist_ok=True)
         rec = dict(usage or {}, when=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
         tmp = folder / ".generation_cost.tmp"
-        tmp.write_text(json.dumps(rec, indent=2))
+        tmp.write_text(json.dumps(rec, indent=2), encoding="utf-8")
         os.replace(tmp, folder / "generation_cost.json")
     except Exception:  # noqa: BLE001
         pass
@@ -118,7 +118,7 @@ def history(project: str, limit: int = 10, root: Path | None = None) -> list:
         out = []
         for f in files:                         # one half-written file must not hide the others
             try:
-                out.append(json.loads(f.read_text()))
+                out.append(json.loads(f.read_text(encoding="utf-8")))
             except Exception:  # noqa: BLE001
                 continue
         return out
@@ -161,7 +161,7 @@ def add_regression_cases(project: str, cases: list, bug_keys: dict, root: Path |
         folder = (root or _root()) / "regression"
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{_safe(project)}.json"
-        suite = json.loads(path.read_text()) if path.exists() else {"test_cases": []}
+        suite = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"test_cases": []}
         by_id = {str(c.get("test_case_id")): c for c in suite.get("test_cases", [])}
         for c in cases or []:
             if not isinstance(c, dict):
@@ -173,7 +173,7 @@ def add_regression_cases(project: str, cases: list, bug_keys: dict, root: Path |
         suite["test_cases"] = list(by_id.values())
         suite["_comment"] = ("QAX regression suite: every case here once found a bug. Load it in the "
                              "web UI (Load a test-cases file) or run `main.py execute` with it.")
-        path.write_text(json.dumps(suite, indent=2))
+        path.write_text(json.dumps(suite, indent=2), encoding="utf-8")
         return str(path)
     except Exception:  # noqa: BLE001
         return ""
@@ -184,7 +184,7 @@ def quarantine(project: str, root: Path | None = None) -> dict:
     bug lists and release readiness, still run and still shown)."""
     try:
         f = (root or _root()) / "functional_runs" / _safe(project) / "quarantine.json"
-        return json.loads(f.read_text()) if f.exists() else {}
+        return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
     except Exception:  # noqa: BLE001
         return {}
 
@@ -200,7 +200,7 @@ def set_quarantine(project: str, case_id: str, on: bool, reason: str = "", root:
         folder = (root or _root()) / "functional_runs" / _safe(project)
         folder.mkdir(parents=True, exist_ok=True)
         tmp = folder / ".quarantine.tmp"
-        tmp.write_text(json.dumps(q, indent=2))
+        tmp.write_text(json.dumps(q, indent=2), encoding="utf-8")
         os.replace(tmp, folder / "quarantine.json")
     except Exception:  # noqa: BLE001
         pass

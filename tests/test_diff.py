@@ -56,8 +56,8 @@ def test_warnings_for_different_targets_and_modes():
 
 def test_cli_exit_codes(tmp_path, capsys):
     o, n = tmp_path / "o.json", tmp_path / "n.json"
-    o.write_text(json.dumps(_scan([])))
-    n.write_text(json.dumps(_scan([_f("C", sev="P2")], build="b2")))
+    o.write_text(json.dumps(_scan([])), encoding="utf-8")
+    n.write_text(json.dumps(_scan([_f("C", sev="P2")], build="b2")), encoding="utf-8")
     assert run([str(o), str(n)]) == 0
     assert run([str(o), str(n), "--fail-on-new", "P1,P2"]) == 1
     assert run([str(o), str(n), "--fail-on-new", "P1"]) == 0

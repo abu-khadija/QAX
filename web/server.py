@@ -1082,6 +1082,8 @@ _register_functional(app, _sys.modules[__name__])
 
 def serve() -> None:
     """Start the web UI (the `qax-web` command and `python -m web.server`)."""
+    from core.console import force_utf8_output
+    force_utf8_output()
     # Loopback by default. QAX_WEB_HOST=0.0.0.0 is for a container (publish the port on the
     # host's loopback only); anywhere else, set QAX_API_TOKEN first.
     _host = os.getenv("QAX_WEB_HOST", "127.0.0.1") or "127.0.0.1"

@@ -39,7 +39,7 @@ def save_requirements(project: str, criteria: list, coverage: dict, story_key: s
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "requirements.json").write_text(json.dumps(
             {"criteria": criteria, "coverage": coverage, "story_key": story_key,
-             "when": time.strftime("%Y-%m-%d %H:%M")}, indent=2))
+             "when": time.strftime("%Y-%m-%d %H:%M")}, indent=2), encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
 

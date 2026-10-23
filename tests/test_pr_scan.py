@@ -43,7 +43,7 @@ def test_main_no_url_does_not_block(tmp_path, monkeypatch):
     monkeypatch.setenv("QAX_TARGET_URL", "")
     monkeypatch.setenv("QAX_COMMENT_PATH", str(comment))
     assert main() == 0                      # never blocks when there's no target
-    assert "skipping" in comment.read_text().lower()
+    assert "skipping" in comment.read_text(encoding="utf-8").lower()
 
 
 
@@ -163,14 +163,14 @@ def test_main_scans_live_only_by_default_so_no_api_key_is_needed(monkeypatch, tm
     assert P.main() == 0
     assert _FakeOrch.seen["url"] == "http://preview.test" and _FakeOrch.seen["deep"] is False
     assert _FakeOrch.seen["repo"] and "qax_ci_" in _FakeOrch.seen["repo"]  # an empty temp dir, not "."
-    assert "held up" in c.read_text()
+    assert "held up" in c.read_text(encoding="utf-8")
 
 
 def test_main_needs_a_key_only_for_deep_or_a_repo(monkeypatch, tmp_path):
     c, _ = _setup(monkeypatch, tmp_path, _res(), key="", QAX_REPO="./src")
-    assert P.main() == 0 and "Config error" in c.read_text()             # reported, not blocking
+    assert P.main() == 0 and "Config error" in c.read_text(encoding="utf-8")             # reported, not blocking
     c, _ = _setup(monkeypatch, tmp_path, _res(), key="", QAX_DEEP="1")
-    assert P.main() == 0 and "Config error" in c.read_text()
+    assert P.main() == 0 and "Config error" in c.read_text(encoding="utf-8")
 
 
 def test_main_passes_tokens_scheme_and_reverify_to_the_scan(monkeypatch, tmp_path):
@@ -207,10 +207,10 @@ def test_main_fails_when_a_required_probe_did_not_run(monkeypatch, tmp_path):
     gap = {"probe": "bola", "kind": "missing-prerequisite", "needs": "token_b", "reason": "r"}
     c, j = _setup(monkeypatch, tmp_path, _res(not_tested=[gap]), QAX_REQUIRE_PROBES="bola")
     assert P.main() == 1                                                  # green must never mean "didn't run"
-    assert "Required check(s) did not run: `bola`" in c.read_text()
-    assert _json.loads(j.read_text())["required_missing"] == ["bola"]
+    assert "Required check(s) did not run: `bola`" in c.read_text(encoding="utf-8")
+    assert _json.loads(j.read_text(encoding="utf-8"))["required_missing"] == ["bola"]
     c, _ = _setup(monkeypatch, tmp_path, _res(not_tested=[gap]))          # not required → warns but passes
-    assert P.main() == 0 and "NOT TESTED" in c.read_text()
+    assert P.main() == 0 and "NOT TESTED" in c.read_text(encoding="utf-8")
 
 
 def test_main_writes_a_json_with_the_honesty_ledgers(monkeypatch, tmp_path):
@@ -218,7 +218,7 @@ def test_main_writes_a_json_with_the_honesty_ledgers(monkeypatch, tmp_path):
     _, j = _setup(monkeypatch, tmp_path, _res(confirmed=[_BLOCK], left_on_target=left,
                                               not_tested=[{"probe": "xxe", "kind": "not-applicable", "reason": "n/a"}]))
     P.main()
-    out = _json.loads(j.read_text())
+    out = _json.loads(j.read_text(encoding="utf-8"))
     assert out["build"]["id"] == "abc123def456" and out["left_on_target"] == left
     assert [c["title"] for c in out["claims"]] == ["BOLA"] and out["not_tested"][0]["probe"] == "xxe"
 
@@ -229,4 +229,4 @@ def test_main_scan_errors_never_block_the_pr(monkeypatch, tmp_path):
     import services.orchestrator_service as O
     c, _ = _setup(monkeypatch, tmp_path, _res())
     monkeypatch.setattr(O, "OrchestratorService", _Boom)
-    assert P.main() == 0 and "Scan error" in c.read_text()
+    assert P.main() == 0 and "Scan error" in c.read_text(encoding="utf-8")
