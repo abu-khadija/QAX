@@ -59,7 +59,7 @@ def login():
         return redirect("/dashboard")          # like real apps: no login form when signed in
     error = ""
     if request.method == "POST":
-        if request.form.get("username") == "demo" and request.form.get("password") == "demo123":
+        if request.form.get("username") == "demo" and request.form.get("password") == "demo1234":
             resp = make_response(redirect("/dashboard"))
             resp.set_cookie("sid", _SESSION, httponly=True, samesite="Lax")
             return resp
