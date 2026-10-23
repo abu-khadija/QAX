@@ -181,8 +181,13 @@ Healthchecks rate-limits logins after many runs in a day. Its cases then come ou
 - Re-run the release-check demo on GitHub after any change to the workflow: open a PR from `demo/clean-change`
   (expect GO) and one from `demo/break-login` (expect NO-GO, never merge). The workflow's variables are in
   Settings → Secrets and variables → Actions → Variables.
-- The workflow's speed is unmeasured after the Chromium cache; the slow part (apt libraries on a slow mirror) is not
-  cached. A Playwright container image is the next experiment, not done.
+- Workflow speed, measured on GitHub 2026-10-23 (`workflow_dispatch` on the branch): cache miss 76 s for the whole job
+  (install 41 s), cache hit 66 s (cache restore 5 s, install 29 s): the Chromium cache saves about 10 s. The apt
+  libraries are not cached and their speed varies a lot: the same step took 338 s (job 373 s) on a slow-mirror run.
+  A Playwright container image would remove that variance; not tried.
+- Re-running a pull request with close + reopen can run the OLD workflow: GitHub recomputes the PR's merge commit
+  lazily. To test a workflow change use `gh workflow run qax-release-check.yml --ref <branch>` (the workflow has
+  `workflow_dispatch`) or push to the PR's branch.
 - `qax verify-fixes` and the Jira filing still run only from the command line; the web UI has "What changed between
   two scans?" (`/api/diff`), not the Jira-linked re-check.
 - Removed as dead (static check, 2026-10-23): three services, four result types, two functions; see CHANGELOG.
