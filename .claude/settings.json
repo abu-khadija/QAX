@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*(createJiraIssue|editJiraIssue|addOrEditJiraIssueComment|transitionJiraIssue|createConfluenceContent|updateConfluenceContent|executeWrite|executeDestructive)|mcp__.*__(navigate|preview_start)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/qax_guard.py\"",
+            "timeout": 10,
+            "statusMessage": "QAX guard"
+          }
+        ]
+      }
+    ]
+  }
+}
