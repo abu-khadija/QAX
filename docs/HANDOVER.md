@@ -1,31 +1,37 @@
-# QAX — handover to a new machine (2026-10-21)
+# QAX — handover to a new machine (2026-10-21, updated 2026-10-23 after the move)
 
 Everything needed to continue on another machine: what to move, how to set it up, how to check it works,
-where things are, and what is open. Read section 1 first: **some of the work is not on GitHub.**
+where things are, and what is open. Read section 1 first.
 
 ---
 
-## 1. State right now
+## 1. State right now (re-measured on the new Mac, 2026-10-22/23)
 
 | | |
 |---|---|
 | Branch | `feat/functional-qa-track` (all work since 2026-10-19 is here) |
-| Last commit | see `git log -1` — the handover commit, after `ae0b3d9` |
-| On GitHub? | **No.** The branch has never been pushed (by agreement: no push without the owner). `main` on GitHub is still at `0be95d4`. |
-| Tests | 1020 passed, 4 skipped on the last full run; one mutant guard fixed afterwards (it passes on its own; **re-run the full suite once on the new machine**) |
+| Last commit | see `git log -1` (after `bcd61fd`, the Windows fixes) |
+| On GitHub? | **Yes, private.** `abu-khadija/QAX` was deleted by the owner and recreated private; `main` (`0be95d4`), `feat/service-layer-and-reliability-fix` and `feat/functional-qa-track` were pushed with the **clean** history on 2026-10-22. |
+| Tests | **1031 passed, 0 skipped** (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
 | Gate | `make eval` → GATE: PASS |
-| Benchmarks | functional 125/125 on 15 sets (×2); release check 4/4; bug reproduction 6/6; functional mutants 13/13; scan 32/32, 0 FP, mutants 40/40 |
+| Benchmarks | functional **120/120 on 15 sets (×2)**; release check 4/4; bug reproduction 6/6; functional mutants 13/13; scan 32/32, 0 FP |
+| Windows | first run 2026-10-23: scan works (demo 44 findings, gate scan rows 32/32). The browser track did **not** run: Chromium would not start on that machine (see §4a) |
+
+**Not settled:** before the move this file said "functional 125/125". The same 15 sets now hold 120 cases
+(sum of `cases` in the raw result). The 5-case difference is not explained yet.
+
+**First functional run on the new Mac:** one case each in memos and beszel gave PASS then FAIL (a flip, so
+`make bench-functional` exits 1). Both apps had just been started. Re-run alone, `--repeat 3`: no flip.
+Watch for it again; a second flip there needs a real look.
 
 **History rewritten on 2026-10-22.** Everything related to the former employer was removed from **every**
 commit with `git filter-repo`. The current tree is byte-identical (tree `b84ecc1`), so all commit IDs changed:
 `docs/COMMIT_MAP_2026-10-22.txt` maps old IDs to new ones. The evidence documents and run records already use
 the new IDs.
 
-**GitHub was NOT cleaned.** `abu-khadija/QAX` was not reachable with this machine's stored credential ("Repository not
-found"). If that repository still exists, its `main` and `feat/service-layer-and-reliability-fix` branches hold the
-**old** history. Either delete the repository on GitHub yourself, or log in and replace those two branches with the
-clean ones (`git push --force origin main feat/service-layer-and-reliability-fix`). The original history is kept
-only in the private legal archive outside the repo.
+**GitHub is clean now.** The old repository (which held the old history) was deleted by the owner on
+2026-10-22; the private one holds only the rewritten history. The original history is kept only in the
+private legal archive outside the repo.
 
 ## 2. Move the code (pick one)
 
@@ -59,6 +65,19 @@ Check: `git log --oneline -3` shows the same commits as here.
   run `git -C ~/Downloads/qax-corpus/linkding worktree repair`.
 - `.demo-petclinic-seeded` is rebuilt by the demo script when it is missing.
 
+**What the 2026-10-22 move taught (the corpus is not portable as copied):**
+- **The old user's home is written inside it.** Every venv's scripts (`#!/Users/islam.hanafy/...`), `start-all.sh`
+  (the flaskr line) and eShopOnWeb's build (static-asset manifests) held `/Users/islam.hanafy/`. Replace it with
+  the new home in those text files. eShopOnWeb also needs its NuGet packages: `dotnet build -c Release` in
+  `eShopOnWeb/src/Web` restores them.
+- **Venv Python versions.** linkding, linkding-old and healthchecks use Python **3.13**; microblog uses 3.12.
+  Install `python@3.13`, then `python3.13 -m venv --upgrade <app>/.venv`.
+- **macOS held the moved apps.** Files that came over AirDrop carry `com.apple.quarantine`; their programs and
+  native modules hung at start (0 % CPU, `_dyld_start`), even after the flag was removed. A plain copy to a
+  **new folder name** ran at once. On this Mac the corpus now lives in `~/Downloads/qax-corpus-live`, and
+  `~/Downloads/qax-corpus` is a symlink to it, so every documented path still works.
+- After those fixes all 11 apps answer (8945, 9090–9097, 9190, 4210, 8960).
+
 ## 4. Set up the new machine
 
 ```bash
@@ -75,15 +94,39 @@ For the benchmark and the demo apps:
 
 The commands are in `~/Downloads/qax-corpus/start-all.sh` and `evals/data/functional_bench.json`.
 
+**Before starting anything: stop old QAX servers.** On the new Mac an old web server from another copy of the
+repo (started days earlier) still held port 8900, and `prepare_demo.sh` reused it, so the browser showed an old
+UI. Check `lsof -nP -iTCP:8900 -sTCP:LISTEN` and look at the process's folder.
+
+## 4a. Windows (first tried 2026-10-23)
+
+PowerShell, no `make`, no bash. Use `py -3.12 -m venv .venv-exec`, then `.\.venv-exec\Scripts\python.exe` for
+every command (`-m pip install -e ".[dev,visual,yaml]"`, `-m playwright install chromium`, `main.py doctor`,
+`main.py demo`, `-m pytest -q tests`, `-m web.server`). `demo/*.sh` and the corpus need bash and macOS builds.
+
+Fixed in `bcd61fd` after that run (each with a test): text I/O without `encoding=` (cp1252 broke on "✅" and
+Arabic, and killed a scan's API-test step); Git's CRLF checkout changed the vendored axe-core (now
+`.gitattributes`); doctor looked for browsers in the Linux folder and never started one; the suite read the
+developer's real `.env`; two path tests assumed "/"; the HTTPS test needed `openssl`. **These fixes have not
+been re-run on Windows yet.** An existing Windows checkout must take axe-core again after the pull:
+`Remove-Item core\vendor\axe-core\axe.min.js; git checkout -- core/vendor/axe-core/axe.min.js`.
+
+**Still open on Windows: Chromium does not start** on the tester's machine (`BrowserType.launch: spawn UNKNOWN`,
+`chrome.exe`: "side-by-side configuration is incorrect"), also after installing the Visual C++ Redistributable.
+The commands ran inside the Codex app's sandbox, which may block programs outside the project folder; Windows
+Insider build 26300 with Smart App Control is the other suspect. Next: run `main.py doctor` from a plain
+PowerShell window. If Chromium stays blocked there, a QAX option to drive the preinstalled Microsoft Edge
+(Playwright channel `msedge`) is the fallback; it is not built.
+
 ## 5. Check it works (in this order)
 
 ```bash
-./.venv-exec/bin/python main.py doctor             # machine ready?
-./.venv-exec/bin/python -m pytest -q tests         # ~10 min — expect 1020+ passed, 4 skipped
+./.venv-exec/bin/python main.py doctor             # machine ready? (it now starts Chromium for real)
+./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1031 passed, 0 skipped
 make eval                                          # expect GATE: PASS
 bash demo/prepare_demo.sh                          # all ports 200 (8930 may be 500 — it is an API)
 set -a; . ~/Downloads/qax-corpus/.bench.env; set +a
-make bench-functional                              # ~25 min — 15 sets equal to truth
+make bench-functional                              # ~25 min — 15 sets equal to truth (120 cases)
 ```
 
 Healthchecks rate-limits logins after many runs in a day. Its cases then come out ERROR, cause environment
@@ -114,14 +157,17 @@ Healthchecks rate-limits logins after many runs in a day. Its cases then come ou
 
 **Waiting on the owner (nothing engineering can do without them):**
 1. AI credit, or approval to download a local model, to run `make eval-generation`. AI-written cases are
-   still unmeasured; this is the biggest unknown.
+   still unmeasured; this is the biggest unknown. (2026-10-23: the Anthropic key answers "credit balance too
+   low"; `release-check` tried an AI call and still decided 4/4 right without it.)
 2. A Jira (and Xray) trial: the story-in and bug-out loop has never run live for functional runs.
-3. A repository QAX may push to, with CI: a real PR comment from `release-check` has not been tried.
+3. CI on the private repository: a real PR comment from `release-check` has not been tried.
 4. The IP and legal review before any use at the company. Confirm who owns QAX first.
 5. The positioning decision, Phase-0 interviews, and a human baseline (a person testing the same apps).
 
 **Engineering, small:**
-- Run the full test suite once on the new machine (see §1).
+- Windows: re-run the suite after `bcd61fd`; get Chromium to start (§4a).
+- Explain 120 vs 125 functional cases (§1).
+- `prepare_demo.sh` reuses whatever answers on 8900; it should check that the server is this checkout's QAX.
 - The plain-language step reader (manual steps, tickets) is now strict: it refuses rather than guesses. Watch
   real tickets for wording it should learn; add each as a test.
 - `QAX_SETTLE_MAX_MS` (default 6 s) bounds the wait after a click. Revisit it if a real app updates slower.
