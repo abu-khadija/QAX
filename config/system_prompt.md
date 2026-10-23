@@ -120,6 +120,8 @@ Return an array of test case objects. Each object has exactly these fields:
 - `automation_steps[].playwright_action` — one of `click · fill · navigate · assert · select · upload · wait · hover`.
 - `automation_steps[].selector_key` — never empty. Use `TODO_elementname` when the selector is unknown from the code.
 - `automation_steps[].assertion_type` — never empty. Default to `visible`. One of `visible · text · url · count · enabled · disabled · checked · value · contains · not_visible · attribute`.
+- **Browser cases: one action per step; every check is its own `assert` step.** An `assertion_type`/`assertion_value` on a `click`, `fill` or `navigate` step is evaluated against THAT step's own element, right after the action: a login button that was just clicked is gone once the page changes, so the check fails although the app is fine. To check a result, add a separate step with `playwright_action: "assert"` whose `selector_key` is the element that SHOWS the result (the welcome heading, the error message, the list item), never the element that was clicked. On an action step leave `assertion_value` empty.
+- **Browser cases are self-contained and start signed out.** Each case runs in a fresh browser with no session. If the flow needs a signed-in user, the case's FIRST steps navigate to the login page, fill the credentials given in the context and click the login button (and a separate `assert` step confirms it worked) — never start on a page that needs a session (a dashboard, a list of saved items) and never assume an earlier case logged in.
 - `generated_at` — valid ISO-8601 UTC. `generated_from_file` — the exact path you were given.
 - `test_data` — optional; a JSON object when present, never a string.
 
