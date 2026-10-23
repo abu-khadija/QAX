@@ -110,3 +110,19 @@ def test_release_check_workflow_is_valid_for_the_installed_cli_flags():
     assert used, "no flags parsed"
     for flag in used:
         assert f'"{flag}"' in cli, flag
+
+
+# GitHub forces Node 20 actions onto Node 24 with a deprecation warning on every run. These majors declare node24
+# (read from each action's action.yml on 2026-10-24; note upload-artifact@v5 is still node20).
+_NODE20 = {"actions/checkout@v4", "actions/setup-python@v5", "actions/cache@v4", "actions/github-script@v7",
+           "actions/upload-artifact@v4", "actions/upload-artifact@v5"}
+
+
+def test_no_template_uses_an_action_that_still_runs_on_node_20():
+    import re
+    root = CI.parent
+    files = sorted(CI.glob("github_action*.yml")) + sorted((root / ".github" / "workflows").glob("*.yml"))
+    assert files
+    for f in files:
+        used = set(re.findall(r"uses:\s*(actions/[\w-]+@v\d+)", f.read_text(encoding="utf-8")))
+        assert not (used & _NODE20), (f.name, used & _NODE20)
