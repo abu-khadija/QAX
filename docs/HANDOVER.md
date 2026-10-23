@@ -12,7 +12,7 @@ where things are, and what is open. Read section 1 first.
 | Branch | `feat/functional-qa-track` (all work since 2026-10-19 is here) |
 | Last commit | see `git log -1` (after `bcd61fd`, the Windows fixes) |
 | On GitHub? | **Yes, private.** `abu-khadija/QAX` was deleted by the owner and recreated private; `main` (`0be95d4`), `feat/service-layer-and-reliability-fix` and `feat/functional-qa-track` were pushed with the **clean** history on 2026-10-22. |
-| Tests | **1040 passed, 0 skipped** (2026-10-23, after the CI, UI and dead-code work) (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
+| Tests | **1099 passed, 0 failed** (2026-10-24, after the AI-provider, CI and dead-code work) (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
 | Gate | `make eval` → GATE: PASS. `make eval-deep` → PASS on `gemini-3-flash-preview` (4 AI calls, 25 cases, 44 confirmed findings all from probes) |
 | AI features (2026-10-23, free Gemini tier, **never Claude**) | Generation on the demo notes story: `gemini-3.5-flash` met the bar 1 of 2 completed runs, `gemini-3-flash-preview` 0 of 2. Self-healing: 1 case healed. Ticket writer: 1 ticket, buggy app REPRODUCED / fixed copy NOT REPRODUCED. n is tiny; every number belongs to its model. Eight defects found and fixed (CHANGELOG "AI features run for real") |
 | Release check on GitHub | **Ran on real pull requests 2026-10-23** (QAX's own private repo, demo app): PR #1 harmless change → **GO**; PR #2 login broken → **NO-GO**, closed unmerged. PR #1 is kept open as the proof. Variables set in the repo: `QAX_APP_URL`, `QAX_PROJECT`, `QAX_REPO`, `QAX_APP_START`; branches `demo/clean-change` and `demo/break-login` on GitHub. See `strategy/PLAN.md` §9 for the two defects the first runs found |
@@ -128,7 +128,7 @@ PowerShell window. If Chromium stays blocked there, a QAX option to drive the pr
 
 ```bash
 ./.venv-exec/bin/python main.py doctor             # machine ready? (it now starts Chromium for real)
-./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1040 passed, 0 skipped
+./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1099 passed
 make eval                                          # expect GATE: PASS
 bash demo/prepare_demo.sh                          # all ports 200 (8930 may be 500 — it is an API)
 set -a; . ~/Downloads/qax-corpus/.bench.env; set +a
