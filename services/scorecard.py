@@ -83,7 +83,8 @@ def match_truth(claims: list, expected: list) -> dict:
 
 
 def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
-              usage: dict | None = None, truth: dict | None = None) -> dict:
+              usage: dict | None = None, truth: dict | None = None,
+              read_only: bool = False) -> dict:
     """
     Build a scorecard record from an OrchestratorResult and run metadata.
 
@@ -96,6 +97,7 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
             A finding matches an entry when EVERY keyword is a substring of its
             text. Recall = entries matched / documented; FP = findings matching
             no entry.
+        read_only: True when the scan ran with --read-only (no writes to the target).
 
     Returns:
         dict: The full scorecard record (never raises).
@@ -136,6 +138,10 @@ def score_run(result, *, repo: str, url: str, mode: str, duration_sec: float,
         "by_layer": by_layer,
         "coverage": dict(getattr(result, "coverage", {}) or {}),
         "completed_end_to_end": bool(getattr(result, "success", False)),
+        "read_only": bool(read_only),
+        "not_tested": list(getattr(result, "not_tested", []) or []),
+        "left_on_target": list(getattr(result, "left_on_target", []) or []),
+        "silent_legs": list(result.silent_legs() if callable(getattr(result, "silent_legs", None)) else []),
         "confirmed": [{"title": b.get("title"), "severity": b.get("severity"),
                        "source": b.get("source")} for b in confirmed],
     }

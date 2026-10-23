@@ -260,7 +260,8 @@ def run_scan_command() -> None:
     try:
         _rec = _scorecard.score_run(
             result, repo=(args.repo or args.url), url=args.url, mode=mode,
-            duration_sec=_elapsed, usage=_usage.snapshot(), truth=_truth)
+            duration_sec=_elapsed, usage=_usage.snapshot(), truth=_truth,
+            read_only=bool(getattr(args, "read_only", False)))
         _path = _scorecard.write_run(_rec)
         print(_scorecard.render(_rec))
         if _path:

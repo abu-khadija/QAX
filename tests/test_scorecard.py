@@ -45,6 +45,11 @@ def test_score_run_marks_failed_run_not_end_to_end():
                               mode="deep", duration_sec=1.0)
     assert rec["completed_end_to_end"] is False
     assert rec["confirmed_count"] == 0
+    # run-record fields are always present (PLAN.md §6)
+    assert rec["read_only"] is False
+    assert rec["not_tested"] == []
+    assert rec["left_on_target"] == []
+    assert rec["silent_legs"] == []
 
 
 # ── scorecard: recall + false-positive math against ground truth ─────────────
@@ -134,3 +139,35 @@ def test_entries_without_a_probe_still_work_but_are_listed_as_keyword_only():
     from services.scorecard import match_truth
     m = match_truth([{"title": "Reflected XSS on /greet"}], [{"id": "x", "match": ["reflected xss"]}])
     assert m["tp"] == 1 and m["keyword_only"] == ["x"]
+
+
+# ── run-record completeness (PLAN.md §6; first written 2026-10-18 in another checkout) ──
+
+def test_score_run_read_only_flag_propagates():
+    rec = scorecard.score_run(_result(), repo="r", url="u", mode="quick", duration_sec=1.0, read_only=True)
+    assert rec["read_only"] is True
+
+
+def test_score_run_propagates_not_tested_and_left_on_target():
+    nt = [{"probe": "csrf-check", "reason": "no POST form found", "kind": "missing-prerequisite"}]
+    lot = [{"collection": "users", "key": "test-99", "why": "cleanup failed"}]
+    result = OrchestratorResult(
+        confirmed=[{"title": "x", "severity": "P2", "source": "test"}],
+        not_tested=nt, left_on_target=lot, rounds=2, tests_run=5, suspects=10,
+        legs={"functional_attempted": True, "functional_generated": 3,
+              "templates_injected": 2, "tests_executed": 5},
+    )
+    rec = scorecard.score_run(result, repo="r", url="u", mode="deep", duration_sec=8.0)
+    assert rec["not_tested"] == nt and rec["left_on_target"] == lot
+    assert rec["silent_legs"] == []
+
+
+def test_score_run_silent_legs_detects_dead_stage():
+    """A stage that ran but produced nothing is flagged as a silent leg."""
+    result = OrchestratorResult(
+        confirmed=[],
+        legs={"functional_attempted": True, "functional_generated": 0,
+              "templates_injected": 2, "tests_executed": 0},
+    )
+    rec = scorecard.score_run(result, repo="r", url="u", mode="deep", duration_sec=3.0)
+    assert len(rec["silent_legs"]) >= 1
