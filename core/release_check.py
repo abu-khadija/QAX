@@ -97,7 +97,7 @@ def decide(functional: "dict | None", *, selection: "dict | None" = None, scan: 
                                      "why": str(c.get("target") or c.get("endpoint") or "")[:120]})
             for g in (scan.get("coverage_gaps") or [])[:20]:
                 not_covered.append({"kind": "security", "id": str(g.get("probe") or g.get("kind") or "check"),
-                                    "why": str(g.get("reason") or g.get("kind") or "")[:160]})
+                                    "why": _clean(g.get("reason") or g.get("kind") or "", 160)})
     elif scan_requested:
         not_proven.append({"kind": "security", "id": "scan", "title": "the security scan was asked for but did not run",
                            "status": "NOT RUN", "cause": "environment", "why": ""})
@@ -132,12 +132,20 @@ def decide(functional: "dict | None", *, selection: "dict | None" = None, scan: 
                           "files": (selection or {}).get("files", 0)}}
 
 
+def _clean(text, limit: int = 220) -> str:
+    """One readable line: whitespace (newlines from page text) flattened, cut at a word with an ellipsis."""
+    flat = " ".join(str(text or "").split())
+    if len(flat) <= limit:
+        return flat
+    return flat[:limit].rsplit(" ", 1)[0].rstrip(" ,.;:") + " …"
+
+
 def _first_failure(r: dict) -> str:
-    """The first failing step's observed result, short."""
+    """The first failing step's observed result, as one short readable line."""
     for s in r.get("steps") or []:
         if s.get("status") not in ("PASS", "HEALED"):
-            return f"step {s.get('step_number', '?')}: " + str(s.get("actual_result") or s.get("error") or "")[:160]
-    return str(r.get("error") or "")[:160]
+            return f"step {s.get('step_number', '?')}: " + _clean(s.get("actual_result") or s.get("error") or "")
+    return _clean(r.get("error") or "")
 
 
 def _observations(results: list) -> dict:

@@ -19,6 +19,23 @@ def _r(cid, status, cause="", **kw):
                  "steps": [{"step_number": 1, "status": status, "actual_result": "seen"}]}, **kw)
 
 
+def test_a_blocker_quotes_the_app_on_one_readable_line():
+    """Page text has newlines and can be long: the report must stay a one-line list item, cut at a word."""
+    page = "\n".join(["HOME", " FIND OWNERS", "VETERINARIANS", "ERROR", "Owner", "First Name"] * 12)
+    actual = f"Text mismatch. Expected 'Telephone must be a 10-digit number', got '{page}' (still failing after 3s)"
+    r = _r("TC-1", "FAIL", "app", steps=[{"step_number": 8, "status": "FAIL", "actual_result": actual}])
+    d = decide({"results": [r]})
+    why = d["blockers"][0]["why"]
+    assert "\n" not in why and "  " not in why
+    assert why.startswith("step 8: Text mismatch. Expected 'Telephone must be a 10-digit number'")
+    assert why.endswith(" …") and len(why) < 260                      # cut at a word, never mid-word
+    line = [x for x in render_markdown(d).splitlines() if x.startswith("- **functional TC-1**")]
+    assert len(line) == 1 and line[0].endswith(" …")
+    short = decide({"results": [_r("S", "FAIL", "app", steps=[{"step_number": 2, "status": "FAIL",
+                                                              "actual_result": "Text mismatch.\nExpected 'a'"}])]})
+    assert short["blockers"][0]["why"] == "step 2: Text mismatch. Expected 'a'"        # short text is not touched
+
+
 def test_everything_ran_and_passed_is_go():
     d = decide({"results": [_r("A", "PASS"), _r("B", "PASS")]}, scan={"claims": [], "coverage_gaps": []},
                scan_requested=True)
