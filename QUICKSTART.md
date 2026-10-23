@@ -156,7 +156,7 @@ risks the story implies), writes test cases traced to each criterion, and lets y
 **share** them to Jira/Xray (dry run unless live export is enabled). Then **Run tests**: PASS / FAIL per case with a
 screenshot of every step, the page errors it saw, accessibility and performance observations, and what changed since
 the last run. Failures become Jira bugs (English or Arabic), linked to the story, with the requirement verdicts as a
-comment on it — previewed until an operator enables live export. Writing test cases needs `ANTHROPIC_API_KEY`;
+comment on it — previewed until an operator enables live export. Writing test cases needs an AI provider (`ANTHROPIC_API_KEY`, or any OpenAI-compatible API: see the README);
 everything else works without AI (load your own cases file instead).
 
 For coding agents: `python main.py mcp` serves the same tools over MCP — see [docs/MCP.md](docs/MCP.md).
@@ -175,8 +175,8 @@ To file the findings to Jira for real, add `--live` and set `JIRA_BASE_URL`, `JI
 ## 6. Known limits (today)
 
 - **The quick scan sends no data to any AI service.** A deep scan (without `--quick`) uses the
-  Anthropic API, needs `ANTHROPIC_API_KEY` in `.env`, costs about $0.5–1 per run, and sends the API
-  surface (and the source code if you pass `--repo`) to Anthropic.
+  AI provider (Anthropic by default, or an OpenAI-compatible API you configure), needs its key in `.env`, and sends the API
+  surface (and the source code if you pass `--repo`) to that provider. Measured once: ~$0.13 at Sonnet list prices on the golden test app.
 - Apps **without an OpenAPI/Swagger document** are scanned less thoroughly unless you give QAX the surface
   (`--spec`, `--endpoints`, `--repo`). It says so under NOT TESTED.
 - A **username/password login form** is not supported: log in yourself and pass the cookie or token.

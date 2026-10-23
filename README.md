@@ -45,7 +45,8 @@ python main.py scan --url https://your-app.example --quick --authorized \
   Accepted findings are not counted, not blocking and not filed — but they are always listed under
   **ACCEPTED**, an expired acceptance counts again, and an entry that matches nothing is reported.
 * A **quick** scan needs no API key. A **deep** scan (AI test generation, red-team, critic)
-  needs `ANTHROPIC_API_KEY` in `.env` (about $0.5–1 per run).
+  needs an AI provider (`ANTHROPIC_API_KEY`, or any OpenAI-compatible API — see *AI provider* below). Measured once: a deep scan of the
+  golden test app made 4 AI calls, ~20k tokens (≈ $0.13 at Sonnet list prices); a bigger app costs more.
 
 **Compare two scans:** `python main.py diff before.json after.json` → NEW · STILL THERE · GONE ·
 NOT RE-CHECKED · FLAKY? · ACCEPTED. A finding that disappeared is only GONE when its probe really ran on a
@@ -150,7 +151,9 @@ Copy `.env.example` to `.env` and fill in these variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | **Yes** | Claude API key — get from console.anthropic.com |
+| `ANTHROPIC_API_KEY` | For AI features, unless another provider is set | Claude API key — get from console.anthropic.com. The quick scan, `release-check`, `execute` and `reproduce` need no AI |
+| `QAX_AI_PROVIDER` / `QAX_AI_MODEL` / `QAX_AI_BASE_URL` / `QAX_AI_API_KEY` | No | Use any OpenAI-compatible API (a free tier, Azure, a local model) instead of Anthropic — see *AI provider* below |
+| `QAX_AI_REASONING_EFFORT` | No | `none` / `low` / … sent as `reasoning_effort`. A reasoning model can spend the whole output budget thinking: set `none` |
 | `JIRA_BASE_URL` | Yes (for push) | Your Jira Cloud URL, e.g. `https://company.atlassian.net` |
 | `JIRA_EMAIL` | Yes (for push) | Email you use to log into Jira |
 | `JIRA_API_TOKEN` | Yes (for push) | Jira API token (not your password) — generate at id.atlassian.com |
@@ -341,6 +344,21 @@ python main.py analyze --file "D:\path\to\YourController.cs" --project example
 
 ---
 
+## AI provider (optional)
+
+What needs an AI: writing test cases from a story or code, the deep scan (red-team, critic, investigator), AI selector healing (`--ai-heal`) and the
+ticket writer (`reproduce --ai-writer`). Everything else runs without one, and a quick scan makes zero provider calls.
+
+```
+QAX_AI_PROVIDER=openai
+QAX_AI_BASE_URL=https://…/v1          # https only; http only for a model on this machine (Ollama: http://localhost:11434/v1)
+QAX_AI_MODEL=<model name>
+QAX_AI_API_KEY=<key>                  # a local model needs none
+QAX_AI_REASONING_EFFORT=none          # for reasoning models (see the table above)
+```
+
+Measure a provider before trusting it: `make eval-generation` scores the cases it writes and **names the model** in the printout and the record. Measured 2026-10-23 on one story: `gemini-3.5-flash` met the bar in 1 of 2 completed runs and `gemini-3-flash-preview` in 0 of 2, so the result depends on the model. A free tier has a small **daily request cap per model** (two models ran out in one day of testing): enough to try, not to run every day. 429 and 503 answers are retried (1, 2, 4 s, four tries).
+
 ## Troubleshooting
 
 Start with `python main.py doctor`. More: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
@@ -353,6 +371,12 @@ Make sure `config/projects/example/context.md` exists. See the Projects section 
 
 **`JSON parse failed — retrying with correction prompt`**
 Handled automatically. If it happens on every chunk, check that `config/system_prompt.md` starts with `OUTPUT FORMAT — READ THIS FIRST`.
+
+**`Error code: 429 … quota`** (free tier)
+The provider's daily request cap for that model is used up (it resets daily) — switch `QAX_AI_MODEL` to another model or wait. A short 429/503 is retried automatically.
+
+**`AI answer cut after N visible characters`**
+A reasoning model spent the output budget thinking: set `QAX_AI_REASONING_EFFORT=none`.
 
 **`Insufficient API credits`**
 Add credits at: console.anthropic.com/settings/billing

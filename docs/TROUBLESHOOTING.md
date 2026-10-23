@@ -41,6 +41,10 @@ git, the output folder and which integrations are configured, and prints the exa
 | CI hangs at "Proceed with execution?" | Add `--yes` (implied when `CI=true`). |
 | Parallel runs disagree with a single run | The cases depend on each other or on shared data; make each self-contained (`{{unique}}`, `cleanup_steps`). |
 | Writing cases without Anthropic | `QAX_AI_PROVIDER=openai` + `QAX_AI_MODEL` (+ `QAX_AI_BASE_URL` for Azure or a local Ollama). |
+| `Error code: 429 … quota` from a free tier | The provider's DAILY request cap for that model is used up (it resets daily): use another model in `QAX_AI_MODEL` or wait. Short 429/503 answers are retried (1, 2, 4 s). |
+| `AI answer cut after N visible characters`, or cases cut at max_tokens | A reasoning model spent the output budget thinking: `QAX_AI_REASONING_EFFORT=none`. |
+| `make eval-generation` says NOT MEASURED | No provider configured (it names what is missing), or the provider answered 429/503 for every story. The record names the model that was measured. |
+| A generated case fails at step 1 with a missing element | The case never opened a page (no navigate first): QAX classes it as a TEST problem, not an app bug. Regenerate, or add the navigate. |
 
 ## Change-based runs
 

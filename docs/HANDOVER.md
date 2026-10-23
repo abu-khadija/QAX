@@ -13,7 +13,8 @@ where things are, and what is open. Read section 1 first.
 | Last commit | see `git log -1` (after `bcd61fd`, the Windows fixes) |
 | On GitHub? | **Yes, private.** `abu-khadija/QAX` was deleted by the owner and recreated private; `main` (`0be95d4`), `feat/service-layer-and-reliability-fix` and `feat/functional-qa-track` were pushed with the **clean** history on 2026-10-22. |
 | Tests | **1040 passed, 0 skipped** (2026-10-23, after the CI, UI and dead-code work) (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
-| Gate | `make eval` → GATE: PASS |
+| Gate | `make eval` → GATE: PASS. `make eval-deep` → PASS on `gemini-3-flash-preview` (4 AI calls, 25 cases, 44 confirmed findings all from probes) |
+| AI features (2026-10-23, free Gemini tier, **never Claude**) | Generation on the demo notes story: `gemini-3.5-flash` met the bar 1 of 2 completed runs, `gemini-3-flash-preview` 0 of 2. Self-healing: 1 case healed. Ticket writer: 1 ticket, buggy app REPRODUCED / fixed copy NOT REPRODUCED. n is tiny; every number belongs to its model. Eight defects found and fixed (CHANGELOG "AI features run for real") |
 | Release check on GitHub | **Ran on real pull requests 2026-10-23** (QAX's own private repo, demo app): PR #1 harmless change → **GO**; PR #2 login broken → **NO-GO**, closed unmerged. PR #1 is kept open as the proof. Variables set in the repo: `QAX_APP_URL`, `QAX_PROJECT`, `QAX_REPO`, `QAX_APP_START`; branches `demo/clean-change` and `demo/break-login` on GitHub. See `strategy/PLAN.md` §9 for the two defects the first runs found |
 | Benchmarks | functional **120/120 on 15 sets (×2)**; release check 4/4; bug reproduction 6/6; functional mutants 13/13; scan 32/32, 0 FP |
 | Windows | first run 2026-10-23: scan works (demo 44 findings, gate scan rows 32/32). The browser track did **not** run: Chromium would not start on that machine (see §4a) |
@@ -191,6 +192,30 @@ Healthchecks rate-limits logins after many runs in a day. Its cases then come ou
 - `qax verify-fixes` and the Jira filing still run only from the command line; the web UI has "What changed between
   two scans?" (`/api/diff`), not the Jira-linked re-check.
 - Removed as dead (static check, 2026-10-23): three services, four result types, two functions; see CHANGELOG.
+
+**AI features: open after 2026-10-23 (nothing here is hidden):**
+- Generation has only been measured on **one broken-app story** and never on Claude. Credit (~2026-10-29) → `make eval-generation`
+  with Anthropic, three runs, and read the numbers per model. Two healthy stories (`logout`, `delayed-save`) were added; they had
+  not been run live when this was written (the free tier's daily cap).
+- One false failure (`TC-SEC-0002`, `gemini-3.5-flash`, run 2) was never diagnosed: the daily cap ended the day and the case is
+  regenerated every run. If it comes back, run `evals/generation_quality.py` and read the failing step before touching anything.
+- The deep scan added test cases but no findings on the golden target; whether the AI finds something the probes miss is unmeasured.
+- Self-healing and the ticket writer were each seen working once. Add more tickets (a fixed copy of each is the control) before
+  claiming either.
+- Free tier: a small DAILY request cap per model. Do not run AI jobs in parallel; name the model next to every number.
+
+**Lessons (2026-10-23) — each is also pinned by a test or a doc line:**
+1. Mocks hid eight bugs; running the AI features once with a real provider found them. Run every integration for real before
+   describing it.
+2. A written promise needs a caller: the "AI writer" in the verdict text and the CHANGELOG had no code path to it.
+3. Two contracts that each look right can disagree (the schema's default `visible` vs the engine enforcing it).
+4. Never decide on `pytest | tail`: read the exit code (a commit went in with a failing test; fixed before any push).
+5. Tests: use `monkeypatch` for the environment (a direct `os.environ` write leaked into later tests) and give helpers unique
+   names (a second `_login_case` silently replaced the first).
+6. `gh pr close/reopen` can run the OLD workflow (GitHub recomputes the merge commit lazily): test a workflow change with
+   `gh workflow run <file> --ref <branch>`.
+7. Read the version of anything before bumping it (`upload-artifact@v5` is still Node 20; v6 is Node 24).
+8. A number without its model, n and date is a slogan. The eval prints and records the model.
 
 ## 8. Rules that stay in force
 

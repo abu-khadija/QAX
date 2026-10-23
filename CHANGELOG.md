@@ -6,6 +6,32 @@ Every scan written with `--out` records the exact version and commit that produc
 
 ## [Unreleased]
 
+### AI features run for real (2026-10-23: the first day with a provider; free Gemini tier, never Claude)
+Everything below was found by running the AI features, which had only ever run against mocks. Each fix has tests.
+- **The OpenAI-compatible client** retries 429/503 (1, 2, 4 s, `Retry-After` honoured, four tries; a read timeout is not
+  retried), has an opt-in `QAX_AI_REASONING_EFFORT` (a reasoning model spent the output budget thinking: 11 tokens of a 300
+  budget, case batches cut at 8000) and warns when an answer was cut very short.
+- **The engine and the schema disagreed:** the schema says "`visible` is the default for non-assert steps", the engine enforced
+  it after every action, so every AI-written case skipped at its `navigate` step or failed on the button it had just clicked.
+  `visible` with no value on an action step is now "no check"; real checks and `assert` steps are still enforced.
+- **The generation prompt:** browser cases start signed out and log in themselves; every check is its own `assert` step.
+- **AI self-healing** stored the wrong selector (it asked the AI again after the step, on the next page): it now stores the
+  selector that worked (`persist_selector`); the dead `refresh_selectors` that had the bug is removed.
+- **Five features looked for the Anthropic key only** (self-healing, bug-pattern extraction, selector discovery, the prompt
+  optimizer, the gate's deep lane): they use the configured provider. `make eval-generation` also reads `.env`, accepts any
+  provider and names the model it measured; its stories went from 1 to 3 and it maps the pages they start on.
+- **`reproduce --ai-writer`** (and a web checkbox): the optional AI writer for loosely written tickets, which the verdict text
+  already promised and nothing used. Opt-in (the ticket and the app's element names go to the provider), judged by the same
+  rules, a wording the ticket does not quote is flagged as the AI's guess, a failed AI call is reported (quota, no provider)
+  instead of swallowed. Live: the buggy demo app gave REPRODUCED, a fixed copy NOT REPRODUCED, the password came from
+  `QAX_VAR_PASSWORD`.
+- **Cost:** a non-Claude provider was priced as Sonnet ("$0.13" for a free tier); it is now "not priced".
+- **Triage:** a missing element on a first step that opens no page is a TEST problem, not an app bug.
+- **CI templates** use the Node 24 majors of the GitHub actions (checkout v5, setup-python v6, cache v5, github-script v8,
+  upload-artifact v6; v5 of upload-artifact is still Node 20); a test forbids the Node 20 ones.
+- **Docs:** README, QUICKSTART, TROUBLESHOOTING and `.env.example` no longer say the key is always required or that AI cases
+  were never measured; the public "how we measure" page states the measured result with the models named.
+
 ### Fixed (first run on Windows, 2026-10-23)
 - **UTF-8 everywhere**: every text file read or written names `encoding="utf-8"` (148 calls; Windows used cp1252
   and failed on "✅" or Arabic text), and the web server, CI script and evals print UTF-8 — a scan's API-test step
