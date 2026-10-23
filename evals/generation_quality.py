@@ -159,7 +159,8 @@ def run(stories_file: str, out: str, generate=None, execute: bool = True) -> int
     worst = 0
     try:
         from core.app_mapper import map_app, save_map
-        app_map = asyncio.run(map_app(url, username="demo", password="demo123"))
+        starts = sorted({st["start_path"] for st in stories if st.get("start_path")})
+        app_map = asyncio.run(map_app(url, start_paths=starts or None, username="demo", password="demo123"))
         if app_map.error:
             print(f"QAX generation quality: NOT MEASURED — could not read the demo app: {app_map.error}")
             return 2

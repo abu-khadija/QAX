@@ -1,11 +1,25 @@
 {
-  "_comment": "Stories for evals/generation_quality.py, written against evals/targets/ui_demo_app.py. planted_bug_criteria = the criteria the demo app breaks on purpose: a good set of cases must FAIL there and nowhere else.",
+  "_comment": "Stories for evals/generation_quality.py, written against evals/targets/ui_demo_app.py. planted_bug_criteria = the criteria the demo app breaks on purpose: a good set of cases must FAIL there and nowhere else. | 2026-10-23: 3 stories. 'notes' has the planted bug (AC-2); 'logout' and 'delayed-save' are healthy, so a failing case there is a false failure.",
   "stories": [
     {
       "id": "notes",
       "start_path": "/login",
       "story": "As a user I keep short notes in my account.\nTest user: demo / demo123 (log in at /login).\n- A logged-in user can add a note and then sees it in the notes list\n- An empty note is rejected with the message 'Note cannot be empty'\n- A wrong password shows 'Invalid username or password' and the user stays on the login page\n- After logging in, the dashboard greets the user with 'Welcome, demo'",
-      "planted_bug_criteria": ["AC-2"]
+      "planted_bug_criteria": [
+        "AC-2"
+      ]
+    },
+    {
+      "id": "logout",
+      "start_path": "/login",
+      "planted_bug_criteria": [],
+      "story": "As a user I can end my session.\nTest user: demo / demo123 (log in at /login).\n- A logged-in user who opens /logout is taken back to the login page, which shows the heading 'Log in'\n- After logging out, opening /dashboard does not show the dashboard: the user is sent to the login page\n- Logging in again with the same user works and the dashboard greets the user with 'Welcome, demo'"
+    },
+    {
+      "id": "delayed-save",
+      "start_path": "/delayed",
+      "planted_bug_criteria": [],
+      "story": "As a user I save a setting on the page /delayed (no login needed).\n- Before the Save button is clicked the page shows no 'Saved!' message\n- Clicking Save shows the message 'Saved!' a moment later, without leaving the page\n- After saving, the page is still /delayed"
     }
   ]
 }
