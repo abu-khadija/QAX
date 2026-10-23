@@ -253,8 +253,9 @@ class _FakeHealer:
         self.asked += 1
         return {"suggested_selector": "#other", "confidence": 9}
 
-    async def refresh_selectors(self, **kw):
-        return None
+    def persist_selector(self, broken_selector="", healed_selector="", **kw):
+        self.persisted = (broken_selector, healed_selector)       # the executor stores the selector that worked
+        return True
 
 
 class _FakeMapper:
@@ -298,6 +299,7 @@ def test_a_moved_element_is_healed_and_the_pass_is_marked(monkeypatch, tmp_path)
     ex = _healing_executor(monkeypatch, "Timeout 5000ms exceeded.\nwaiting for locator('#save')")
     res = asyncio.run(ex._execute_step({"playwright_action": "click", "step_number": 1}, None, None, "TC-1"))
     assert res["status"] == "HEALED" and res["healed_selector"] == "#other"
+    assert ex.healer.persisted[1] == "#other"                    # persisted without a second AI question
 
     class _R:
         def is_ready(self): return True

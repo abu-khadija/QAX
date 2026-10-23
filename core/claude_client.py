@@ -369,7 +369,7 @@ class ClaudeClient:
             # only the complete test cases rather than trust the whole blob.
             if getattr(response, "stop_reason", None) == "max_tokens":
                 logger.warning(
-                    "Claude response for %s hit max_tokens (%d) — output may be "
+                    "AI response for %s hit max_tokens (%d) — output may be "
                     "truncated; salvaging complete test cases only",
                     file_path, MAX_TOKENS,
                 )
