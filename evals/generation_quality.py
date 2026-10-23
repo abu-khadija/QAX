@@ -264,6 +264,8 @@ def main() -> None:
     ap.add_argument("--out", default="output/generation_quality.json")
     ap.add_argument("--no-run", action="store_true", help="review the cases only, do not run them")
     a = ap.parse_args()
+    from core.env_loader import load_env    # the CLI entry reads .env like main.py does (run() stays env-driven for tests)
+    load_env()
     sys.exit(run(a.stories, a.out, execute=not a.no_run))
 
 
