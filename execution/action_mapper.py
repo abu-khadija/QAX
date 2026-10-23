@@ -234,6 +234,18 @@ def _is_browser_gone(exc: Exception) -> bool:
                                 "has been disconnected", "context closed"))
 
 
+
+def _is_placeholder_assertion(assertion_type, assertion_value) -> bool:
+    """
+    True for the schema's documented default on a step that checks nothing: assertion_type "visible" with no
+    value (config/xray_schema.json: "Use 'visible' as default for non-assert steps"). Enforcing it as a real
+    check made every AI-written case fail or skip: the button just clicked is gone after the page changes, and a
+    navigate step has no element at all ("no resolvable selector" → SKIP). A real check on an action step
+    (text, url, value, contains …, or a visible check that carries a value) is still enforced; so is an `assert` step.
+    """
+    return str(assertion_type or "").strip().lower() == "visible" and not str(assertion_value or "").strip()
+
+
 class _InFrame:
     """
     A page whose element methods run inside one iframe (click, fill, query_selector,
@@ -1224,6 +1236,7 @@ class ActionMapper:
                 base_result["status"] == "PASS"
                 and assertion_type
                 and action not in ("assert", "verify", "check", "expect")
+                and not _is_placeholder_assertion(assertion_type, assertion_val)
             ):
                 check = await self._check_automation_assertion(
                     page, assertion_type, assertion_val, base_result["selector_used"]

@@ -1058,3 +1058,47 @@ def test_a_failed_case_keeps_its_network_log_without_secrets_and_a_cause(ui_app,
     assert "demo123" not in raw and "sid=" not in raw                       # no password, no session cookie
     import os as _os
     assert oct(_os.stat(bad["network_log"]).st_mode & 0o777) == "0o600"
+
+
+# ── AI-written cases: the schema's default 'visible' placeholder is not a check ─────────────────────────────────
+# config/xray_schema.json says "Use 'visible' as default for non-assert steps". The engine enforced it after every
+# action: a navigate step has no element (SKIP: "no resolvable selector") and the button just clicked is gone once the
+# page changes (FAIL). Found when every case an AI wrote (gemini-3.5-flash, 2026-10-23) stopped at step 1.
+
+def _ai_login_case(extra_click_assertion=None):
+    step = lambda n, a, sel, val="", at="visible", av="": {  # noqa: E731
+        "step_number": n, "playwright_action": a, "selector_key": sel, "value": val,
+        "assertion_type": at, "assertion_value": av}
+    click = step(4, "click", "#login-btn")
+    if extra_click_assertion:
+        click.update(assertion_type=extra_click_assertion[0], assertion_value=extra_click_assertion[1])
+    return {"test_case_id": "AI-1", "title": "login", "automation_steps": [
+        step(1, "navigate", "page", "/login"), step(2, "fill", "#username", "demo"),
+        step(3, "fill", "#password", "demo123"), click,
+        step(5, "assert", "#welcome", "", "text", "Welcome, demo")]}
+
+
+def test_default_visible_placeholders_on_action_steps_do_not_break_a_real_flow(ui_app):
+    r = _run([_ai_login_case()])["results"][0]
+    assert r["status"] == "PASS", [(s["step_number"], s["status"], s.get("actual_result")) for s in r["steps"]]
+    assert all(s["status"] == "PASS" for s in r["steps"])             # not a single SKIP from a placeholder
+
+
+def test_a_real_check_on_an_action_step_is_still_enforced(ui_app):
+    r = _run([_ai_login_case(("text", "Definitely not on the page"))])["results"][0]
+    assert r["status"] != "PASS"
+
+
+def test_an_assert_step_on_a_missing_element_still_fails(ui_app):
+    case = {"test_case_id": "AI-2", "title": "assert", "automation_steps": [
+        {"step_number": 1, "playwright_action": "navigate", "selector_key": "page", "value": "/login",
+         "assertion_type": "visible", "assertion_value": ""},
+        {"step_number": 2, "playwright_action": "assert", "selector_key": "#welcome", "value": "",
+         "assertion_type": "visible", "assertion_value": ""}]}
+    assert _run([case])["results"][0]["status"] != "PASS"             # an `assert` is never a placeholder
+
+
+def test_only_visible_without_a_value_is_the_placeholder():
+    from execution.action_mapper import _is_placeholder_assertion as ph
+    assert ph("visible", "") and ph("VISIBLE", "  ") and ph(" visible ", None)
+    assert not ph("visible", "x") and not ph("text", "") and not ph("url", "") and not ph("", "")
