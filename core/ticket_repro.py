@@ -243,9 +243,14 @@ def ai_writer(base_url: str, project: str = "", *, client=None):
                 m = load_map(project)
                 surface = m.as_context() if m else ""
             user = f"BUG TICKET:\n{(ticket_text or '')[:6000]}\n\n{surface or 'No saved map: use selector_key \"page\" and the paths in the ticket.'}"
-            resp = (client or make_ai_client()).messages.create(
-                model="", max_tokens=2500, system=_WRITER_SYSTEM, messages=[{"role": "user", "content": user}])
-            case = _case_from_ai(resp.content[0].text)
+            ai = client or make_ai_client()
+            case = None
+            for _try in range(2):      # a model's reply varies: one unusable answer gets one more try (about 1 in 7 on a free tier)
+                resp = ai.messages.create(model="", max_tokens=2500, system=_WRITER_SYSTEM,
+                                          messages=[{"role": "user", "content": user}])
+                case = _case_from_ai(resp.content[0].text)
+                if case is not None:
+                    break
             if case is None:
                 write.last_error = "the AI's reply was not a usable case (it must end with one check and use only known actions and elements)"
             return case

@@ -134,3 +134,30 @@ def test_an_unusable_reply_and_a_missing_provider_are_named_too(monkeypatch):
 def test_without_a_writer_the_message_is_unchanged():
     r = tr.reproduce(LOOSE, "http://x")
     assert "AI writer was asked" not in r["why"] and "notes" not in r or not r.get("notes")
+
+
+class SeqClient:
+    """Answers with each reply in turn; counts the calls."""
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), 0
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, **kw):
+        self.calls += 1
+        return SimpleNamespace(content=[SimpleNamespace(text=self.replies.pop(0))])
+
+
+def test_one_unusable_reply_gets_one_more_try():
+    c = SeqClient("sorry", json.dumps(GOOD))
+    assert tr.ai_writer("http://x", "", client=c)(LOOSE) is not None and c.calls == 2
+
+
+def test_two_unusable_replies_stop_there_and_say_so():
+    c = SeqClient("sorry", "still sorry")
+    w = tr.ai_writer("http://x", "", client=c)
+    assert w(LOOSE) is None and c.calls == 2 and "not a usable case" in w.last_error
+
+
+def test_a_usable_first_reply_costs_one_call():
+    c = SeqClient(json.dumps(GOOD))
+    assert tr.ai_writer("http://x", "", client=c)(LOOSE) is not None and c.calls == 1
