@@ -759,19 +759,18 @@ class TestExecutor:
                         "[%s] Step %s HEALED successfully with '%s'",
                         tc_id, step_num, healed_selector
                     )
-                    # C4: Persist the healed selector to selectors.json
+                    # C4: Persist the selector that just worked (no second AI call: the page has moved on by now)
                     try:
-                        await self.healer.refresh_selectors(
+                        if self.healer.persist_selector(
                             broken_selector=step.get("selector_used", ""),
-                            element_description=step.get("action", ""),
-                            playwright_page=page,
-                        )
-                        logger.info(
-                            "[%s] Step %s — Selector auto-healed and updated",
-                            tc_id, step_num,
-                        )
+                            healed_selector=healed_selector,
+                        ):
+                            logger.info(
+                                "[%s] Step %s — Selector auto-healed and updated",
+                                tc_id, step_num,
+                            )
                     except Exception as _re:
-                        logger.debug("refresh_selectors failed (non-fatal): %s", _re)
+                        logger.debug("persist_selector failed (non-fatal): %s", _re)
                     return healed_result
 
                 logger.info(

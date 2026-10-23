@@ -85,12 +85,13 @@ class ClaudeHealer:
         Reads ANTHROPIC_API_KEY from environment. Logs a warning if not set
         (healing will return None for all calls).
         """
-        self._api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        from core.ai_provider import resolved_key
+        self._api_key = resolved_key()
         self._model = os.getenv("CLAUDE_MODEL") or os.getenv("CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5")
 
         if not self._api_key:
             logger.warning(
-                "ClaudeHealer: ANTHROPIC_API_KEY not set. "
+                "ClaudeHealer: no AI provider configured. "
                 "Selector healing is disabled."
             )
 
@@ -263,6 +264,59 @@ class ClaudeHealer:
         except Exception as e:  # noqa: BLE001
             logger.error("get_page_html error: %s", e)
             return ""
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Public: persist_selector
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def persist_selector(self, broken_selector: str, healed_selector: str, project: str | None = None) -> bool:
+        """
+        Write the selector that just WORKED over the broken one in the project's selectors.json.
+
+        No AI call: heal_step already found `healed_selector` and the retry proved it. (refresh_selectors used to
+        ask the AI again after the step, when the page had already moved on, and stored an unrelated element:
+        a login button became the dashboard's "add note" button.) Only an entry whose value IS the broken
+        selector is changed; nothing is invented when none matches.
+
+        Args:
+            broken_selector (str): The selector that failed.
+            healed_selector (str): The selector that passed on retry.
+            project (str | None): Project for selectors.json; default DEFAULT_PROJECT.
+
+        Returns:
+            bool: True when an entry was updated.
+        """
+        project = project or os.getenv("DEFAULT_PROJECT", "")
+        if not (broken_selector and healed_selector and project) or broken_selector == healed_selector:
+            return False
+        try:
+            from core.paths import user_config_dir
+            path = user_config_dir() / "projects" / project / "selectors.json"
+            if not path.exists():
+                return False
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            updated = False
+            for section, entries in data.items():
+                if section.startswith("_") or not isinstance(entries, dict):
+                    continue
+                for key, val in entries.items():
+                    if val == broken_selector:
+                        entries[key] = healed_selector
+                        updated = True
+            if not updated:
+                return False
+            if isinstance(data.get("_meta"), dict):
+                from datetime import datetime, timezone
+                data["_meta"]["last_discovered"] = datetime.now(timezone.utc).isoformat()
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(path)
+            logger.info("Auto-updated selector: %s → %s", broken_selector, healed_selector)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("persist_selector error: %s", e)
+            return False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public: refresh_selectors
