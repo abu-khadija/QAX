@@ -60,14 +60,13 @@ def test_a_free_or_local_provider_passes_the_gate_without_an_anthropic_key(clean
 def test_the_cli_entry_reads_dot_env_like_main_py(clean_env, tmp_path):
     """`python -m evals.generation_quality` used to ignore .env, so a key kept there was never seen.
     (The suite blocks real .env reading, so a stand-in loader plays the part of the file.)"""
-    import os
-
     import core.env_loader as env_loader
     loaded = []
 
     def fake_load_env(path=None):
         loaded.append(True)
-        os.environ.update(QAX_AI_PROVIDER="openai", QAX_AI_MODEL="some-model")
+        clean_env.setenv("QAX_AI_PROVIDER", "openai")                 # through monkeypatch: undone after the test
+        clean_env.setenv("QAX_AI_MODEL", "some-model")
         return {}
 
     clean_env.setattr(env_loader, "load_env", fake_load_env)
