@@ -43,9 +43,10 @@ def optimize_prompt(feedback_summary: str) -> str:
     """
     load_dotenv()
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    from core.ai_provider import resolved_key
+    api_key = resolved_key() or None
     if not api_key:
-        return "Error: ANTHROPIC_API_KEY not set. Cannot call optimization API."
+        return "Error: no AI provider configured (ANTHROPIC_API_KEY, or QAX_AI_PROVIDER=openai). Cannot call optimization API."
 
     # Check if the feedback summary indicates insufficient data
     if "Not enough data yet" in feedback_summary:

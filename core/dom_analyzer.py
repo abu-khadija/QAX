@@ -545,14 +545,15 @@ class DOMAnalyzer:
         self.login_url = os.getenv("APP_LOGIN_URL", "").rstrip("/") or (
             f"{self.base_url}/login" if self.base_url else ""
         )
-        self._api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        from core.ai_provider import resolved_key
+        self._api_key = resolved_key()
         self._model = os.getenv(
             "CLAUDE_MODEL_HEAVY", "claude-sonnet-4-5"
         )
 
         if not self._api_key:
             logger.warning(
-                "QAX DOMAnalyzer: ANTHROPIC_API_KEY not set — "
+                "QAX DOMAnalyzer: no AI provider configured — "
                 "selector discovery will be unavailable."
             )
         if not self.base_url:

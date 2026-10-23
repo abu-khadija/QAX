@@ -424,12 +424,14 @@ def _quick_and_ab() -> list[tuple[str, bool, str]]:
 
 
 def _deep_lane() -> list[tuple[str, bool, str]]:
-    from services.context import QAXContext
     from services.scorecard import render
 
-    if not getattr(QAXContext.from_env(), "anthropic_key", None):
-        print("\n[deep lane skipped] no ANTHROPIC_API_KEY — the deep lane needs credits.\n")
+    from core.ai_provider import ai_configured, describe
+    if not ai_configured():
+        print("\n[deep lane skipped] no AI provider configured (ANTHROPIC_API_KEY with credit, or "
+              "QAX_AI_PROVIDER=openai + QAX_AI_MODEL) — the deep lane needs one.\n")
         return []
+    print(f"\n[deep lane] AI under test: {describe()}   (the numbers belong to this model)\n")
 
     port = _free_port()
     proc = _boot(port, secure=False)
