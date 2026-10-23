@@ -228,7 +228,7 @@ waiting for it again returns at once, even while the click's fetch is still runn
 (Turbo/htmx/SPA, `/wizard-spa`: a 1.5 s fetch that swaps the form) was never waited for and the next step typed
 into the form that was being replaced — a false FAIL. Fixed: wait for the action's own requests (bounded by
 QAX_SETTLE_MAX_MS, default 6 s), no race. Then **all 15 benchmark sets, 125 cases, twice: 125/125 correct, 0
-flips**, no slowdown (memos 11.1 s/case vs 10.7; beszel 11.7 vs 11.7) — output/bench/functional_all_2026-10-21.json.
+flips** *(correction 2026-10-23: the result file holds 120 cases, all correct; see docs/HANDOVER.md §1)*, no slowdown (memos 11.1 s/case vs 10.7; beszel 11.7 vs 11.7) — output/bench/functional_all_2026-10-21.json.
 
 Limits: n = 11 apps, one machine; the 79 corpus cases are still written by QAX's author (checks 2–3 are
 the independent part); generation by AI is still unmeasured (no credit).

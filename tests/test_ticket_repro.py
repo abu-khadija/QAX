@@ -121,5 +121,5 @@ def test_the_how_we_measure_page_is_served_and_linked(monkeypatch, tmp_path):
     from web.server import app
     c = app.test_client()
     body = c.get("/how-we-measure").get_data(as_text=True)
-    assert "How we measure" in body and "125/125" in body and "What we do not claim yet" in body
+    assert "How we measure" in body and "120/120" in body and "125/125" not in body and "What we do not claim yet" in body
     assert "/how-we-measure" in c.get("/").get_data(as_text=True)

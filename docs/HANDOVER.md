@@ -17,8 +17,12 @@ where things are, and what is open. Read section 1 first.
 | Benchmarks | functional **120/120 on 15 sets (×2)**; release check 4/4; bug reproduction 6/6; functional mutants 13/13; scan 32/32, 0 FP |
 | Windows | first run 2026-10-23: scan works (demo 44 findings, gate scan rows 32/32). The browser track did **not** run: Chromium would not start on that machine (see §4a) |
 
-**Not settled:** before the move this file said "functional 125/125". The same 15 sets now hold 120 cases
-(sum of `cases` in the raw result). The 5-case difference is not explained yet.
+**125 vs 120 (checked 2026-10-23):** before the move this file said "functional 125/125". Both full-run result
+files of 2026-10-21 (`functional_all_2026-10-21.json` and `...21b.json`) hold **120** cases in the same 15 sets
+(93 expected PASS, 25 expected FAIL, 2 NOTPASS); "125" appears only in the prose of
+`strategy/evidence/FUNCTIONAL_QA_CORPUS_2026-10-19.md`. Use 120. Why the prose said 125 is still not known. The
+second full run (`...21b`) had 6 flips: Healthchecks cases that went PASS then ERROR (login rate limit, cause
+environment); the first had 0. The public page `/how-we-measure` now says exactly this.
 
 **First functional run on the new Mac:** one case each in memos and beszel gave PASS then FAIL (a flip, so
 `make bench-functional` exits 1). Both apps had just been started. Re-run alone, `--repeat 3`: no flip.
