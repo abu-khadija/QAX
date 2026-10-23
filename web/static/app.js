@@ -466,7 +466,7 @@ async function reproduceTicket(){
   try{
     const r=await api('/api/reproduce',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({url,text:$('reprotext').value,jira:$('reprojira').value.trim(),project:$('mapproj').value.trim(),
-        repo:(($('exrepo')||{}).value||'').trim(),authorized:true})});
+        repo:(($('exrepo')||{}).value||'').trim(),authorized:true,ai_writer:$('reproai').checked})});
     const d=await r.json();
     if(d.error){ out.innerHTML='<div class="hk">⚠️ '+esc(d.error)+'</div>'; return; }
     window._lastRepro=d;

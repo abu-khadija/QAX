@@ -158,8 +158,103 @@ def verdict(expected_result: "dict | None", symptom_result: "dict | None", built
             return {"verdict": "NOT REPRODUCED", "why": "the steps ran and the reported symptom did not appear"}
     if expected_result is None and symptom_result is None:
         return {"verdict": "NOT DECIDABLE", "why": "; ".join(built.get("why_not") or ["nothing to check"])
-                + " — quote the text the app should (or should not) show, or give the page it should open"}
+                + " — quote the text the app should (or should not) show, give the page it should open, or turn on the AI writer (--ai-writer)"}
     return {"verdict": "COULD NOT RUN", "why": "the check itself could not be evaluated"}
+
+
+_WRITER_SYSTEM = """You turn ONE bug ticket into ONE browser test case that reproduces it. Reply with a single JSON object and nothing else:
+{"title": "...", "automation_steps": [ {"step_number": 1, "playwright_action": "navigate", "selector_key": "page", "value": "/login"}, ... ]}
+
+Rules:
+- Follow the ticket's own steps, in order. Every case starts in a fresh, signed-out browser: if the steps need a signed-in user,
+  the FIRST steps navigate to the login page, fill the credentials the ticket (or the context) gives, and click the login button.
+  Never put a password in the case when the ticket does not give one: use {{env:QAX_VAR_PASSWORD}}.
+- One action per step. playwright_action is one of: navigate, click, fill, select, hover, wait, assert.
+  navigate: selector_key "page", value = the path. fill: selector_key + value. click: selector_key. Do NOT put an assertion on a click, fill or navigate step.
+- Use only selector_key names from the OBSERVED UI SURFACE below, plus "page". Do not invent pages or elements.
+- The LAST step, and only the last, is the check: playwright_action "assert" with assertion_type "text" (or "url") and the assertion_value
+  that states what SHOULD happen according to the ticket's Expected result, never the bug itself. Use selector_key "page" to look for a text anywhere on the page.
+- If the ticket is too vague to write a check, reply {"title": "", "automation_steps": []}."""
+
+_WRITER_ACTIONS = {"navigate", "click", "fill", "select", "hover", "wait", "assert"}
+
+
+def _case_from_ai(raw: str) -> "dict | None":
+    """The case in the AI's reply, or None when it is not usable: a JSON object, known actions, a last `assert` with a value."""
+    import json
+    text = (raw or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+    i, j = text.find("{"), text.rfind("}")
+    if i < 0 or j <= i:
+        return None
+    try:
+        case = json.loads(text[i:j + 1])
+    except ValueError:
+        return None
+    steps = case.get("automation_steps") if isinstance(case, dict) else None
+    if not isinstance(steps, list) or len(steps) < 2 or not all(isinstance(x, dict) for x in steps):
+        return None
+    clean = []
+    for n, x in enumerate(steps, 1):
+        action = str(x.get("playwright_action") or "").strip().lower()
+        if action not in _WRITER_ACTIONS or not str(x.get("selector_key") or "").strip():
+            return None
+        step = {"step_number": n, "playwright_action": action, "selector_key": str(x["selector_key"]).strip(),
+                "value": str(x.get("value") or "")}
+        if action == "assert":
+            step.update(assertion_type=str(x.get("assertion_type") or "text").strip().lower(),
+                        assertion_value=str(x.get("assertion_value") or ""))
+        else:
+            step.update(assertion_type="visible", assertion_value="")        # the schema's "no check" placeholder
+        clean.append(step)
+    last = clean[-1]
+    if last["playwright_action"] != "assert" or not last["assertion_value"].strip():
+        return None
+    if any(c["playwright_action"] == "assert" for c in clean[:-1]):
+        return None                                                          # the verdict reads the LAST step as the check
+    return {"title": str(case.get("title") or "Reported bug (AI-written)")[:120], "automation_steps": clean,
+            "manual_steps": [{"step_number": c["step_number"], "action": f"{c['playwright_action']} {c['selector_key']} {c['value']}".strip()}
+                             for c in clean], "source": "ticket-ai", "check_step": len(clean)}
+
+
+def ai_writer(base_url: str, project: str = "", *, client=None):
+    """
+    The optional AI case writer for a ticket written loosely: `writer(ticket_text) -> case | None`.
+
+    Opt-in: the ticket text and the app's element names (from the saved map of `project`, when there is one) go to the
+    configured AI provider. The case it returns runs in the same engine and is judged by the same deterministic rules as
+    a case built from the ticket itself; a reply that is not a usable case is None (the verdict stays NOT DECIDABLE).
+
+    Args:
+        base_url (str): The app (kept for symmetry with reproduce; the map, not the app, is read here).
+        project (str): QAX project whose saved app map names the pages and elements.
+        client: Injected AI client for tests (default: the configured provider).
+    """
+    def write(ticket_text: str):
+        write.last_error = ""
+        try:
+            from core.ai_provider import ai_configured, make_ai_client
+            if client is None and not ai_configured():
+                write.last_error = "no AI provider is configured (ANTHROPIC_API_KEY, or QAX_AI_PROVIDER=openai with QAX_AI_MODEL)"
+                return None
+            surface = ""
+            if project:
+                from core.app_mapper import load_map
+                m = load_map(project)
+                surface = m.as_context() if m else ""
+            user = f"BUG TICKET:\n{(ticket_text or '')[:6000]}\n\n{surface or 'No saved map: use selector_key \"page\" and the paths in the ticket.'}"
+            resp = (client or make_ai_client()).messages.create(
+                model="", max_tokens=2500, system=_WRITER_SYSTEM, messages=[{"role": "user", "content": user}])
+            case = _case_from_ai(resp.content[0].text)
+            if case is None:
+                write.last_error = "the AI's reply was not a usable case (it must end with one check and use only known actions and elements)"
+            return case
+        except Exception as exc:  # noqa: BLE001 - never raise: no case → NOT DECIDABLE, but say why
+            from core.public_error import clean
+            write.last_error = clean(str(exc)) or type(exc).__name__
+            return None
+    write.last_error = ""
+    return write
 
 
 def reproduce(ticket_text: str, base_url: str, project: str = "", *, writer=None, run=None, repo: str = "") -> dict:
@@ -186,13 +281,28 @@ def reproduce(ticket_text: str, base_url: str, project: str = "", *, writer=None
             pass
     if not cases:
         v = verdict(None, None, built)
-        return dict(v, ticket=t, cases=[], results=[])
+        out = dict(v, ticket=t, cases=[], results=[])
+        err = getattr(writer, "last_error", "") if writer is not None else ""
+        if err:
+            out["notes"] = [f"The AI writer could not write a check: {err}"]
+            out["why"] = v["why"] + f" (the AI writer was asked and could not help: {err})"
+        return out
     results = (run or _run_default(base_url, project))(cases)
     by = {str(r.get("test_case_id")): r for r in results or []}
     exp_r = by.get("REPRO-EXPECTED") if built.get("expected_case") else None
     sym_r = by.get("REPRO-SYMPTOM") if built.get("symptom_case") else None
     v = verdict(exp_r, sym_r, built)
-    out = dict(v, ticket=t, cases=cases, results=results, ai_written=used_writer, notes=built.get("notes", []))
+    out = dict(v, ticket=t, cases=cases, results=results, ai_written=used_writer, notes=list(built.get("notes", [])))
+    if used_writer:
+        # The AI chose the case, and maybe the wording it looks for. A wording the ticket never quoted is a guess:
+        # a fixed app can then look REPRODUCED. Say so next to the verdict instead of hiding it.
+        text = str(cases[0]["automation_steps"][-1].get("assertion_value") or "")
+        grounded = bool(text) and text.lower() in (ticket_text or "").lower()
+        out["ai_check_text"], out["ai_check_in_ticket"] = text, grounded
+        out["notes"].append(f'The check was written by the AI: it looks for "{text}"'
+                            + ("" if grounded else " — a wording the ticket does not quote, so it is the AI's own guess"))
+        if not grounded and v["verdict"] == "REPRODUCED":
+            out["why"] = v["why"] + " (but the text it looked for is the AI's guess: confirm the wording before trusting this)"
     if v["verdict"] == "REPRODUCED":
         from core.fix_brief import build as brief
         r = exp_r or sym_r

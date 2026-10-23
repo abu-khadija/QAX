@@ -72,3 +72,6 @@ output/cache/
 
 # Saved browser sessions (QAX session import for SSO/2FA apps) are credentials
 config/projects/*/.auth/
+
+# written by `make eval-generation` (its demo app map), not project data
+config/projects/qax-generation-eval/

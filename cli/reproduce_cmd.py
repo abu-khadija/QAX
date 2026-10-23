@@ -30,6 +30,9 @@ def run_reproduce_command() -> None:
     ap.add_argument("--repo", default="", help="The app's checkout — the fix brief then lists files to look at.")
     ap.add_argument("--out", default="", help="Folder for result.json and fix-brief.md")
     ap.add_argument("--authorized", action="store_true", help="Confirm you own or are authorized to test this app.")
+    ap.add_argument("--ai-writer", action="store_true",
+                    help="For a ticket written loosely: let the AI provider write the case (the ticket text and the saved "
+                         "map's element names are sent to it). Off by default: nothing leaves the machine.")
     args = ap.parse_args(sys.argv[2:])
     if not args.authorized:
         print("\n  QAX: reproducing runs the ticket's steps in a browser against the app.\n"
@@ -48,7 +51,11 @@ def run_reproduce_command() -> None:
             print(f"\n  QAX: could not read {args.jira} from Jira (check JIRA_* in .env).\n")
             sys.exit(3)
     from core.ticket_repro import reproduce
-    r = reproduce(text, args.base_url, args.project, repo=args.repo)
+    writer = None
+    if args.ai_writer:
+        from core.ticket_repro import ai_writer
+        writer = ai_writer(args.base_url, args.project)
+    r = reproduce(text, args.base_url, args.project, repo=args.repo, writer=writer)
     print(f"\n  {r['verdict']} — {r['why']}")
     for n in r.get("notes") or []:
         print(f"  · {n}")

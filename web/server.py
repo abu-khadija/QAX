@@ -938,8 +938,10 @@ def reproduce_route():
     if not _target_authorized():
         return jsonify({"error": _UNAUTHORIZED_TARGET}), 400
     with _browser_lock():
-        from core.ticket_repro import reproduce
-        r = reproduce(text, url, _clean_project(data.get("project")), repo=_local_checkout(data.get("repo", "")))
+        from core.ticket_repro import ai_writer, reproduce
+        project = _clean_project(data.get("project"))
+        writer = ai_writer(url, project) if str(data.get("ai_writer", "")).lower() in ("1", "true", "yes", "on") else None
+        r = reproduce(text, url, project, repo=_local_checkout(data.get("repo", "")), writer=writer)
     return jsonify(r)
 
 

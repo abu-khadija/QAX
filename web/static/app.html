@@ -147,6 +147,9 @@
           <div class="field" style="flex:1;min-width:140px"><label for="reprojira">or Jira key</label>
             <input id="reprojira" placeholder="SHOP-123" autocomplete="off" spellcheck="false"></div>
         </div>
+        <label class="consent" for="reproai"><input type="checkbox" id="reproai">
+          <span>For a ticket written loosely, let the <b>AI provider</b> write the check. The ticket text and this project's element names are
+          sent to it; nothing is sent when this is off. The case it writes still runs in the browser and is judged by the same rules.</span></label>
         <label class="consent" for="reproauth"><input type="checkbox" id="reproauth">
           <span><b>I own this app or am authorized to test it.</b></span></label>
         <div class="row" style="justify-content:flex-end"><button class="btn" id="reprobtn" onclick="reproduceTicket()">Reproduce</button></div>
