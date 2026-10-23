@@ -7,7 +7,8 @@ records — never an AI judgement:
   environment  the app did not answer (refused, DNS, timeout on opening a page), the browser
                crashed, the app rate-limited QAX, or the app server failed to start a page load
   test         the case named an element QAX never saw, an expectation QAX cannot read, a step
-               that could not run, a navigation to another site, a failure after an unrunnable step
+               that could not run, a navigation to another site, a failure after an unrunnable step,
+               a missing element on step 1 when step 1 never opened a page
   app          the page or API answered and an assertion on it did not hold (expected vs actual),
                or the app answered a page / API call with a server error (5xx)
   unclear      a click/fill timed out on an element that should be there: a missing element is
@@ -28,6 +29,7 @@ _TEST = re.compile(r"No element named|not in the project's selectors|is not a st
                    r"refused: .* is not the app under test|not evaluated|Action '.*' not recognised|no steps", re.I)
 _APP_ASSERT = re.compile(r"Text mismatch|URL '.*' missing|Expected status \d+, got|Element is (not )?|"
                          r"Element absent|Element is visible|Value mismatch|assertion failed", re.I)
+_OPENS_A_PAGE = {"navigate", "goto", "go", "go to", "open", "visit", "browse", "load"}
 _MISSING = re.compile(r"Timeout \d+ms exceeded.*waiting for locator|Element not found", re.I | re.S)
 
 
@@ -55,6 +57,10 @@ def classify(result: dict) -> dict:
             cause, why = "environment", "the app or the browser did not answer"
         elif _TEST.search(text):
             cause, why = "test", "the test itself could not run as written (fix the case, then re-run)"
+        elif (str(bad.get("step_number")) == "1" and _MISSING.search(text)
+              and str(bad.get("action_type") or "").lower() not in _OPENS_A_PAGE | {""}):   # a KNOWN non-visit action
+            cause, why = "test", ("the case's first step is not a page visit, so no page was ever opened: "
+                                  "add a navigate step (an AI-written case can omit it)")
         elif isinstance(code, int) and code >= 500:
             cause, why = "app", f"the app answered with a server error ({code})"
         elif status == "FAIL" and _APP_ASSERT.search(text):

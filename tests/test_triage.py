@@ -25,3 +25,31 @@ def test_each_kind_of_failure_gets_its_cause():
                    "crash": "environment"}, got
     assert "cause" not in classify({"status": "PASS", "steps": []})
     assert summary(list(cases.values())) == {"app": 2, "test": 2, "environment": 4, "unclear": 1}
+
+
+# ── a case that never opens a page is a test problem, not an app bug ─────────────────────────────────────────
+# An AI-written case (gemini-3-flash-preview) began with `fill #note-input` and no navigate: it waited 15 s on a blank
+# page and was classified `app` ("the app answered and the expected result did not hold"), i.e. a bogus bug draft.
+
+def _step1_missing(action):
+    return {"status": "FAIL", "steps": [{"step_number": "1", "status": "FAIL", "action_type": action,
+            "actual_result": "Step execution failed",
+            "error": 'Page.fill: Timeout 15000ms exceeded.\nCall log:\nwaiting for locator("#note-input")\n'}]}
+
+
+def test_a_missing_element_on_a_first_step_that_opens_no_page_is_a_test_problem():
+    from core.triage import classify
+    r = classify(_step1_missing("fill"))
+    assert r["cause"] == "test" and "add a navigate step" in r["cause_why"]
+
+
+def test_the_same_failure_after_a_navigate_is_still_unclear_not_test():
+    from core.triage import classify
+    assert classify(_step1_missing("navigate"))["cause"] == "unclear"
+
+
+def test_a_missing_element_on_a_later_step_is_unchanged():
+    from core.triage import classify
+    r = _step1_missing("fill")
+    r["steps"][0]["step_number"] = "3"
+    assert classify(r)["cause"] == "unclear"
