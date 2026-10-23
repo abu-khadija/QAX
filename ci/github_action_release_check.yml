@@ -66,10 +66,19 @@ jobs:
           cache: 'pip'
           cache-dependency-path: .qax/requirements.txt
 
+      # Chromium itself is cached. The OS libraries (apt) are not: they are what is slow on a slow mirror, and
+      # they cannot live in this cache.
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('.qax/requirements.txt') }}
+
       - name: Install QAX and Chromium
         run: |
           pip install -r .qax/requirements.txt
-          python -m playwright install --with-deps chromium
+          python -m playwright install-deps chromium
+          python -m playwright install chromium
           mkdir -p ".qax/config/projects/${{ vars.QAX_PROJECT }}"
           cp -r "config/projects/${{ vars.QAX_PROJECT }}/." ".qax/config/projects/${{ vars.QAX_PROJECT }}/" 2>/dev/null || true
 

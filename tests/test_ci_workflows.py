@@ -66,6 +66,18 @@ def test_release_check_workflow_pins_a_runner_that_can_install_the_pinned_playwr
     assert "playwright==1.44" in (CI.parent / "requirements.txt").read_text(encoding="utf-8")
 
 
+def test_release_check_workflow_caches_the_browser_before_installing_it():
+    steps = _steps(_load("github_action_release_check.yml"))
+    names = [s.get("name", "") for s in steps]
+    cache = next(i for i, n in enumerate(names) if n.startswith("Cache Playwright"))
+    install = next(i for i, n in enumerate(names) if n.startswith("Install QAX"))
+    assert cache < install
+    assert steps[cache]["uses"].startswith("actions/cache@")
+    assert "hashFiles('.qax/requirements.txt')" in steps[cache]["with"]["key"]     # new Playwright → new cache
+    run = steps[install]["run"]
+    assert "install-deps chromium" in run and "install chromium" in run             # libraries always, browser cached
+
+
 def test_release_check_workflow_can_boot_the_app_before_it_waits_for_it():
     steps = _steps(_load("github_action_release_check.yml"))
     names = [s.get("name", "") for s in steps]
