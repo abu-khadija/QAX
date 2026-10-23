@@ -161,10 +161,16 @@ def _write_briefs(d: dict, functional, cases: list, base_url: str, project: str,
 
 def _quick_scan(base_url: str, read_only: bool) -> dict:
     """The quick scan of the running app: confirmed (deterministic) findings, leads, gaps; never raises."""
+    import shutil
+    import tempfile
+    # An EMPTY folder, never "": Path("") is the current directory, and the orchestrator would model that
+    # source with the AI (a model call that needs a key and sends code off the machine). A quick scan reads
+    # the live app only, like `qax scan --quick` and the web UI do.
+    nosrc = tempfile.mkdtemp(prefix="qax_nosrc_")
     try:
         from services.context import QAXContext
         from services.orchestrator_service import OrchestratorService
-        result = OrchestratorService(QAXContext.from_env()).run("", base_url, deep=False, tour=False,
+        result = OrchestratorService(QAXContext.from_env()).run(nosrc, base_url, deep=False, tour=False,
                                                                read_only=read_only)
         if result.error:
             return {"error": result.error}
@@ -173,6 +179,8 @@ def _quick_scan(base_url: str, read_only: bool) -> dict:
     except Exception as exc:  # noqa: BLE001
         from core.public_error import clean
         return {"error": clean(str(exc)) or type(exc).__name__}
+    finally:
+        shutil.rmtree(nosrc, ignore_errors=True)
 
 
 def _write(d: dict, functional, scan_out, out_dir) -> dict:

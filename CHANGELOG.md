@@ -39,6 +39,11 @@ Every scan written with `--out` records the exact version and commit that produc
   truth, its n, its limits, the command that repeats it, and what QAX does not claim yet.
 
 ### Fixed
+- **Release check's quick scan no longer reads the current directory.** It passed `repo=""` to the orchestrator, and
+  `Path("")` is the working directory, so the "quick" scan modelled that source with the AI: it needed an Anthropic key
+  (the first run on GitHub ended NOT PROVEN with "ANTHROPIC_API_KEY is not set") and sent code to the provider (the
+  local log showed a POST to api.anthropic.com). It now scans the live app with an empty temporary folder, like
+  `qax scan --quick` and the web UI. Found by the first real CI run; two tests pin it.
 - Plain-language steps (manual steps, tickets) never pass a step they did not do: names match whole words, not
   substrings ("Log in button" had clicked the username field — PASS); a map element is used only when it is on the
   current page; an unreadable fill value is SKIP, not typing ""; a URL check with no expected value is SKIP (it had

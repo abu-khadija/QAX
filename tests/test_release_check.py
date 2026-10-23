@@ -19,6 +19,48 @@ def _r(cid, status, cause="", **kw):
                  "steps": [{"step_number": 1, "status": status, "actual_result": "seen"}]}, **kw)
 
 
+def test_the_quick_scan_reads_the_live_app_never_the_current_directory(monkeypatch):
+    """First real CI run (2026-10-23): the scan got repo "", which is the CURRENT directory, so the orchestrator
+    modelled that source with the AI: a key was needed (NOT PROVEN without one) and code left the machine.
+    The quick scan must get an EMPTY folder, in quick mode, and clean it up."""
+    import os
+    import types
+
+    from services import release_check_service as rcs
+    from services.orchestrator_service import OrchestratorService
+
+    seen = {}
+
+    def fake_run(self, repo_path, base_url, **kw):
+        seen.update(repo=repo_path, files=os.listdir(repo_path) if os.path.isdir(repo_path) else None,
+                    deep=kw.get("deep"), tour=kw.get("tour"))
+        return types.SimpleNamespace(error="", confirmed_deterministic=[], leads_ai=[], coverage_gaps=[])
+
+    monkeypatch.setattr(OrchestratorService, "run", fake_run)
+    out = rcs._quick_scan("http://127.0.0.1:1", True)
+    assert seen["repo"] and seen["files"] == []                      # a real, empty folder: no source to model
+    assert seen["deep"] is False and seen["tour"] is False
+    assert not os.path.exists(seen["repo"])                          # removed afterwards, even on success
+    assert out == {"claims": [], "leads": [], "coverage_gaps": []}
+
+
+def test_the_quick_scan_folder_is_removed_when_the_scan_raises(monkeypatch):
+    import os
+
+    from services import release_check_service as rcs
+    from services.orchestrator_service import OrchestratorService
+
+    seen = {}
+
+    def boom(self, repo_path, base_url, **kw):
+        seen["repo"] = repo_path
+        raise RuntimeError("target down")
+
+    monkeypatch.setattr(OrchestratorService, "run", boom)
+    out = rcs._quick_scan("http://127.0.0.1:1", True)
+    assert "error" in out and not os.path.exists(seen["repo"])
+
+
 def test_a_blocker_quotes_the_app_on_one_readable_line():
     """Page text has newlines and can be long: the report must stay a one-line list item, cut at a word."""
     page = "\n".join(["HOME", " FIND OWNERS", "VETERINARIANS", "ERROR", "Owner", "First Name"] * 12)
