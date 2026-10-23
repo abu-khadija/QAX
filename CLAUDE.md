@@ -78,7 +78,10 @@ execution/
 web/
   server.py               ✅ (the one supported UI)
 ci/
-  github_action.yml       ✅
+  github_action_release_check.yml  ✅ (GO / NO-GO comment on every PR; run on GitHub 2026-10-23)
+  github_action_scan.yml  ✅ (security scan PR gate)
+  github_action_e2e.yml   ✅ (functional cases in a browser, JUnit)
+  pr_scan.py              ✅ (what the scan gate runs)
   gitlab_ci.yml           ✅
 main.py                   ✅
 requirements.txt          ✅
