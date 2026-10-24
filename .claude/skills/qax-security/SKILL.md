@@ -9,7 +9,7 @@ Read-only. Never print a secret: report names, files and counts. Never call a li
 
 ## 1. Secrets
 - `git ls-files` for `.env`, keys, `.bench.env`. `.env` must be ignored (`git check-ignore -v .env`).
-- Key-shaped strings in tracked files and in history (`git grep -lE` and `git log --all -G`), counts only. Prefixes such as `AKIA`, `ghp_`, `sk-ant-`, `AIza`, `BEGIN PRIVATE KEY`.
+- Key-shaped strings in tracked files and in history (`git grep -lE` and `git log --all -G`), counts only. Prefixes such as `AKIA`, `ghp_`, `sk-ant-`, `AIza`, and a private-key header.
 - A removed secret is still exposed: recommend rotation, never history rewriting from this audit.
 
 ## 2. Dependencies
