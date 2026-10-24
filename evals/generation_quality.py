@@ -86,6 +86,15 @@ def score_cases(cases: list, criteria: list, app_keys: "set | None" = None) -> d
     }
 
 
+def _why(result: dict) -> str:
+    """Where a case stopped and what the engine said (the first step that did not pass), short, for diagnosing a false failure."""
+    for st in result.get("steps") or []:
+        if str(st.get("status", "")).upper() not in ("PASS", ""):
+            text = " ".join(str(st.get("actual_result") or st.get("error") or "").split())[:220]
+            return f"step {st.get('step_number', '?')} ({st.get('action_type') or st.get('playwright_action') or '?'}) {st.get('status')}: {text}"
+    return " ".join(str(result.get("actual_result") or result.get("error") or "").split())[:220]
+
+
 def score_run(results: list, by_criterion: dict, planted: list) -> dict:
     """
     Judge a browser run against the known bugs: the planted bug must be found (a case on
@@ -98,6 +107,8 @@ def score_run(results: list, by_criterion: dict, planted: list) -> dict:
     false_fail = sorted(i for i, s in status.items() if s == "FAIL" and i not in planted_ids)
     return {"planted_found": found, "planted_missed": [a for a in planted if a not in found],
             "false_failures": false_fail,
+            "why": {r.get("test_case_id"): _why(r) for r in results or []
+                    if r.get("test_case_id") in false_fail or r.get("status") in ("ERROR", "SKIP")},
             "error_pct": int(round(100 * sum(1 for s in status.values() if s in ("ERROR", "SKIP")) / n)),
             "passed": sum(1 for s in status.values() if s == "PASS"),
             "failed": sum(1 for s in status.values() if s == "FAIL")}
@@ -255,6 +266,8 @@ def _print(sid: str, review: dict, run_res, missed: list) -> None:
     if run_res:
         print(f"    run: {run_res['passed']} PASS · {run_res['failed']} FAIL · errors {run_res['error_pct']}%"
               f" · planted bug found: {run_res['planted_found'] or 'NO'} · false failures: {run_res['false_failures'] or '–'}")
+        for cid, why in (run_res.get("why") or {}).items():
+            print(f"      · {cid}: {why}")
     print("    " + ("bar met" if not missed else "missed: " + "; ".join(missed)))
 
 

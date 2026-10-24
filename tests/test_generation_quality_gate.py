@@ -90,3 +90,20 @@ def test_the_label_names_the_model_and_never_a_key(clean_env):
     clean_env.setenv("QAX_AI_API_KEY", "secret-should-never-print")
     label = gq._ai_label()
     assert "llama3.1:8b" in label and "secret" not in label
+
+
+def test_a_false_failure_is_recorded_with_the_step_and_the_engine_words():
+    """Only the case ids used to be saved: a repeating false failure (TC-SEC-0002, 3 of 3 runs) could not be diagnosed."""
+    from evals import generation_quality as gq
+    results = [
+        {"test_case_id": "TC-A", "status": "PASS"},
+        {"test_case_id": "TC-B", "status": "FAIL", "steps": [
+            {"step_number": 1, "action_type": "navigate", "status": "PASS", "actual_result": "ok"},
+            {"step_number": 2, "action_type": "click", "status": "FAIL", "actual_result": "Element   not found:\n #go"}]},
+        {"test_case_id": "TC-C", "status": "ERROR", "error": "boom"},
+    ]
+    out = gq.score_run(results, {"AC-1": ["TC-A"], "AC-2": ["TC-B"]}, planted=[])
+    assert out["false_failures"] == ["TC-B"] and out["error_pct"] == 33        # an ERROR is not a false failure, it is counted apart
+    assert out["why"]["TC-B"] == "step 2 (click) FAIL: Element not found: #go"
+    assert out["why"]["TC-C"] == "boom"
+    assert "TC-A" not in out["why"]
