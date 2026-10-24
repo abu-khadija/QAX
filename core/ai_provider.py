@@ -123,6 +123,8 @@ class _Messages:
                 headers["api-key"] = self._c.api_key            # Azure OpenAI's header
             else:
                 headers["Authorization"] = f"Bearer {self._c.api_key}"
+        from services import usage as _cap
+        _cap.check_cap()                                                    # QAX_AI_MAX_CALLS: no endless spend
         # never follow a redirect: the key would travel to wherever it points
         from core.http_retry import send
         r = send(lambda: requests.post(f"{self._c.base_url}/chat/completions", json=body, headers=headers,

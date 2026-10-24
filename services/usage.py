@@ -72,6 +72,28 @@ def note(input_tokens: int, output_tokens: int, model: str = "") -> None:
         bm["calls"] += 1
 
 
+class AICallLimit(RuntimeError):
+    """Raised before an AI call when QAX_AI_MAX_CALLS calls have already been made in this run."""
+
+
+def check_cap() -> None:
+    """
+    Stop a runaway loop from spending without end: when QAX_AI_MAX_CALLS is a positive number and that many AI
+    calls have been counted since the last reset(), raise AICallLimit. Unset, 0 or not a number means no cap.
+    """
+    import os
+    try:
+        cap = int(os.getenv("QAX_AI_MAX_CALLS", "0") or 0)
+    except ValueError:
+        return
+    if cap <= 0:
+        return
+    with _lock:
+        used = _state["calls"]
+    if used >= cap:
+        raise AICallLimit(f"QAX_AI_MAX_CALLS={cap} reached ({used} AI calls this run); raise it or unset it to continue")
+
+
 def reset() -> None:
     """Zero the counters — call at the start of a run to measure just that run."""
     with _lock:
@@ -125,6 +147,7 @@ def track() -> bool:
         return True
 
     def wrapped(self, *args, **kwargs):
+        check_cap()
         resp = orig(self, *args, **kwargs)
         try:
             u = getattr(resp, "usage", None)
