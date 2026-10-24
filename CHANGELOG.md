@@ -7,6 +7,8 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### AI features run for real (2026-10-23: the first day with a provider; free Gemini tier, never Claude)
+- **A ceiling on AI calls.** `QAX_AI_MAX_CALLS` (off unless set) refuses the next AI call, before any request is sent, once that many have been made in the run. Found by running gstack's review checklist (read as a checklist, not installed) over QAX: the meter counted calls but nothing stopped them.
+- Dependencies capped at the next major (`anthropic<3`, `pydantic<3`, `flask<4`, `openpyxl<4`); a wall-clock bound in one browser test became an outcome check.
 Everything below was found by running the AI features, which had only ever run against mocks. Each fix has tests.
 - **The OpenAI-compatible client** retries 429/503 (1, 2, 4 s, `Retry-After` honoured, four tries; a read timeout is not
   retried), has an opt-in `QAX_AI_REASONING_EFFORT` (a reasoning model spent the output budget thinking: 11 tokens of a 300
