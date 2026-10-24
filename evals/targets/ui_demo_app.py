@@ -100,6 +100,12 @@ def add_note():
     return redirect("/dashboard")
 
 
+@app.get("/health")
+def health():
+    """Liveness probe for deploy checks: the app answers and holds no state here."""
+    return "ok"
+
+
 @app.get("/notes/manage")
 def manage_notes():
     """Delete notes one by one (what a cleanup step uses)."""
