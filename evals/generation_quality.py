@@ -187,13 +187,16 @@ def run(stories_file: str, out: str, generate=None, execute: bool = True) -> int
                 record["stories"].append({"id": st["id"], "error": msg[:300]})
                 worst = max(worst, 2)
                 continue
+            dropped = list(getattr(generate, "dropped", None) or [])      # cases the validator refused, and why
             review = score_cases(cases, criteria, keys)
+            review["dropped"] = dropped
             run_res = None
             if execute and cases:
                 run_res = score_run(_execute(cases, url, project), review["by_criterion"],
                                     st.get("planted_bug_criteria", []))
             missed = verdict(review, run_res)
-            record["stories"].append({"id": st["id"], "review": review, "run": run_res, "missed": missed})
+            record["stories"].append({"id": st["id"], "review": review, "run": run_res, "missed": missed,
+                                      "cases": cases})        # the cases themselves, so a false failure can be read
             _print(st["id"], review, run_res, missed)
             worst = max(worst, 1 if missed else 0)
     finally:
@@ -235,8 +238,11 @@ def _live_generate(story: str, app_map, ctx: str):
                                  use_cache=False)
         res = GenerationService(QAXContext.from_env()).generate("story://generation-eval", options=opts,
                                                                 progress=NullProgressReporter())
+        _live_generate.dropped = [{"id": (i.get("test_case") or {}).get("test_case_id"), "why": " ".join(str(i.get("error")).split())[:200]}
+                                  for i in (getattr(res, "invalid", None) or [])]
         return (res.test_cases or []), res.error
     except Exception as exc:  # noqa: BLE001
+        _live_generate.dropped = []
         return [], exc
 
 
@@ -263,6 +269,8 @@ def _print(sid: str, review: dict, run_res, missed: list) -> None:
           f" · traced {review['traced_pct']}% · negative {review['negative_pct']}% · security {review['security_cases']}"
           f" · grounded {review['grounded_pct']}% · automated {review['automated_pct']}%")
     print(f"    techniques: {review['techniques'] or '–'}")
+    for d in review.get("dropped") or []:
+        print(f"      · refused by the validator: {d['id']}: {d['why']}")
     if run_res:
         print(f"    run: {run_res['passed']} PASS · {run_res['failed']} FAIL · errors {run_res['error_pct']}%"
               f" · planted bug found: {run_res['planted_found'] or 'NO'} · false failures: {run_res['false_failures'] or '–'}")

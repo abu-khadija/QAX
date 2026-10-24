@@ -1402,6 +1402,15 @@ class ActionMapper:
             if assertion_type == "not_visible":
                 if not await element.is_visible():
                     return {"status": "PASS", "actual_result": f"Element not visible: {selector}"}
+                if assertion_value.strip() and str(selector).strip().lower() in ("body", "html"):
+                    # "the message X is not shown" on the PAGE: the page itself is always visible, so the only
+                    # meaningful reading is that the text is not among what the page shows (any other element keeps
+                    # its meaning: a stray value there must not turn a visible element into a pass)
+                    shown = await element.inner_text()
+                    if assertion_value.strip().lower() not in shown.lower():
+                        return {"status": "PASS", "actual_result": f"Text not shown on the page: '{assertion_value}'"}
+                    return {"status": "FAIL", "actual_result": f"Text is shown on the page: '{assertion_value}'",
+                            "error": "not_visible assertion failed"}
                 return {"status": "FAIL", "actual_result": f"Element is visible: {selector}",
                         "error": "not_visible assertion failed"}
 

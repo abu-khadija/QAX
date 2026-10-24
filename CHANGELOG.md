@@ -7,6 +7,11 @@ Every scan written with `--out` records the exact version and commit that produc
 ## [Unreleased]
 
 ### AI features run for real (2026-10-23: the first day with a provider; free Gemini tier, never Claude)
+- **Reading a generation run.** The quality harness now records why a case false-failed or errored (the step and the engine's words),
+  which cases the validator refused and why, and the cases themselves. Reading them found and fixed: a validator that dropped every case
+  whose id area had 6+ letters (`TC-LOGOUT-0001`; one story scored 0 cases three runs in a row), a text check riding on a click that
+  read the button's own label (triage now says "unclear", with the fix; the prompt has a wrong/right example), and `not_visible` + a
+  text on `page` (read as "that text is not shown"; any other element keeps its meaning). Measured on `gemini-3.5-flash` only, tiny n.
 - **A ceiling on AI calls.** `QAX_AI_MAX_CALLS` (off unless set) refuses the next AI call, before any request is sent, once that many have been made in the run. Found by running gstack's review checklist (read as a checklist, not installed) over QAX: the meter counted calls but nothing stopped them.
 - Dependencies capped at the next major (`anthropic<3`, `pydantic<3`, `flask<4`, `openpyxl<4`); a wall-clock bound in one browser test became an outcome check.
 Everything below was found by running the AI features, which had only ever run against mocks. Each fix has tests.

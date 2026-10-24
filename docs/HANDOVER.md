@@ -12,7 +12,7 @@ where things are, and what is open. Read section 1 first.
 | Branch | `feat/functional-qa-track` (all work since 2026-10-19 is here) |
 | Last commit | see `git log -1` (after `bcd61fd`, the Windows fixes) |
 | On GitHub? | **Yes, private.** `abu-khadija/QAX` was deleted by the owner and recreated private; `main` (`0be95d4`), `feat/service-layer-and-reliability-fix` and `feat/functional-qa-track` were pushed with the **clean** history on 2026-10-22. |
-| Tests | **1108 passed, 0 failed** (2026-10-24, after the AI-provider, CI and dead-code work) (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
+| Tests | **1114 passed, 0 failed** (2026-10-24, after the AI-provider, CI and dead-code work) (`PyJWT` in the dev extra runs the 3 JWT tests that used to skip) |
 | Gate | `make eval` → GATE: PASS. `make eval-deep` → PASS on `gemini-3-flash-preview` (4 AI calls, 25 cases, 44 confirmed findings all from probes) |
 | AI features (2026-10-23, free Gemini tier, **never Claude**) | Generation on the demo notes story: `gemini-3.5-flash` met the bar 1 of 2 completed runs, `gemini-3-flash-preview` 0 of 2. Self-healing: 1 case healed. Ticket writer: 1 ticket, buggy app REPRODUCED / fixed copy NOT REPRODUCED. n is tiny; every number belongs to its model. Eight defects found and fixed (CHANGELOG "AI features run for real") |
 | Release check on GitHub | **Ran on real pull requests 2026-10-23** (QAX's own private repo, demo app): PR #1 harmless change → **GO**; PR #2 login broken → **NO-GO**, closed unmerged. PR #1 is kept open as the proof. Variables set in the repo: `QAX_APP_URL`, `QAX_PROJECT`, `QAX_REPO`, `QAX_APP_START`; branches `demo/clean-change` and `demo/break-login` on GitHub. See `strategy/PLAN.md` §9 for the two defects the first runs found |
@@ -128,7 +128,7 @@ PowerShell window. If Chromium stays blocked there, a QAX option to drive the pr
 
 ```bash
 ./.venv-exec/bin/python main.py doctor             # machine ready? (it now starts Chromium for real)
-./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1108 passed
+./.venv-exec/bin/python -m pytest -q tests         # ~10 min (all but ~30 s is browser tests) — expect 1114 passed
 make eval                                          # expect GATE: PASS
 bash demo/prepare_demo.sh                          # all ports 200 (8930 may be 500 — it is an API)
 set -a; . ~/Downloads/qax-corpus/.bench.env; set +a
@@ -197,8 +197,14 @@ Healthchecks rate-limits logins after many runs in a day. Its cases then come ou
 - Generation has only been measured on **one broken-app story** and never on Claude. Credit (~2026-10-29) → `make eval-generation`
   with Anthropic, three runs, and read the numbers per model. Two healthy stories (`logout`, `delayed-save`) were added; they had
   not been run live when this was written (the free tier's daily cap).
-- One false failure (`TC-SEC-0002`, `gemini-3.5-flash`, run 2) was never diagnosed: the daily cap ended the day and the case is
-  regenerated every run. If it comes back, run `evals/generation_quality.py` and read the failing step before touching anything.
+- `TC-SEC-0002` (a false failure, `gemini-3.5-flash`, 3 of 3 runs that generated it) could not be read: the record kept only ids. The
+  harness now records the step and the engine's words for every false failure, the validator's reason for every refused case, and the
+  generated cases themselves. The same day's reading of the new records found four causes of the SAME kind (a case-writing slip,
+  not an app bug) and fixed them: a text check riding on a click (now triaged "unclear" and the prompt has a wrong/right example),
+  an id area of 6+ letters (`TC-LOGOUT-0001`, refused by the schema: the story scored 0 cases 3 times; the validator now shortens it),
+  and `not_visible` + a text on `page` (now read as "that text is not shown"). Whether `TC-SEC-0002` was one of these is NOT proven.
+- After those fixes (`gemini-3.5-flash`, 2026-10-25, tiny n): `notes` met the bar 3 of 3 runs; `logout` went from 0 cases to bar met
+  in 1 of 2 runs; `delayed-save` still missed in 2 of 2 (a case the model invented on a login the story did not mention). Never run on Claude.
 - The deep scan added test cases but no findings on the golden target; whether the AI finds something the probes miss is unmeasured.
 - Self-healing and the ticket writer were each seen working once. Add more tickets (a fixed copy of each is the control) before
   claiming either.

@@ -107,3 +107,20 @@ def test_a_false_failure_is_recorded_with_the_step_and_the_engine_words():
     assert out["why"]["TC-B"] == "step 2 (click) FAIL: Element not found: #go"
     assert out["why"]["TC-C"] == "boom"
     assert "TC-A" not in out["why"]
+
+
+def test_cases_the_validator_refused_are_recorded_with_the_reason(tmp_path):
+    """A story that scored 0 cases twice gave no clue why; the refused cases and the validator's words are now in the record."""
+    import json
+    from evals import generation_quality as gq
+    story = {"stories": [{"id": "s", "story": "As a user\n- It works", "start_path": "/login"}]}
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps(story), encoding="utf-8")
+
+    def gen(story_text, app_map, ctx):
+        return [], None
+    gen.dropped = [{"id": "TC-X-0001", "why": "Schema: 'selector_key' is a required property"}]
+    out = tmp_path / "o.json"
+    gq.run(str(f), str(out), generate=gen, execute=False)
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    assert rec["stories"][0]["review"]["dropped"] == gen.dropped

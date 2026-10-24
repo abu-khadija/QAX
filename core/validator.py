@@ -7,6 +7,7 @@ flags low-confidence cases for human review.
 """
 
 import json
+import re
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -295,6 +296,7 @@ def fix_common_issues(tc: dict) -> dict:
       - 'test_data' as string → convert to object with raw_value key
       - Leading/trailing whitespace stripped from title, description
       - Empty 'assertion_type' in automation_steps → replaced with 'visible'
+      - 'test_case_id' whose area is 6+ letters (TC-LOGOUT-0001) → TC-LOGOU-0001: the id's shape alone never costs a case
 
     Args:
         tc (dict): The test case dictionary to fix.
@@ -304,6 +306,12 @@ def fix_common_issues(tc: dict) -> dict:
     """
     # Work on a copy to avoid mutating the original
     fixed = dict(tc)
+
+    # ── Fix 0: an id whose area is longer than the schema's 2-5 letters (the AI named the area after the story) ──
+    m = re.fullmatch(r"TC-([A-Za-z]{6,})-(\d{4})", str(fixed.get("test_case_id") or ""))
+    if m:
+        fixed["test_case_id"] = f"TC-{m.group(1)[:5].upper()}-{m.group(2)}"
+        logger.debug("Shortened test_case_id %s to %s", tc.get("test_case_id"), fixed["test_case_id"])
 
     # ── Fix 1: Missing or malformed generated_at ──────────────────────────────
     current_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

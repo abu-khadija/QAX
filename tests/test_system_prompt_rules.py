@@ -20,6 +20,8 @@ def test_a_check_is_its_own_assert_step_never_riding_on_a_click():
     assert "one action per step; every check is its own `assert` step" in p
     assert "evaluated against THAT step's own element" in p       # the reason, so the model does not guess
     assert "never the element that was clicked" in p
+    assert "NOT shown" in p and "not_visible" in p               # how to say "the message is absent"
+    assert "WRONG:" in p and "RIGHT:" in p                      # a worked example: a bare rule was ignored 3 times in one run
 
 
 def test_browser_cases_start_signed_out_and_log_in_themselves():

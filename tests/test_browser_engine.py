@@ -1105,3 +1105,22 @@ def test_only_visible_without_a_value_is_the_placeholder():
     from execution.action_mapper import _is_placeholder_assertion as ph
     assert ph("visible", "") and ph("VISIBLE", "  ") and ph(" visible ", None)
     assert not ph("visible", "x") and not ph("text", "") and not ph("url", "") and not ph("", "")
+
+
+def test_not_visible_with_a_text_on_the_page_means_the_text_is_not_shown(ui_app):
+    """Found 2026-10-25: the AI wrote `assert page not_visible 'Saved!'` ("the message is not shown yet") and the engine failed it
+    because the page itself (body) is visible. On the page the value is read as text; on any other element it is not."""
+    def case(cid, steps):
+        return {"test_case_id": cid, "title": cid, "automation_steps": steps}
+    nav = {"step_number": 1, "playwright_action": "navigate", "value": "/delayed"}
+    absent = {"step_number": 2, "playwright_action": "assert", "selector_key": "page",
+              "assertion_type": "not_visible", "assertion_value": "Saved!"}
+    batch = _run([
+        case("BEFORE", [nav, absent]),                                                    # not shown yet → PASS
+        case("AFTER", [nav, {"step_number": 2, "playwright_action": "click", "selector_key": "#save-btn"},
+                       {"step_number": 3, "playwright_action": "wait", "value": "1500"},
+                       dict(absent, step_number=4)]),                                     # shown now → FAIL
+        case("BARE", [nav, dict(absent, assertion_value="")]),                            # no text: unchanged, the page IS visible
+    ])
+    got = {r["test_case_id"]: r["status"] for r in batch["results"]}
+    assert got == {"BEFORE": "PASS", "AFTER": "FAIL", "BARE": "FAIL"}, batch["results"]

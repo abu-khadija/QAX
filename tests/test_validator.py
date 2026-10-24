@@ -431,3 +431,13 @@ def test_fix_common_issues_defaults_empty_preconditions():
     assert fix_common_issues({"preconditions": []})["preconditions"] == ["No special preconditions."]
     assert fix_common_issues({"preconditions": "a clean db"})["preconditions"] == ["a clean db"]
     assert fix_common_issues({})["preconditions"] == ["No special preconditions."]
+
+
+def test_an_id_whose_area_is_too_long_is_shortened_not_lost():
+    """Found 2026-10-25: gemini named the area after the story (TC-LOGOUT-0001); the schema allows 2-5 letters, so every case
+    of the story was refused and the story scored 0 cases, three runs in a row."""
+    from core.validator import fix_common_issues
+    assert fix_common_issues({"test_case_id": "TC-LOGOUT-0001"})["test_case_id"] == "TC-LOGOU-0001"
+    assert fix_common_issues({"test_case_id": "TC-notes-0002"})["test_case_id"] == "TC-notes-0002"      # 5 letters: left alone
+    assert fix_common_issues({"test_case_id": "TC-AUTH-0003"})["test_case_id"] == "TC-AUTH-0003"
+    assert fix_common_issues({"test_case_id": "nonsense"})["test_case_id"] == "nonsense"                # not ours to fix

@@ -53,3 +53,21 @@ def test_a_missing_element_on_a_later_step_is_unchanged():
     r = _step1_missing("fill")
     r["steps"][0]["step_number"] = "3"
     assert classify(r)["cause"] == "unclear"
+
+
+def _text_mismatch(action):
+    """A failed text check on a step whose action is `action` (the engine's own words)."""
+    return _r("FAIL", "Text mismatch. Expected 'Invalid username or password', got 'Log in' (still failing after 5s)",
+              step={"action_type": action, "step_number": 4})
+
+
+def test_a_text_check_riding_on_a_click_is_unclear_and_says_how_to_read_it():
+    """Found by the 2026-10-25 pilot: three AI-written cases clicked a button and expected a message, so the engine read the
+    button's own label. That is a case-writing slip OR a real app problem; QAX cannot tell, so it must not call it either."""
+    for action in ("click", "fill", "select"):
+        r = classify(_text_mismatch(action))
+        assert r["cause"] == "unclear" and "its own assert step" in r["cause_why"], action
+
+
+def test_a_failed_assert_step_is_still_an_app_problem():
+    assert classify(_text_mismatch("assert"))["cause"] == "app"

@@ -30,6 +30,7 @@ _TEST = re.compile(r"No element named|not in the project's selectors|is not a st
 _APP_ASSERT = re.compile(r"Text mismatch|URL '.*' missing|Expected status \d+, got|Element is (not )?|"
                          r"Element absent|Element is visible|Value mismatch|assertion failed", re.I)
 _OPENS_A_PAGE = {"navigate", "goto", "go", "go to", "open", "visit", "browse", "load"}
+_ACTS_ON_ONE_ELEMENT = {"click", "fill", "select", "hover", "type", "press"}
 _MISSING = re.compile(r"Timeout \d+ms exceeded.*waiting for locator|Element not found", re.I | re.S)
 
 
@@ -63,6 +64,11 @@ def classify(result: dict) -> dict:
                                   "add a navigate step (an AI-written case can omit it)")
         elif isinstance(code, int) and code >= 500:
             cause, why = "app", f"the app answered with a server error ({code})"
+        elif (status == "FAIL" and re.search(r"Text mismatch", str(bad.get("actual_result") or ""), re.I)
+              and str(bad.get("action_type") or "").lower() in _ACTS_ON_ONE_ELEMENT):
+            cause, why = "unclear", ("a text check riding on a click/fill step reads THAT element's own text. If the case meant "
+                                     "a message or heading the action should make appear, it needs its own assert step; "
+                                     "if it meant this element, the app did not show it")
         elif status == "FAIL" and _APP_ASSERT.search(text):
             cause, why = "app", "the app answered and the expected result did not hold"
         elif status == "FAIL" and _MISSING.search(text):
