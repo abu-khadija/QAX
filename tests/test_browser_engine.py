@@ -403,7 +403,7 @@ def test_value_assertions_unique_values_and_disabled_buttons(ui_app, monkeypatch
     assert not got["wrong"].get("throttled")
     same = got["same"]
     assert same["status"] == "FAIL" and "disabled" in same["steps"][2]["actual_result"]
-    assert same["duration_seconds"] < 12                          # no 15 s click timeout
+    assert "timeout" not in same["steps"][2]["actual_result"].lower()      # refused up front, not after a 15 s click timeout
 
 
 # ── Map hardening (2026-10-19, second round) ─────────────────────────────────

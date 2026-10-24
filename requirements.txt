@@ -4,10 +4,10 @@
 
 # ── AI / Anthropic ────────────────────────────────────────────────────────────
 # Use >= to allow pip to pick the best compatible version for your Python version
-anthropic>=0.40.0
+anthropic>=0.40.0,<3
 
 # ── Pydantic (required by anthropic SDK internals, fixes Python 3.14 warnings) ─
-pydantic>=2.0.0
+pydantic>=2.0.0,<3
 
 # ── Environment variable loading ──────────────────────────────────────────────
 python-dotenv==1.2.4
@@ -30,10 +30,10 @@ pytest-asyncio==1.4.0
 # ── Web Dashboard (Prompt 6) ──────────────────────────────────────────────────
 # Lightweight WSGI web framework — used only for the local dashboard server.
 # Does NOT require a production server; flask dev server is fine for local use.
-flask>=3.0.0
+flask>=3.0.0,<4
 
 # ── Excel export (ExcelAdapter) ───────────────────────────────────────────────
-openpyxl>=3.1.0
+openpyxl>=3.1.0,<4
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==9.1.1
